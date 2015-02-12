@@ -262,6 +262,7 @@ information about the governance of the io.js project, see
 * **Fedor Indutny** ([@indutny](https://github.com/indutny)) &lt;fedor.indutny@gmail.com&gt; (Technical Committee)
 * **Trevor Norris** ([@trevnorris](https://github.com/trevnorris)) &lt;trev.norris@gmail.com&gt; (Technical Committee)
 * **Chris Dickinson** ([@chrisdickinson](https://github.com/chrisdickinson)) &lt;christopher.s.dickinson@gmail.com&gt; (Technical Committee)
+<br>Release GPG key: 9554F04D7259F04124DE6B476D5A82AC7E37093B
 * **Colin Ihrig** ([@cjihrig](https://github.com/cjihrig)) &lt;cjihrig@gmail.com&gt; (Technical Committee)
 * **Mikeal Rogers** ([@mikeal](https://github.com/mikeal)) &lt;mikeal.rogers@gmail.com&gt;
 * **Rod Vagg** ([@rvagg](https://github.com/rvagg)) &lt;rod@vagg.org&gt;
@@ -274,6 +275,8 @@ information about the governance of the io.js project, see
 * **Vladimir Kurchatkin** ([@vkurchatkin](https://github.com/vkurchatkin)) &lt;vladimir.kurchatkin@gmail.com&gt;
 * **Nikolai Vavilov** ([@seishun](https://github.com/seishun)) &lt;vvnicholas@gmail.com&gt;
 * **Nicu Micleușanu** ([@micnic](https://github.com/micnic)) &lt;micnic90@gmail.com&gt;
+* **Aleksey Smolenchuk** ([@lxe](https://github.com/lxe)) &lt;lxe@lxe.co&gt;
+* **Shigeki Ohtsu** ([@shigeki](https://github.com/shigeki)) &lt;ohtsu@iij.ad.jp&gt;
 
 Collaborators follow the [COLLABORATOR_GUIDE.md](./COLLABORATOR_GUIDE.md) in
 maintaining the io.js project.

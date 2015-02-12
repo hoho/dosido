@@ -61,29 +61,37 @@ AAAA (IPv6) record. `options` can be an object or integer. If `options` is
 not provided, then IP v4 and v6 addresses are both valid. If `options` is
 an integer, then it must be `4` or `6`.
 
-Alternatively, `options` can be an object containing two properties,
-`family` and `hints`. Both properties are optional. If `family` is provided,
-it must be the integer `4` or `6`. If `family` is not provided then IP v4
-and v6 addresses are accepted. The `hints` field, if present, should be one
-or more of the supported `getaddrinfo` flags. If `hints` is not provided,
-then no flags are passed to `getaddrinfo`. Multiple flags can be passed
-through `hints` by logically `OR`ing their values. An example usage of
-`options` is shown below.
+Alternatively, `options` can be an object containing these properties:
+
+* `family` {Number} - The record family. If present, must be the integer
+  `4` or `6`. If not provided, both IP v4 and v6 addresses are accepted.
+* `hints`: {Number} - If present, it should be one or more of the supported
+  `getaddrinfo` flags. If `hints` is not provided, then no flags are passed to
+  `getaddrinfo`. Multiple flags can be passed through `hints` by logically
+  `OR`ing their values.
+  See [supported `getaddrinfo` flags](#dns_supported_getaddrinfo_flags) below
+  for more information on supported flags.
+* `all`: {Boolean} - When `true`, the callback returns all resolved addresses
+  in an array, otherwise returns a single address. Defaults to `false`.
+
+All properties are optional. An example usage of options is shown below.
 
 ```
 {
   family: 4,
-  hints: dns.ADDRCONFIG | dns.V4MAPPED
+  hints: dns.ADDRCONFIG | dns.V4MAPPED,
+  all: false
 }
 ```
 
-See [supported `getaddrinfo` flags](#dns_supported_getaddrinfo_flags) below for
-more information on supported flags.
+The callback has arguments `(err, address, family)`. `address` is a string
+representation of a IP v4 or v6 address. `family` is either the integer 4 or 6
+and denotes the family of `address` (not necessarily the value initially passed
+to `lookup`).
 
-The callback has arguments `(err, address, family)`.  The `address` argument
-is a string representation of a IP v4 or v6 address. The `family` argument
-is either the integer 4 or 6 and denotes the family of `address` (not
-necessarily the value initially passed to `lookup`).
+With the `all` option set, the arguments change to `(err, addresses)`, with
+`addresses` being an array of objects with the properties `address` and
+`family`.
 
 On error, `err` is an `Error` object, where `err.code` is the error code.
 Keep in mind that `err.code` will be set to `'ENOENT'` not only when
@@ -95,7 +103,7 @@ It's only an operating system facility that can associate name with addresses,
 and vice versa.
 
 Its implementation can have subtle but important consequences on the behavior
-of any Node.js program. Please take some time to consult the [Implementation
+of any io.js program. Please take some time to consult the [Implementation
 considerations section](#dns_implementation_considerations) before using it.
 
 ## dns.lookupService(address, port, callback)
@@ -267,7 +275,7 @@ were found, then return IPv4 mapped IPv6 addresses.
 Although `dns.lookup` and `dns.resolve*/dns.reverse` functions have the same
 goal of associating a network name with a network address (or vice versa),
 their behavior is quite different. These differences can have subtle but
-significant consequences on the behavior of Node.js programs.
+significant consequences on the behavior of io.js programs.
 
 ### dns.lookup
 

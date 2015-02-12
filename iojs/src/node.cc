@@ -23,6 +23,10 @@
 #include "node_dtrace.h"
 #endif
 
+#if defined HAVE_LTTNG
+#include "node_lttng.h"
+#endif
+
 #include "ares.h"
 #include "async-wrap.h"
 #include "async-wrap-inl.h"
@@ -2871,6 +2875,10 @@ void LoadEnvironment(Environment* env) {
   InitDTrace(env, global);
 #endif
 
+#if defined HAVE_LTTNG
+  InitLTTNG(env, global);
+#endif
+
 #if defined HAVE_PERFCTR
   InitPerfCounters(env, global);
 #endif
@@ -3383,6 +3391,10 @@ inline void PlatformInit() {
 
   RegisterSignalHandler(SIGINT, SignalExit, true);
   RegisterSignalHandler(SIGTERM, SignalExit, true);
+
+  // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
+  // performance penalty of frequent EINTR wakeups when the profiler is running.
+  uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
 
   // Raise the open file descriptor limit.
   struct rlimit lim;
