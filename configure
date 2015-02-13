@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+import optparse
+import os
+import pprint
+import re
+import shlex
+import subprocess
+import sys
+import shutil
+import string
+
+root_dir = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(root_dir, 'iojs', 'tools', 'gyp', 'pylib'))
+import gyp
+
+parser = optparse.OptionParser()
+
+parser.add_option('--prefix',
+    action='store',
+    dest='prefix',
+    help='select the install prefix (defaults to /usr/local)')
+
+parser.add_option('--debug',
+    action='store_true',
+    dest='debug',
+    help='also build debug build')
+
+parser.add_option('--dest-os',
+    action='store',
+    dest='dest_os',
+    help='operating system to build for. Valid values are: '
+         'win, mac, solaris, freebsd, openbsd, linux, android')
+
+parser.add_option('--xcode',
+    action='store_true',
+    dest='use_xcode',
+    help='generate build files for use with xcode')
+
+(options, args) = parser.parse_args()
+
+def chdir_and_exit(code):
+    os.chdir(root_dir)
+    sys.exit(code)
+
+def run_gyp(args):
+    rc = gyp.main(args)
+    if rc != 0:
+        print 'Error running GYP'
+        chdir_and_exit(rc)
+
+# determine the "flavor" (operating system) we're building for,
+# leveraging gyp's GetFlavor function
+flavor_params = {}
+if (options.dest_os):
+  flavor_params['flavor'] = options.dest_os
+flavor = gyp.common.GetFlavor(flavor_params)
+
+gyp_args = ['--no-parallel']
+
+if flavor == 'win' and sys.platform != 'msys':
+  gyp_args.extend(['-f', 'msvs', '-G', 'msvs_version=auto'])
+else:
+  gyp_args.extend(['-f', 'make-' + flavor])
+
+#gyp_args += args
+
+os.chdir(os.path.join(root_dir, 'iojs'))
+code = subprocess.call(os.path.join('.', 'configure'))
+if code != 0:
+    chdir_and_exit(code)
+
+os.chdir(os.path.join(root_dir, 'iojsp'))
+gyp_args.extend([
+    '-I', 'iojsp.gypi',
+    '-I', os.path.join(root_dir, 'iojs', 'common.gypi'),
+    '-I', os.path.join(root_dir, 'iojs', 'config.gypi'),
+    'iojsp.gyp',
+    '--depth=' + os.path.join(root_dir, 'iojsp')])
+#print gyp_args
+run_gyp(gyp_args)
+
+prefix = options.prefix or '/usr/local'
+nginx_args = [
+    os.path.join('.', 'configure'),
+    '--prefix=' + prefix,
+    '--conf-path=/etc/dosido/nginx.conf',
+    '--sbin-path=' + os.path.join(prefix, 'bin', 'dosido'),
+    '--http-log-path=/var/log/dosido/access.log',
+    '--error-log-path=/var/log/dosido/error.log',
+    '--pid-path=/var/run/dosido.pid',
+    '--lock-path=/var/run/dosido.lock',
+    '--http-client-body-temp-path=/var/cache/dosido/client_temp',
+    '--http-proxy-temp-path=/var/cache/dosido/proxy_temp',
+    '--http-fastcgi-temp-path=/var/cache/dosido/fastcgi_temp',
+    '--http-uwsgi-temp-path=/var/cache/dosido/uwsgi_temp',
+    '--http-scgi-temp-path=/var/cache/dosido/scgi_temp',
+    '--add-module=../nginx-iojsp',
+    #'--with-http_ssl_module',
+    '--with-http_realip_module',
+    '--with-http_gzip_static_module',
+    '--with-http_secure_link_module',
+    '--with-http_stub_status_module',
+    #'--with-openssl=../deps/openssl',
+    '--with-pcre=../deps/pcre',
+    '--with-zlib=../deps/zlib',
+    '--with-cc-opt=-I../iojsp',
+]
+
+#print nginx_args
+os.chdir(os.path.join(root_dir, 'nginx'))
+chdir_and_exit(subprocess.call(nginx_args))
