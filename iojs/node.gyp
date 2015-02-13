@@ -14,6 +14,7 @@
     'node_shared_openssl%': 'false',
     'node_use_mdb%': 'false',
     'node_v8_options%': '',
+    'iojs_target_type%': 'executable',
     'library_files': [
       'src/node.js',
       'lib/_debug_agent.js',
@@ -75,7 +76,7 @@
   'targets': [
     {
       'target_name': 'iojs',
-      'type': 'executable',
+      'type': '<(iojs_target_type)',
 
       'dependencies': [
         'node_js2c#host',
