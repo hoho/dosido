@@ -96,14 +96,12 @@
         'src/fs_event_wrap.cc',
         'src/cares_wrap.cc',
         'src/handle_wrap.cc',
-        'src/node.cc',
         'src/node_buffer.cc',
         'src/node_constants.cc',
         'src/node_contextify.cc',
         'src/node_file.cc',
         'src/node_http_parser.cc',
         'src/node_javascript.cc',
-        'src/node_main.cc',
         'src/node_os.cc',
         'src/node_v8.cc',
         'src/node_v8_platform.cc',
@@ -174,6 +172,22 @@
       ],
 
       'conditions': [
+        [ 'iojs_target_type=="executable"', {
+          'sources': [
+            'src/node.cc',
+            'src/node_main.cc',
+          ],
+        }, {
+          'target_name': 'iojsp',
+          'include_dirs': [
+            '../iojsp',
+          ],
+          'sources': [
+            '../iojsp/iojsp.cc',
+            '../iojsp/iojsp.h',
+            '../iojsp/iojspexports.h',
+          ],
+        }],
         [ 'v8_enable_i18n_support==1', {
           'defines': [ 'NODE_HAVE_I18N_SUPPORT=1' ],
           'dependencies': [
