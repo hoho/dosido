@@ -44,11 +44,12 @@ nginx:
 .PHONY: clean
 clean:
 	$(MAKE) -C iojs clean
+	rm -rf iojs/out/Release/libiojsp.*
 	$(MAKE) -C nginx clean
 
 
 .PHONY: install
 install:
 	$(MAKE) -C iojs install
-	cp iojs/out/Release/libiojsp.dylib /usr/local/lib/libiojsp.dylib
+	cp iojs/out/Release/libiojsp.* /usr/local/lib/libiojsp.*
 	$(MAKE) -C nginx install

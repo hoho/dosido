@@ -187,6 +187,15 @@
             '../iojsp/iojsp.h',
             '../iojsp/iojspexports.h',
           ],
+          'conditions': [
+            [ 'iojs_target_type=="shared_library"', {
+              'conditions': [
+                ["OS in 'linux freebsd openbsd solaris android'", {
+                  "cflags": ["-fPIC"],
+                }],
+              ],
+            }],
+          ],
         }],
         [ 'v8_enable_i18n_support==1', {
           'defines': [ 'NODE_HAVE_I18N_SUPPORT=1' ],
