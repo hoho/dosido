@@ -220,19 +220,24 @@
                 './deps/openssl/openssl.gyp:openssl-cli',
               ],
               # Do not let unused OpenSSL symbols to slip away
-              'xcode_settings': {
-                'OTHER_LDFLAGS': [
-                  '-Wl,-force_load,<(PRODUCT_DIR)/libopenssl.a',
-                ],
-              },
               'conditions': [
-                ['OS in "linux freebsd"', {
-                  'ldflags': [
-                    '-Wl,--whole-archive <(PRODUCT_DIR)/libopenssl.a -Wl,--no-whole-archive',
+                [ 'iojs_target_type!="static_library"', {
+                  'xcode_settings': {
+                    'OTHER_LDFLAGS': [
+                      '-Wl,-force_load,<(PRODUCT_DIR)/libopenssl.a',
+                    ],
+                  },
+                  'conditions': [
+                    ['OS in "linux freebsd"', {
+                      'ldflags': [
+                        '-Wl,--whole-archive <(PRODUCT_DIR)/libopenssl.a -Wl,--no-whole-archive',
+                      ],
+                    } ],
                   ],
-                }],
+                } ],
               ],
-            }]]
+            } ]
+          ],
         }, {
           'defines': [ 'HAVE_OPENSSL=0' ]
         }],
@@ -316,12 +321,16 @@
         } ],
         [ 'v8_postmortem_support=="true"', {
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
-          'xcode_settings': {
-            'OTHER_LDFLAGS': [
-              '-Wl,-force_load,<(V8_BASE)',
-            ],
-          },
-        }],
+          'conditions': [
+            [ 'iojs_target_type!="static_library"', {
+              'xcode_settings': {
+                'OTHER_LDFLAGS': [
+                  '-Wl,-force_load,<(V8_BASE)',
+                ],
+              },
+            } ],
+          ],
+        } ],
         [ 'node_shared_v8=="false"', {
           'sources': [
             'deps/v8/include/v8.h',
