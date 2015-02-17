@@ -1,5 +1,5 @@
 .PHONY: all
-all: iojs iojsp nginx
+all: iojs iojsp nginx-configure nginx
 
 
 .PHONY: iojs
@@ -14,8 +14,8 @@ iojsp:
 	$(MAKE) -C iojs
 
 
-.PHONY: nginx
-nginx:
+.PHONY: nginx-configure
+nginx-configure:
 	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi
 	cd nginx && ./configure --prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
@@ -39,6 +39,10 @@ nginx:
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
 		--with-cc-opt=-I../iojsp
+
+
+.PHONY: nginx
+nginx:
 	$(MAKE) -C nginx
 
 
