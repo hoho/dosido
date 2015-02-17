@@ -10,12 +10,13 @@ iojs:
 
 .PHONY: iojsp
 iojsp:
-	cd iojs && GYP_DEFINES="iojs_target_type=shared_library" ./configure
+	cd iojs && GYP_DEFINES="iojs_target_type=static_library" ./configure
 	$(MAKE) -C iojs
 
 
 .PHONY: nginx
 nginx:
+	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi
 	cd nginx && ./configure --prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
 		--sbin-path=/usr/local/bin/dosido \
@@ -29,12 +30,12 @@ nginx:
 		--http-uwsgi-temp-path=/var/cache/dosido/uwsgi_temp \
 		--http-scgi-temp-path=/var/cache/dosido/scgi_temp \
 		--add-module=../nginx-iojsp \
-		#--with-http_ssl_module \
 		--with-http_realip_module \
 		--with-http_gzip_static_module \
 		--with-http_secure_link_module \
 		--with-http_stub_status_module \
-		#--with-openssl=../deps/openssl \
+		--with-http_ssl_module \
+		--with-openssl=../deps/openssl \
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
 		--with-cc-opt=-I../iojsp
@@ -51,5 +52,4 @@ clean:
 .PHONY: install
 install:
 	$(MAKE) -C iojs install
-	cp iojs/out/Release/libiojsp.* /usr/local/lib/libiojsp.*
 	$(MAKE) -C nginx install
