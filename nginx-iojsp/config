@@ -7,9 +7,11 @@ FLAVOUR=`python -c 'from os import path; import sys; \
 if [ $FLAVOUR = "mac" ]; then
     FORCE_LOAD_BEGIN="-Wl,-force_load,"
     FORCE_LOAD_END=""
+    LIBSTD_VERSION=".6.0.9"
 else
     FORCE_LOAD_BEGIN="-Wl,--whole-archive "
     FORCE_LOAD_END="-Wl,--no-whole-archive "
+    LIBSTD_VERSION=""
 fi
 
 CORE_LIBS="$CORE_LIBS \
@@ -22,7 +24,7 @@ CORE_LIBS="$CORE_LIBS \
 		$FORCE_LOAD_BEGIN../iojs/out/Release/libv8_base.a $FORCE_LOAD_END\
 		../iojs/out/Release/libv8_libbase.a \
 		../iojs/out/Release/libv8_nosnapshot.a \
-		-lstdc++.6.0.9 -lm -ldl"
+		-lstdc++$LIBSTD_VERSION -lm -ldl"
 
 HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_iojsp_module"
 NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_iojsp_module.c"
