@@ -9,7 +9,7 @@ if [ $FLAVOUR = "mac" ]; then
     FORCE_LOAD_END=""
 else
     FORCE_LOAD_BEGIN="-Wl,--whole-archive "
-    FORCE_LOAD_END=="-Wl,--no-whole-archive "
+    FORCE_LOAD_END="-Wl,--no-whole-archive "
 fi
 
 CORE_LIBS="$CORE_LIBS \
