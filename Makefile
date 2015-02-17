@@ -45,7 +45,6 @@ nginx:
 .PHONY: clean
 clean:
 	$(MAKE) -C iojs clean
-	rm -rf iojs/out/Release/libiojsp.*
 	$(MAKE) -C nginx clean
 
 
