@@ -18,7 +18,8 @@ CORE_LIBS="$CORE_LIBS \
 		$FORCE_LOAD_BEGIN../iojs/out/Release/libiojsp.a $FORCE_LOAD_END\
 		../iojs/out/Release/libuv.a \
 		../iojs/out/Release/libcares.a \
-		$FORCE_LOAD_BEGIN../iojs/out/Release/libopenssl.a $FORCE_LOAD_END\
+		$FORCE_LOAD_BEGIN../deps/openssl/.openssl/lib/libssl.a $FORCE_LOAD_END\
+		$FORCE_LOAD_BEGIN../deps/openssl/.openssl/lib/libcrypto.a $FORCE_LOAD_END\
 		../iojs/out/Release/libzlib.a \
 		../iojs/out/Release/libhttp_parser.a \
 		$FORCE_LOAD_BEGIN../iojs/out/Release/libv8_base.a $FORCE_LOAD_END\
