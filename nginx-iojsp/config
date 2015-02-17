@@ -1,0 +1,28 @@
+ngx_addon_name=ngx_http_iojsp_module
+
+FLAVOUR=`python -c 'from os import path; import sys; \
+        sys.path.insert(0, path.join("..", "iojs", "tools", "gyp", "pylib")); \
+        from gyp.common import GetFlavor; \
+        print GetFlavor({})'`
+if [ $FLAVOUR = "mac" ]; then
+    FORCE_LOAD_BEGIN="-Wl,-force_load,"
+    FORCE_LOAD_END=""
+else
+    FORCE_LOAD_BEGIN="-Wl,--whole-archive "
+    FORCE_LOAD_END=="-Wl,--no-whole-archive "
+fi
+
+CORE_LIBS="$CORE_LIBS \
+		$FORCE_LOAD_BEGIN../iojs/out/Release/libiojsp.a $FORCE_LOAD_END\
+		../iojs/out/Release/libuv.a \
+		../iojs/out/Release/libcares.a \
+		$FORCE_LOAD_BEGIN../iojs/out/Release/libopenssl.a $FORCE_LOAD_END\
+		../iojs/out/Release/libzlib.a \
+		../iojs/out/Release/libhttp_parser.a \
+		$FORCE_LOAD_BEGIN../iojs/out/Release/libv8_base.a $FORCE_LOAD_END\
+		../iojs/out/Release/libv8_libbase.a \
+		../iojs/out/Release/libv8_nosnapshot.a \
+		-lstdc++.6.0.9 -lm -ldl"
+
+HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_iojsp_module"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_iojsp_module.c"
