@@ -73,6 +73,14 @@
     ],
   },
 
+  'conditions': [
+    [ 'iojs_target_type!="executable"', {
+      'variables': {
+        'library_files': ['../libiojs/_third_party_main.js']
+      },
+    }]
+  ],
+
   'targets': [
     {
       'target_name': 'iojs',
@@ -96,12 +104,14 @@
         'src/fs_event_wrap.cc',
         'src/cares_wrap.cc',
         'src/handle_wrap.cc',
+        'src/node.cc',
         'src/node_buffer.cc',
         'src/node_constants.cc',
         'src/node_contextify.cc',
         'src/node_file.cc',
         'src/node_http_parser.cc',
         'src/node_javascript.cc',
+        'src/node_main.cc',
         'src/node_os.cc',
         'src/node_v8.cc',
         'src/node_v8_platform.cc',
@@ -172,20 +182,18 @@
       ],
 
       'conditions': [
-        [ 'iojs_target_type=="executable"', {
+        [ 'iojs_target_type!="executable"', {
+          'include_dirs': [
+            '../libiojs',
+          ],
           'sources': [
+            '../libiojs/libiojs.cc',
+            '../libiojs/libiojs.h',
+            '../libiojs/libiojsexports.h',
+          ],
+          'sources!': [
             'src/node.cc',
             'src/node_main.cc',
-          ],
-        }, {
-          'target_name': 'iojsp',
-          'include_dirs': [
-            '../iojsp',
-          ],
-          'sources': [
-            '../iojsp/iojsp.cc',
-            '../iojsp/iojsp.h',
-            '../iojsp/iojspexports.h',
           ],
         }],
         [ 'v8_enable_i18n_support==1', {

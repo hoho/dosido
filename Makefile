@@ -1,5 +1,5 @@
 .PHONY: all
-all: iojs iojsp nginx-configure nginx
+all: iojs libiojs nginx-configure nginx
 
 
 .PHONY: iojs
@@ -8,8 +8,8 @@ iojs:
 	$(MAKE) -C iojs
 
 
-.PHONY: iojsp
-iojsp:
+.PHONY: libiojs
+libiojs:
 	cd iojs && GYP_DEFINES="iojs_target_type=static_library" ./configure
 	$(MAKE) -C iojs
 
@@ -29,7 +29,7 @@ nginx-configure:
 		--http-fastcgi-temp-path=/var/cache/dosido/fastcgi_temp \
 		--http-uwsgi-temp-path=/var/cache/dosido/uwsgi_temp \
 		--http-scgi-temp-path=/var/cache/dosido/scgi_temp \
-		--add-module=../nginx-iojsp \
+		--add-module=../nginx-iojs \
 		--with-http_realip_module \
 		--with-http_gzip_static_module \
 		--with-http_secure_link_module \
@@ -38,7 +38,7 @@ nginx-configure:
 		--with-openssl=../deps/openssl \
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
-		--with-cc-opt=-I../iojsp
+		--with-cc-opt=-I../libiojs
 
 
 .PHONY: nginx
