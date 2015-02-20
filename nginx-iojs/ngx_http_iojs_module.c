@@ -158,7 +158,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
     ngx_http_iojs_ctx_t       *ctx;
     ngx_http_iojs_loc_conf_t  *conf;
     //ngx_uint_t                 i, j;
-    ngx_http_iojs_param_t     *params;
+    //ngx_http_iojs_param_t     *params;
     //char                     **iojsParams;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_iojs_module);
@@ -179,7 +179,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
         dd("context creation");
 
         if (conf->params != NULL && conf->params->nelts > 0) {
-            params = conf->params->elts;
+            //params = conf->params->elts;
 
             /*iojsParams = ngx_palloc(
                 r->pool, sizeof(char *) * (conf->params->nelts * 2 + 1)
