@@ -159,7 +159,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
     ngx_http_iojs_loc_conf_t  *conf;
     //ngx_uint_t                 i, j;
     ngx_http_iojs_param_t     *params;
-    char                     **iojsParams;
+    //char                     **iojsParams;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_iojs_module);
 
@@ -195,9 +195,8 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
             }
 
             iojsParams[j] = NULL;*/
-            iojsParams = NULL;
         } else {
-            iojsParams = NULL;
+            //iojsParams = NULL;
         }
 
         //ctx->xctx = xrltContextCreate(conf->sheet, xrltparams);
