@@ -189,7 +189,7 @@
           'sources': [
             '../libiojs/libiojs.cc',
             '../libiojs/libiojs.h',
-            '../libiojs/libiojsexports.h',
+            '../libiojs/libiojsExports.h',
           ],
           'sources!': [
             'src/node.cc',
