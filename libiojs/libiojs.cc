@@ -3738,7 +3738,7 @@ int LoadScripts(Environment *env) {
   iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
   ret = uv_poll_init(env->event_loop(),
-                           &iojsCommandPoll, iojsIncomingPipeFd[0]);
+                     &iojsCommandPoll, iojsIncomingPipeFd[0]);
   if (ret)
     goto done;
 
