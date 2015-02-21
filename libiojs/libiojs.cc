@@ -1,5 +1,4 @@
 #include "node.h"
-#include "libiojs.h"
 #include "libiojsInternals.h"
 #include "node_buffer.h"
 #include "node_constants.h"
@@ -8,7 +7,6 @@
 #include "node_javascript.h"
 #include "node_version.h"
 #include "node_v8_platform.h"
-#include "node_natives.h"
 
 #if defined HAVE_PERFCTR
 #include "node_counters.h"
@@ -3737,6 +3735,7 @@ int LoadScripts(Environment *env) {
   }
 
   CHECK(f_value->IsArray());
+  iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
   return 0;
 }
@@ -3844,6 +3843,10 @@ done:
       if (uv_barrier_wait(&iojsStartBlocker) > 0)
         uv_barrier_destroy(&iojsStartBlocker);
     }
+
+    if (!iojsError)
+      iojsLoadedScripts.Reset();
+
     iojsClosePipes();
     env->Dispose();
     env = nullptr;

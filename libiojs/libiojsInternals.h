@@ -5,8 +5,12 @@
 #ifndef __LIBIOJSINTERNALS_H__
 #define __LIBIOJSINTERNALS_H__
 
+#include "node.h"
 #include "libiojs.h"
 #include "uv.h"
+#include "node_natives.h"
+#include "v8.h"
+
 
 typedef enum {
     IOJS_REQUEST_HEADERS = 1,
@@ -26,6 +30,7 @@ typedef enum {
         abort();                                                             \
     }
 
+
 typedef struct {
     IOJS_TO_JS_HEAD
 } iojsToJS;
@@ -38,16 +43,17 @@ typedef struct {
 } iojsCmdAddJS;
 
 
+int                            iojsIncomingPipeFd[2] = {-1, -1};
+int                            iojsOutgoingPipeFd[2] = {-1, -1};
+uv_barrier_t                   iojsStartBlocker;
+uv_thread_t                    iojsThreadId;
+uv_poll_t                      iojsCommandPoll;
 
-int            iojsIncomingPipeFd[2] = {-1, -1};
-int            iojsOutgoingPipeFd[2] = {-1, -1};
-uv_barrier_t   iojsStartBlocker;
-uv_thread_t    iojsThreadId;
-uv_poll_t      iojsCommandPoll;
+iojsJS                        *iojsScripts;
+size_t                         iojsScriptsLen;
+int                            iojsError;
 
-iojsJS        *iojsScripts;
-size_t         iojsScriptsLen;
-int            iojsError;
+v8::Persistent<v8::Array>      iojsLoadedScripts;
 
 
 void
