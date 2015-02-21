@@ -3690,13 +3690,12 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
 
 
 int LoadScripts(Environment *env) {
+  int ret = 0;
+
   HandleScope handle_scope(env->isolate());
 
   TryCatch try_catch;
 
-  // Disable verbose mode to stop FatalException() handler from trying
-  // to handle the exception. Errors this early in the start-up phase
-  // are not safe to ignore.
   try_catch.SetVerbose(false);
 
   Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(), "xrlt.js");
@@ -3731,13 +3730,36 @@ int LoadScripts(Environment *env) {
 
   if (try_catch.HasCaught())  {
     ReportException(env, try_catch);
-    return -1;
+    ret = -1;
+    goto done;
   }
 
   CHECK(f_value->IsArray());
   iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
-  return 0;
+  ret = uv_poll_init(env->event_loop(),
+                           &iojsCommandPoll, iojsIncomingPipeFd[0]);
+  if (ret)
+    goto done;
+
+  ret = uv_poll_start(&iojsCommandPoll, UV_READABLE, RunIncomingTask);
+  if (ret)
+    goto done;
+
+  // Workaround to actually run _third_party_main.js.
+  env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
+
+done:
+  if (uv_barrier_wait(&iojsStartBlocker) > 0)
+    uv_barrier_destroy(&iojsStartBlocker);
+
+  return ret;
+}
+
+
+void UnloadScripts(void) {
+  if (!iojsLoadedScripts.IsEmpty())
+    iojsLoadedScripts.Reset();
 }
 
 
@@ -3769,7 +3791,6 @@ int Start(int argc, char** argv) {
   V8::InitializePlatform(new Platform(4));
 
   int code;
-  int releaseBarrier = 1;
 
   V8::Initialize();
 
@@ -3805,23 +3826,6 @@ int Start(int argc, char** argv) {
     if (use_debug_agent)
       EnableDebug(env);
 
-    iojsError = uv_poll_init(env->event_loop(),
-                             &iojsCommandPoll, iojsIncomingPipeFd[0]);
-    if (iojsError)
-      goto done;
-
-    iojsError = uv_poll_start(&iojsCommandPoll, UV_READABLE, RunIncomingTask);
-    if (iojsError)
-      goto done;
-
-    releaseBarrier = 0;
-
-    if (uv_barrier_wait(&iojsStartBlocker) > 0)
-      uv_barrier_destroy(&iojsStartBlocker);
-
-    // Workaround to actually run _third_party_main.js.
-    env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
-
     bool more;
     do {
       more = uv_run(env->event_loop(), UV_RUN_ONCE);
@@ -3839,14 +3843,7 @@ int Start(int argc, char** argv) {
     RunAtExit(env);
 
 done:
-    if (releaseBarrier) {
-      if (uv_barrier_wait(&iojsStartBlocker) > 0)
-        uv_barrier_destroy(&iojsStartBlocker);
-    }
-
-    if (!iojsLoadedScripts.IsEmpty())
-      iojsLoadedScripts.Reset();
-
+    UnloadScripts();
     iojsClosePipes();
     env->Dispose();
     env = nullptr;
