@@ -3844,7 +3844,7 @@ done:
         uv_barrier_destroy(&iojsStartBlocker);
     }
 
-    if (!iojsError)
+    if (!iojsLoadedScripts.IsEmpty())
       iojsLoadedScripts.Reset();
 
     iojsClosePipes();
