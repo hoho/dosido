@@ -10,8 +10,12 @@
 
 
 typedef enum {
-    IOJS_CHUNK = 1,
-    IOJS_SUBREQUEST,
+    IOJS_RESPONSE_HEADERS = 1,
+    IOJS_RESPONSE_DATA,
+    IOJS_SUBREQUEST_HEADERS,
+    IOJS_SUBREQUEST_BODY,
+    IOJS_LOG,
+    IOJS_EXIT_MAIN
 } iojsFromJSCommandType;
 
 
@@ -28,14 +32,16 @@ extern "C" {
 
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsStart                (int *fd);
+LIBIOJSPUBFUN void LIBIOJSCALL
+        iojsStop                 (void);
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsAddJS                (char *filename, int *id);
+        iojsAddJS                (char *filename, size_t len, int id);
 LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsWaitAddJS            (void);
+        iojsAddJSWait            (void);
 
 LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
-        iojsRecvFromJS           (void);
+        iojsFromJSRecv           (void);
 LIBIOJSPUBFUN void LIBIOJSCALL
         iojsFromJSFree           (iojsFromJS *cmd);
 

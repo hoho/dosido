@@ -9,28 +9,41 @@
 
 typedef enum {
     IOJS_ADD_SCRIPT = 1,
-    IOJS_CALL_SCRIPT,
+    IOJS_REQUEST_HEADERS,
+    IOJS_REQUEST_BODY,
+    IOJS_SUBREQUEST_RESPONSE_HEADERS,
+    IOJS_SUBREQUEST_RESPONSE_DATA,
+    IOJS_EXIT_JS
 } iojsToJSCommandType;
 
 
-typedef struct {
+#define IOJS_TO_JS_HEAD                                                      \
     iojsToJSCommandType   type;
-    void                 *data;
+
+#define IOJS_CHECK_OUT_OF_MEMORY(ptr)                                        \
+    if (ptr == NULL) {                                                       \
+        fprintf(stderr, "Out of memory\n");                                  \
+        abort();                                                             \
+    }
+
+typedef struct {
+    IOJS_TO_JS_HEAD
 } iojsToJS;
 
 
 typedef struct {
+    IOJS_TO_JS_HEAD
     char  *filename;
     int    id;
-} iojsAddCommand;
+} iojsCmdAddJS;
 
 
-int
-        iojsSendToJS     (iojsToJS *cmd);
-int
-        iojsSendFromJS   (iojsFromJS *cmd);
+void
+        iojsToJSSend     (iojsToJS *cmd);
+void
+        iojsFromJSSend   (iojsFromJS *cmd);
 iojsToJS*
-        iojsRecvToJS     (void);
+        iojsToJSRecv     (void);
 void
         iojsToJSFree     (iojsToJS *cmd);
 

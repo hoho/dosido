@@ -234,7 +234,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
     // Something is available to read.
     iojsFromJS *cmd;
 
-    cmd = iojsRecvFromJS();
+    cmd = iojsFromJSRecv();
     if (cmd != NULL) {
         fprintf(stderr, "Recv from JS: %d\n", cmd->type);
         iojsFromJSFree(cmd);
@@ -277,6 +277,7 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     ngx_uint_t                 i;
     ngx_http_iojs_loc_conf_t **pxlcf = jsLocations.elts;
     ngx_http_iojs_loc_conf_t  *xlcf;
+    ngx_str_t                 *filename;
 
     for (i = 0; i < jsLocations.nelts; i++) {
         xlcf = pxlcf[i];
@@ -293,7 +294,9 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
 
         dd("add script `%s`", (&xlcf->js)->data);
 
-        rc = iojsAddJS((char *)(&xlcf->js)->data, &xlcf->jsId);
+        xlcf->jsId = i;
+        filename = &xlcf->js;
+        rc = iojsAddJS((char *)filename->data, filename->len, xlcf->jsId);
 
         if (rc != NGX_OK) {
             return NGX_ERROR;
@@ -301,7 +304,9 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     }
 
     // Wait for all JS files to be loaded by io.js.
-    iojsWaitAddJS();
+    iojsAddJSWait();
+
+    dd("scripts ready");
 
     ngx_array_destroy(&jsLocations);
 
