@@ -5,11 +5,11 @@
 #ifndef __LIBIOJSINTERNALS_H__
 #define __LIBIOJSINTERNALS_H__
 
-#include <libiojs.h>
+#include "libiojs.h"
+#include "uv.h"
 
 typedef enum {
-    IOJS_ADD_SCRIPT = 1,
-    IOJS_REQUEST_HEADERS,
+    IOJS_REQUEST_HEADERS = 1,
     IOJS_REQUEST_BODY,
     IOJS_SUBREQUEST_RESPONSE_HEADERS,
     IOJS_SUBREQUEST_RESPONSE_DATA,
@@ -36,6 +36,22 @@ typedef struct {
     char  *filename;
     int    id;
 } iojsCmdAddJS;
+
+
+
+int            iojsIncomingPipeFd[2] = {-1, -1};
+int            iojsOutgoingPipeFd[2] = {-1, -1};
+uv_barrier_t   iojsStartBlocker;
+uv_thread_t    iojsThreadId;
+uv_poll_t      iojsCommandPoll;
+
+iojsJS        *iojsScripts;
+size_t         iojsScriptsLen;
+int            iojsError;
+
+
+void
+        iojsClosePipes   (void);
 
 
 void

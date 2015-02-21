@@ -76,7 +76,10 @@
   'conditions': [
     [ 'iojs_target_type!="executable"', {
       'variables': {
-        'library_files': ['../libiojs/_third_party_main.js']
+        'library_files': [
+          '../libiojs/_third_party_main.js',
+          '../libiojs/xrlt.js',
+        ]
       },
     }]
   ],

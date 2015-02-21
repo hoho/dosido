@@ -20,6 +20,13 @@ typedef enum {
 
 
 typedef struct {
+    char        *filename;
+    size_t       len;
+    int          id;
+} iojsJS;
+
+
+typedef struct {
     iojsFromJSCommandType   type;
     void                   *data;
 } iojsFromJS;
@@ -31,14 +38,9 @@ extern "C" {
 
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsStart                (int *fd);
+        iojsStart                (iojsJS *scripts, size_t len, int *fd);
 LIBIOJSPUBFUN void LIBIOJSCALL
         iojsStop                 (void);
-
-LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsAddJS                (char *filename, size_t len, int id);
-LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsAddJSWait            (void);
 
 LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
         iojsFromJSRecv           (void);

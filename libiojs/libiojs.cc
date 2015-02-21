@@ -8,6 +8,7 @@
 #include "node_javascript.h"
 #include "node_version.h"
 #include "node_v8_platform.h"
+#include "node_natives.h"
 
 #if defined HAVE_PERFCTR
 #include "node_counters.h"
@@ -100,6 +101,7 @@ using v8::Message;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
+using v8::Persistent;
 using v8::PropertyCallbackInfo;
 using v8::String;
 using v8::TryCatch;
@@ -3575,30 +3577,6 @@ int EmitExit(Environment* env) {
 }
 
 
-// Just a convenience method
-Environment* CreateEnvironment(Isolate* isolate,
-                               Handle<Context> context,
-                               int argc,
-                               const char* const* argv,
-                               int exec_argc,
-                               const char* const* exec_argv) {
-  Environment* env;
-  Context::Scope context_scope(context);
-
-  env = CreateEnvironment(isolate,
-                          uv_default_loop(),
-                          context,
-                          argc,
-                          argv,
-                          exec_argc,
-                          exec_argv);
-
-  LoadEnvironment(env);
-
-  return env;
-}
-
-
 static void HandleCloseCb(uv_handle_t* handle) {
   Environment* env = reinterpret_cast<Environment*>(handle->data);
   env->FinishHandleCleanup(handle);
@@ -3681,31 +3659,6 @@ Environment* CreateEnvironment(Isolate* isolate,
 }
 
 
-int            iojsIncomingPipeFd[2] = {-1, -1};
-int            iojsOutgoingPipeFd[2] = {-1, -1};
-uv_barrier_t   iojsStartBlocker;
-uv_thread_t    iojsThreadId;
-uv_poll_t      iojsCommandPoll;
-
-int            iojsWaitCount;
-uv_mutex_t     iojsWaitCountMutex;
-
-
-void iojsClosePipes(void) {
-  if (node::iojsIncomingPipeFd[0] != -1)
-    close(node::iojsIncomingPipeFd[0]);
-
-  if (node::iojsIncomingPipeFd[1] != -1)
-    close(node::iojsIncomingPipeFd[1]);
-
-  if (node::iojsOutgoingPipeFd[0] != -1)
-    close(node::iojsOutgoingPipeFd[0]);
-
-  if (node::iojsOutgoingPipeFd[1] != -1)
-    close(node::iojsOutgoingPipeFd[1]);
-}
-
-
 void RunIncomingTask(uv_poll_t *handle, int status, int events) {
   iojsToJS *cmd;
     
@@ -3715,10 +3668,6 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
     fprintf(stderr, "ToJSRecv %d!!1\n", cmd->type);
 
     switch (cmd->type) {
-      case IOJS_ADD_SCRIPT:
-            fprintf(stderr, "aaaa! %s %d\n", ((iojsCmdAddJS *)cmd)->filename, ((iojsCmdAddJS *)cmd)->id);
-        break;
-
       case IOJS_REQUEST_HEADERS:
         break;
 
@@ -3739,6 +3688,57 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
     iojsToJSFree(cmd);
     //iojsSendFromJS();
   }  
+}
+
+
+int LoadScripts(Environment *env) {
+  HandleScope handle_scope(env->isolate());
+
+  TryCatch try_catch;
+
+  // Disable verbose mode to stop FatalException() handler from trying
+  // to handle the exception. Errors this early in the start-up phase
+  // are not safe to ignore.
+  try_catch.SetVerbose(false);
+
+  Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(), "xrlt.js");
+  Local<Value> f_value = ExecuteString(
+      env,
+      OneByteString(env->isolate(), xrlt_native, sizeof(xrlt_native) - 1),
+      script_name
+  );
+
+  if (try_catch.HasCaught())  {
+    ReportException(env, try_catch);
+    exit(10);
+  }
+
+  CHECK(f_value->IsFunction());
+  Local<Function> f = Local<Function>::Cast(f_value);
+
+  Local<Object> global = env->context()->Global();
+  Local<Array> scripts = Array::New(env->isolate(), iojsScriptsLen);
+
+  size_t   i;
+  iojsJS  *script;
+
+  for (i = 0; i < iojsScriptsLen; i++) {
+    script = &iojsScripts[i];
+    scripts->Set(script->id,
+                 OneByteString(env->isolate(), script->filename, script->len));
+  }
+
+  Local<Value> arg = scripts;
+  f_value = f->Call(global, 1, &arg);
+
+  if (try_catch.HasCaught())  {
+    ReportException(env, try_catch);
+    return -1;
+  }
+
+  CHECK(f_value->IsArray());
+
+  return 0;
 }
 
 
@@ -3770,6 +3770,8 @@ int Start(int argc, char** argv) {
   V8::InitializePlatform(new Platform(4));
 
   int code;
+  int releaseBarrier = 1;
+
   V8::Initialize();
 
   // Fetch a reference to the main isolate, so we have a reference to it
@@ -3796,20 +3798,27 @@ int Start(int argc, char** argv) {
 
     LoadEnvironment(env);
 
+    iojsError = LoadScripts(env);
+    if (iojsError)
+      goto done;
+
     // Enable debugger
     if (use_debug_agent)
       EnableDebug(env);
 
-    code = uv_poll_init(env->event_loop(), &iojsCommandPoll, iojsIncomingPipeFd[0]);
-    if (code)
+    iojsError = uv_poll_init(env->event_loop(),
+                             &iojsCommandPoll, iojsIncomingPipeFd[0]);
+    if (iojsError)
       goto done;
 
-    code = uv_poll_start(&iojsCommandPoll, UV_READABLE, RunIncomingTask);
-    if (code)
+    iojsError = uv_poll_start(&iojsCommandPoll, UV_READABLE, RunIncomingTask);
+    if (iojsError)
       goto done;
+
+    releaseBarrier = 0;
 
     if (uv_barrier_wait(&iojsStartBlocker) > 0)
-      uv_barrier_destroy(&iojsStartBlocker);;
+      uv_barrier_destroy(&iojsStartBlocker);
 
     // Workaround to actually run _third_party_main.js.
     env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
@@ -3831,6 +3840,10 @@ int Start(int argc, char** argv) {
     RunAtExit(env);
 
 done:
+    if (releaseBarrier) {
+      if (uv_barrier_wait(&iojsStartBlocker) > 0)
+        uv_barrier_destroy(&iojsStartBlocker);
+    }
     iojsClosePipes();
     env->Dispose();
     env = nullptr;
@@ -3851,6 +3864,21 @@ done:
 }  // namespace node
 
 
+void iojsClosePipes(void) {
+  if (iojsIncomingPipeFd[0] != -1)
+    close(iojsIncomingPipeFd[0]);
+
+  if (iojsIncomingPipeFd[1] != -1)
+    close(iojsIncomingPipeFd[1]);
+
+  if (iojsOutgoingPipeFd[0] != -1)
+    close(iojsOutgoingPipeFd[0]);
+
+  if (iojsOutgoingPipeFd[1] != -1)
+    close(iojsOutgoingPipeFd[1]);
+}
+
+
 void
 iojsRunnerThread(void *arg) {
   int argc = 1;
@@ -3859,74 +3887,72 @@ iojsRunnerThread(void *arg) {
   argv = new char*[1];
   argv[0] = (char*)"dosido";
 
-  uv_mutex_init(&node::iojsWaitCountMutex);
-
   node::Start(argc, argv);
-
-  uv_mutex_destroy(&node::iojsWaitCountMutex);
 }
 
 
 int
-iojsStart(int *fd) {
+iojsStart(iojsJS *scripts, size_t len, int *fd) {
   int err;
   int r;
   int set = 1;
 
-  err = pipe(node::iojsIncomingPipeFd);
+  err = pipe(iojsIncomingPipeFd);
   if (err) {
     err = -errno;
     goto error;
   }
-  err = pipe(node::iojsOutgoingPipeFd);
+  err = pipe(iojsOutgoingPipeFd);
   if (err) {
     err = -errno;
     goto error;
   }
 
-  do r = ioctl(node::iojsIncomingPipeFd[0], FIONBIO, &set);
+  do r = ioctl(iojsIncomingPipeFd[0], FIONBIO, &set);
   while (r == -1 && errno == EINTR);
   if (r) {
     err = -errno;
     goto error;
   }
 
-  do r = ioctl(node::iojsIncomingPipeFd[1], FIONBIO, &set);
+  do r = ioctl(iojsIncomingPipeFd[1], FIONBIO, &set);
   while (r == -1 && errno == EINTR);
   if (r) {
     err = -errno;
     goto error;
   }
 
-  do r = ioctl(node::iojsOutgoingPipeFd[0], FIONBIO, &set);
+  do r = ioctl(iojsOutgoingPipeFd[0], FIONBIO, &set);
   while (r == -1 && errno == EINTR);
   if (r) {
     err = -errno;
     goto error;
   }
 
-  do r = ioctl(node::iojsOutgoingPipeFd[1], FIONBIO, &set);
+  do r = ioctl(iojsOutgoingPipeFd[1], FIONBIO, &set);
   while (r == -1 && errno == EINTR);
   if (r) {
     err = -errno;
     goto error;
   }
 
-  uv_barrier_init(&node::iojsStartBlocker, 2);
+  uv_barrier_init(&iojsStartBlocker, 2);
 
-  uv_thread_create(&node::iojsThreadId, iojsRunnerThread, NULL);
+  iojsScripts = (iojsJS *)scripts;
+  iojsScriptsLen = len;
+  iojsError = -1;
 
-  if (uv_barrier_wait(&node::iojsStartBlocker) > 0)
-    uv_barrier_destroy(&node::iojsStartBlocker);
+  uv_thread_create(&iojsThreadId, iojsRunnerThread, NULL);
 
-  *fd = node::iojsOutgoingPipeFd[0];
+  if (uv_barrier_wait(&iojsStartBlocker) > 0)
+    uv_barrier_destroy(&iojsStartBlocker);
 
-  node::iojsWaitCount = 0;
+  *fd = iojsOutgoingPipeFd[0];
 
-  return 0;
+  return iojsError;
 
 error:
-  node::iojsClosePipes();
+  iojsClosePipes();
   return err;
 }
 
@@ -3937,7 +3963,7 @@ iojsStop(void) {
   iojsToJS *cmd = (iojsToJS *)malloc(sizeof(iojsToJS));
   cmd->type = IOJS_EXIT_JS;
   iojsToJSSend(cmd);
-  uv_thread_join(&node::iojsThreadId);
+  uv_thread_join(&iojsThreadId);
 }
 
 
@@ -3947,7 +3973,7 @@ iojsToJSSend(iojsToJS *cmd) {
   ssize_t sent = 0;
   ssize_t sz;
   while (sent < (ssize_t)sizeof(cmd)) {
-    sz = write(node::iojsIncomingPipeFd[1],
+    sz = write(iojsIncomingPipeFd[1],
                (char *)&cmd + sent,
                sizeof(cmd) - sent);
     if (sz < 0) {
@@ -3965,7 +3991,7 @@ ssize_t    iojsCurToJSRecvLen = 0;
 iojsToJS  *iojsCurToJSRecvCmd;
 iojsToJS*
 iojsToJSRecv(void) {
-  ssize_t sz = read(node::iojsIncomingPipeFd[0],
+  ssize_t sz = read(iojsIncomingPipeFd[0],
                     (char *)&iojsCurToJSRecvCmd + iojsCurToJSRecvLen,
                     sizeof(iojsToJS *) - iojsCurToJSRecvLen);
   if (sz > 0) {
@@ -3986,7 +4012,7 @@ iojsFromJSSend(iojsFromJS *cmd) {
   ssize_t sent = 0;
   ssize_t sz;
   while (sent < (ssize_t)sizeof(cmd)) {
-    sz = write(node::iojsOutgoingPipeFd[1],
+    sz = write(iojsOutgoingPipeFd[1],
                (char *)&cmd + sent,
                sizeof(cmd) - sent);
     if (sz < 0) {
@@ -4004,7 +4030,7 @@ ssize_t      iojsCurFromJSRecvLen = 0;
 iojsFromJS  *iojsCurFromJSRecvCmd;
 iojsFromJS*
 iojsFromJSRecv(void) {
-  ssize_t sz = read(node::iojsOutgoingPipeFd[0],
+  ssize_t sz = read(iojsOutgoingPipeFd[0],
                     (char *)&iojsCurFromJSRecvCmd + iojsCurFromJSRecvLen,
                      sizeof(iojsFromJS*) - iojsCurFromJSRecvLen);
   if (sz > 0) {
@@ -4016,43 +4042,6 @@ iojsFromJSRecv(void) {
   }
 
   return NULL;
-}
-
-
-// To call from nginx thread.
-int
-iojsAddJS(char *filename, size_t len, int id) {
-  uv_mutex_lock(&node::iojsWaitCountMutex);
-  node::iojsWaitCount++;
-  uv_mutex_unlock(&node::iojsWaitCountMutex);
-
-  iojsCmdAddJS *cmd;
-  cmd = (iojsCmdAddJS *)malloc(sizeof(iojsCmdAddJS) + len + 1);
-
-  IOJS_CHECK_OUT_OF_MEMORY(cmd);
-
-  cmd->type = IOJS_ADD_SCRIPT;
-  cmd->filename = (char *)(cmd + 1);
-  cmd->id = id;
-  memcpy(cmd->filename, filename, len);
-  cmd->filename[len] = 0;
-
-  iojsToJSSend((iojsToJS *)cmd);
-
-  return 0;
-}
-
-
-// To call from nginx thread.
-void
-iojsAddJSWait(void) {
-  int val;
-  do {
-    sleep(0);
-    uv_mutex_lock(&node::iojsWaitCountMutex);
-    val = node::iojsWaitCount;
-    uv_mutex_unlock(&node::iojsWaitCountMutex);
-  } while (val > 0);
 }
 
 

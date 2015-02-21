@@ -247,37 +247,25 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
 {
     dd("start");
 
-    int fd = -1;
-    int rc;
-
-    rc = iojsStart(&fd);
-
-    if (rc) {
-        ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
-                      "Failed to start iojs (%d)", rc);
-        return NGX_ERROR;
-    }
-
-    memset(&jsPipe, 0, sizeof(jsPipe));
-    memset(&jsPipeEv, 0, sizeof(jsPipeEv));
-
-    jsPipe.number = ngx_atomic_fetch_add(ngx_connection_counter, 1);
-    jsPipe.fd = fd;
-    jsPipe.pool = cycle->pool;
-    jsPipe.log = cycle->log;
-    jsPipe.write = &jsPipeEv;
-
-    jsPipeEv.data = &jsPipe;
-    jsPipeEv.handler = ngx_http_iojs_receive;
-    jsPipeEv.log = cycle->log;
-
-    dd("add pipe handler");
-    ngx_add_event(&jsPipeEv, NGX_READ_EVENT, 0);
-
     ngx_uint_t                 i;
     ngx_http_iojs_loc_conf_t **pxlcf = jsLocations.elts;
     ngx_http_iojs_loc_conf_t  *xlcf;
     ngx_str_t                 *filename;
+    iojsJS                    *scripts;
+    iojsJS                    *script;
+    int                       fd = -1;
+    int                       rc;
+
+    if (jsLocations.nelts <= 0) {
+        dd("no scripts, do not start iojs");
+        return NGX_OK;
+    }
+
+    scripts = (iojsJS *)ngx_palloc(cycle->pool,
+                                   sizeof(iojsJS) * jsLocations.nelts);
+    if (scripts == NULL) {
+        return NGX_ERROR;
+    }
 
     for (i = 0; i < jsLocations.nelts; i++) {
         xlcf = pxlcf[i];
@@ -295,20 +283,42 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
         dd("add script `%s`", (&xlcf->js)->data);
 
         xlcf->jsId = i;
-        filename = &xlcf->js;
-        rc = iojsAddJS((char *)filename->data, filename->len, xlcf->jsId);
 
-        if (rc != NGX_OK) {
-            return NGX_ERROR;
-        }
+        script = &scripts[i];
+        filename = &xlcf->js;
+        script->filename = (char *)filename->data;
+        script->len = filename->len;
+        script->id = i;
     }
 
-    // Wait for all JS files to be loaded by io.js.
-    iojsAddJSWait();
-
-    dd("scripts ready");
+    rc = iojsStart(scripts, jsLocations.nelts, &fd);
 
     ngx_array_destroy(&jsLocations);
+    ngx_pfree(cycle->pool, scripts);
+
+    if (rc) {
+        ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+                      "Failed to start iojs (%d)", rc);
+        return NGX_ERROR;
+    }
+
+    dd("started");
+
+    memset(&jsPipe, 0, sizeof(jsPipe));
+    memset(&jsPipeEv, 0, sizeof(jsPipeEv));
+
+    jsPipe.number = ngx_atomic_fetch_add(ngx_connection_counter, 1);
+    jsPipe.fd = fd;
+    jsPipe.pool = cycle->pool;
+    jsPipe.log = cycle->log;
+    jsPipe.write = &jsPipeEv;
+
+    jsPipeEv.data = &jsPipe;
+    jsPipeEv.handler = ngx_http_iojs_receive;
+    jsPipeEv.log = cycle->log;
+
+    dd("add pipe handler");
+    ngx_add_event(&jsPipeEv, NGX_READ_EVENT, 0);
 
     return NGX_OK;
 }
