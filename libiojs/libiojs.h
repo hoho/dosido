@@ -32,6 +32,18 @@ typedef struct {
 } iojsFromJS;
 
 
+typedef int (*iojsAtomicFetchAdd)(int value, int add);
+
+
+typedef struct {
+    void                   *r;
+    void                   *ctx;
+    unsigned                refused:1;
+    int                     refCount;
+    iojsAtomicFetchAdd      afa;
+} iojsContext;
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,6 +58,14 @@ LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
         iojsFromJSRecv           (void);
 LIBIOJSPUBFUN void LIBIOJSCALL
         iojsFromJSFree           (iojsFromJS *cmd);
+
+LIBIOJSPUBFUN iojsContext * LIBIOJSCALL
+        iojsContextCreate        (void *r, void *ctx, iojsAtomicFetchAdd afa);
+LIBIOJSPUBFUN void LIBIOJSCALL
+        iojsContextAttemptFree   (iojsContext *context);
+
+LIBIOJSPUBFUN int LIBIOJSCALL
+        iojsRequest              (int id);
 
 
 #ifdef __cplusplus
