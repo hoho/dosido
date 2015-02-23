@@ -191,6 +191,7 @@
           ],
           'sources': [
             '../libiojs/libiojs.cc',
+            '../libiojs/internals.cc',
             '../libiojs/libiojs.h',
             '../libiojs/libiojsExports.h',
           ],
