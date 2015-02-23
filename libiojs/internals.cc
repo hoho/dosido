@@ -13,7 +13,6 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
     ret->refCount = 2;
     ret->r = r;
     ret->refused = 0;
-    ret->ctx = ctx;
     ret->afa = afa;
 
     return ret;

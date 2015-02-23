@@ -43,19 +43,6 @@ typedef struct {
 } iojsCmdAddJS;
 
 
-int                            iojsIncomingPipeFd[2] = {-1, -1};
-int                            iojsOutgoingPipeFd[2] = {-1, -1};
-uv_barrier_t                   iojsStartBlocker;
-uv_thread_t                    iojsThreadId;
-uv_poll_t                      iojsCommandPoll;
-
-iojsJS                        *iojsScripts;
-size_t                         iojsScriptsLen;
-int                            iojsError;
-
-v8::Persistent<v8::Array>      iojsLoadedScripts;
-
-
 void
         iojsClosePipes   (void);
 

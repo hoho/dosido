@@ -1,5 +1,6 @@
 #include "node.h"
 #include "libiojsInternals.h"
+#include "libiojsVars.h"
 #include "node_buffer.h"
 #include "node_constants.h"
 #include "node_file.h"

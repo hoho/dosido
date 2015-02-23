@@ -32,14 +32,13 @@ typedef struct {
 } iojsFromJS;
 
 
-typedef int (*iojsAtomicFetchAdd)(int value, int add);
+typedef int64_t (*iojsAtomicFetchAdd)(int64_t value, int64_t add);
 
 
 typedef struct {
     void                   *r;
-    void                   *ctx;
     unsigned                refused:1;
-    int                     refCount;
+    int64_t                 refCount;
     iojsAtomicFetchAdd      afa;
 } iojsContext;
 
