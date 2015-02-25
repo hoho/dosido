@@ -78,7 +78,7 @@
       'variables': {
         'library_files': [
           '../libiojs/_third_party_main.js',
-          '../libiojs/xrlt.js',
+          '../libiojs/libiojs.js',
         ]
       },
     }]

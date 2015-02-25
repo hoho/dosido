@@ -3699,10 +3699,10 @@ int LoadScripts(Environment *env) {
 
   try_catch.SetVerbose(false);
 
-  Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(), "xrlt.js");
+  Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(), "libiojs.js");
   Local<Value> f_value = ExecuteString(
       env,
-      OneByteString(env->isolate(), xrlt_native, sizeof(xrlt_native) - 1),
+      OneByteString(env->isolate(), libiojs_native, sizeof(libiojs_native) - 1),
       script_name
   );
 
