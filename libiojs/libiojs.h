@@ -61,10 +61,10 @@ LIBIOJSPUBFUN void LIBIOJSCALL
 LIBIOJSPUBFUN iojsContext * LIBIOJSCALL
         iojsContextCreate        (void *r, void *ctx, iojsAtomicFetchAdd afa);
 LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsContextAttemptFree   (iojsContext *context);
+        iojsContextAttemptFree   (iojsContext *jsCtx);
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsRequest              (int id);
+        iojsCall                 (int id, iojsContext *jsCtx);
 
 
 #ifdef __cplusplus

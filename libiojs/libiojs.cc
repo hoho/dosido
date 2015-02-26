@@ -3658,6 +3658,22 @@ Environment* CreateEnvironment(Isolate* isolate,
 }
 
 
+// We'll store loaded environment here.
+Environment *iojsEnv = NULL;
+
+
+void CallLoadedScript(Environment *env, int id) {
+  HandleScope handle_scope(env->isolate());
+
+  TryCatch try_catch;
+
+  Local<Array>  scripts = Local<Array>::New(iojsEnv->isolate(), iojsLoadedScripts);
+  Local<Function> f = Local<Function>::Cast(scripts->Get(id));
+
+  f_value = f->Call(env->context()->Global(), 0, NULL);
+}
+
+
 void RunIncomingTask(uv_poll_t *handle, int status, int events) {
   iojsToJS *cmd;
     
@@ -3667,7 +3683,8 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
     fprintf(stderr, "ToJSRecv %d!!1\n", cmd->type);
 
     switch (cmd->type) {
-      case IOJS_REQUEST_HEADERS:
+      case IOJS_CALL:
+        CallLoadedScript(iojsEnv, ((iojsCallData *)cmd)->id);
         break;
 
       case IOJS_REQUEST_BODY:
@@ -3679,7 +3696,7 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
       case IOJS_SUBREQUEST_RESPONSE_DATA:
         break;
 
-      case IOJS_EXIT_JS:
+      case IOJS_EXIT:
         uv_poll_stop(&iojsCommandPoll);
         break;
     }
@@ -3693,13 +3710,16 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
 int LoadScripts(Environment *env) {
   int ret = 0;
 
+  iojsEnv = env;
+
   HandleScope handle_scope(env->isolate());
 
   TryCatch try_catch;
 
   try_catch.SetVerbose(false);
 
-  Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(), "libiojs.js");
+  Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(),
+                                                    "libiojs.js");
   Local<Value> f_value = ExecuteString(
       env,
       OneByteString(env->isolate(), libiojs_native, sizeof(libiojs_native) - 1),
@@ -3962,7 +3982,7 @@ error:
 void
 iojsStop(void) {
   iojsToJS *cmd = (iojsToJS *)malloc(sizeof(iojsToJS));
-  cmd->type = IOJS_EXIT_JS;
+  cmd->type = IOJS_EXIT;
   iojsToJSSend(cmd);
   uv_thread_join(&iojsThreadId);
 }

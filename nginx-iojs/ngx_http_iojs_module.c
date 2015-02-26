@@ -136,7 +136,8 @@ ngx_module_t ngx_http_iojs_module = {
 
 typedef struct ngx_http_iojs_ctx_s ngx_http_iojs_ctx_t;
 struct ngx_http_iojs_ctx_s {
-    size_t                id;
+    size_t                subrequestId;
+    int                   jsId;
     iojsContext          *jsctx;
     ngx_http_iojs_ctx_t  *main_ctx;
     unsigned              headers_sent:1;
@@ -205,8 +206,9 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
             //iojsParams = NULL;
         }
 
+        ctx->jsId = conf->jsId;
         ctx->jsctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
-        ctx->id = 0;
+        ctx->subrequestId = 0;
         ctx->main_ctx = ctx;
 
         if (ctx->jsctx == NULL) {
@@ -226,7 +228,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
         }
 
         ctx->jsctx = main_ctx->jsctx;
-        ctx->id = id;
+        ctx->subrequestId = id;
         ctx->main_ctx = main_ctx;
     }
 
@@ -526,25 +528,10 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-
-
-    /*if (ctx->xctx->bodyData != NULL) {
-        rc = ngx_http_read_client_request_body(
-                r, ngx_http_xrlt_post_request_body
-        );
-
-        if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
-            return rc;
-        }
-
-        if (ctx->xctx->cur & XRLT_STATUS_DONE) {
-            ngx_http_xrlt_wev_handler(r);
-
-            return NGX_OK;
-        }
-    } else {
-        r->main->count++;
-    }*/
+    rc = iojsCall(ctx->jsId, ctx->jsctx);
+    if (rc) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
 
     r->main->count++;
 

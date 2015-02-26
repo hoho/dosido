@@ -13,11 +13,11 @@
 
 
 typedef enum {
-    IOJS_REQUEST_HEADERS = 1,
+    IOJS_CALL = 1,
     IOJS_REQUEST_BODY,
     IOJS_SUBREQUEST_RESPONSE_HEADERS,
     IOJS_SUBREQUEST_RESPONSE_DATA,
-    IOJS_EXIT_JS
+    IOJS_EXIT
 } iojsToJSCommandType;
 
 
@@ -38,9 +38,9 @@ typedef struct {
 
 typedef struct {
     IOJS_TO_JS_HEAD
-    char  *filename;
     int    id;
-} iojsCmdAddJS;
+    void  *headers;
+} iojsCallData;
 
 
 void

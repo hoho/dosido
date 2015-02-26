@@ -10,7 +10,7 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
     if (ret == NULL)
         return ret;
 
-    ret->refCount = 2;
+    ret->refCount = 1;
     ret->r = r;
     ret->refused = 0;
     ret->afa = afa;
@@ -20,14 +20,33 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
 
 
 void
-iojsContextAttemptFree(iojsContext *context)
+iojsContextAttemptFree(iojsContext *jsCtx)
 {
-    if (context == NULL)
+    if (jsCtx == NULL)
         return;
 
-    int refs = context->afa(context->refCount, -1);
+    int refs = jsCtx->afa(jsCtx->refCount, -1);
 
     if (refs <= 0) {
-        free(context);
+        free(jsCtx);
     }
+}
+
+
+int
+iojsCall(int id, iojsContext *jsCtx)
+{
+    jsCtx->afa(jsCtx->refCount, 1);
+
+    iojsCallData  *data;
+
+    data = (iojsCallData *)malloc(sizeof(iojsCallData));
+    IOJS_CHECK_OUT_OF_MEMORY(data);
+
+    data->type = IOJS_CALL;
+    data->id = id;
+
+    iojsToJSSend((iojsToJS *)data);
+
+    return 0;
 }
