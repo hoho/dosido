@@ -3662,15 +3662,75 @@ Environment* CreateEnvironment(Isolate* isolate,
 Environment *iojsEnv = NULL;
 
 
+static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
+  Environment *env = Environment::GetCurrent(args.GetIsolate());
+
+  int32_t _type = args[0]->ToInteger(env->isolate())->Int32Value();
+  iojsByJSCommandType type;
+  Local<v8::External> payload = Local<v8::External>::Cast(args[1]);
+
+  int sz = 0;
+  type = static_cast<iojsByJSCommandType>(_type);
+
+  switch (type) {
+    case BY_JS_READ_REQUEST_BODY:
+      sz = sizeof(iojsFromJS);
+      break;
+
+    case BY_JS_RESPONSE_HEADERS:
+      sz = sizeof(iojsFromJS);
+      break;
+
+    case BY_JS_RESPONSE_BODY:
+      sz = sizeof(iojsFromJS);
+      break;
+
+    case BY_JS_SUBREQUEST:
+      sz = sizeof(iojsFromJS);
+      break;
+  }
+
+  if (sz == 0)
+    return;
+
+  iojsFromJS *cmd = static_cast<iojsFromJS *>(malloc(sz));
+
+  switch (type) {
+    case BY_JS_READ_REQUEST_BODY:
+      cmd->type = IOJS_READ_REQUEST_BODY;
+      cmd->data = static_cast<void *>(payload->Value());
+      iojsFromJSSend(cmd);
+      break;
+
+    case BY_JS_RESPONSE_HEADERS:
+      break;
+
+    case BY_JS_RESPONSE_BODY:
+      break;
+
+    case BY_JS_SUBREQUEST:
+      break;
+  }
+}
+
+
 void CallLoadedScript(Environment *env, int id) {
   HandleScope handle_scope(env->isolate());
 
   TryCatch try_catch;
 
-  Local<Array>  scripts = Local<Array>::New(iojsEnv->isolate(), iojsLoadedScripts);
+  Local<Array>  scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
   Local<Function> f = Local<Function>::Cast(scripts->Get(id));
 
-  f_value = f->Call(env->context()->Global(), 0, NULL);
+  Local<Object> headers = Object::New(env->isolate());
+  Local<Function> callback = env->NewFunctionTemplate(CallLoadedScriptCallback)->GetFunction();
+  Local<v8::External> payload = v8::External::New(env->isolate(), (void *)0x05);
+
+  Local<Value> args[3] = {headers, callback, payload};
+
+  f->Call(env->context()->Global(), 3, args);
+
+  env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
 }
 
 
@@ -3702,12 +3762,11 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
     }
 
     iojsToJSFree(cmd);
-    //iojsSendFromJS();
-  }  
+  }
 }
 
 
-int LoadScripts(Environment *env) {
+void LoadScripts(Environment *env) {
   int ret = 0;
 
   iojsEnv = env;
@@ -3771,16 +3830,18 @@ int LoadScripts(Environment *env) {
   env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
 
 done:
+  iojsError = ret;
+
   if (uv_barrier_wait(&iojsStartBlocker) > 0)
     uv_barrier_destroy(&iojsStartBlocker);
-
-  return ret;
 }
 
 
 void UnloadScripts(void) {
   if (!iojsLoadedScripts.IsEmpty())
     iojsLoadedScripts.Reset();
+
+  iojsEnv = NULL;
 }
 
 
@@ -3839,7 +3900,7 @@ int Start(int argc, char** argv) {
 
     LoadEnvironment(env);
 
-    iojsError = LoadScripts(env);
+    LoadScripts(env);
     if (iojsError)
       goto done;
 

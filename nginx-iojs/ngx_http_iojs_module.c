@@ -146,7 +146,7 @@ struct ngx_http_iojs_ctx_s {
 };
 
 
-static int64_t ngx_atomic_fetch_add_wrap(int64_t value, int64_t add)
+static int64_t ngx_atomic_fetch_add_wrap(int64_t *value, int64_t add)
 {
     return ngx_atomic_fetch_add(value, add);
 }
@@ -244,6 +244,29 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
     cmd = iojsFromJSRecv();
     if (cmd != NULL) {
+        switch (cmd->type) {
+            case IOJS_READ_REQUEST_BODY:
+                break;
+
+            case IOJS_RESPONSE_HEADERS:
+                break;
+
+            case IOJS_RESPONSE_BODY:
+                break;
+
+            case IOJS_SUBREQUEST_HEADERS:
+                break;
+
+            case IOJS_SUBREQUEST_BODY:
+                break;
+
+            case IOJS_LOG:
+                break;
+
+            case IOJS_EXIT_MAIN:
+                break;
+        }
+
         fprintf(stderr, "Recv from JS: %d\n", cmd->type);
         iojsFromJSFree(cmd);
     }
@@ -528,10 +551,13 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    dd("aaaa");
+
     rc = iojsCall(ctx->jsId, ctx->jsctx);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
+    dd("aaaa222");
 
     r->main->count++;
 

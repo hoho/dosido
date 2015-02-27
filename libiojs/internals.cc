@@ -25,7 +25,7 @@ iojsContextAttemptFree(iojsContext *jsCtx)
     if (jsCtx == NULL)
         return;
 
-    int refs = jsCtx->afa(jsCtx->refCount, -1);
+    int refs = jsCtx->afa(&jsCtx->refCount, -1);
 
     if (refs <= 0) {
         free(jsCtx);
@@ -36,7 +36,7 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 int
 iojsCall(int id, iojsContext *jsCtx)
 {
-    jsCtx->afa(jsCtx->refCount, 1);
+    jsCtx->afa(&jsCtx->refCount, 1);
 
     iojsCallData  *data;
 
@@ -45,7 +45,6 @@ iojsCall(int id, iojsContext *jsCtx)
 
     data->type = IOJS_CALL;
     data->id = id;
-
     iojsToJSSend((iojsToJS *)data);
 
     return 0;

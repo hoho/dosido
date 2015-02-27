@@ -21,6 +21,14 @@ typedef enum {
 } iojsToJSCommandType;
 
 
+typedef enum {
+    BY_JS_READ_REQUEST_BODY = 1,
+    BY_JS_RESPONSE_HEADERS = 2,
+    BY_JS_RESPONSE_BODY = 3,
+    BY_JS_SUBREQUEST = 4
+} iojsByJSCommandType;
+
+
 #define IOJS_TO_JS_HEAD                                                      \
     iojsToJSCommandType   type;
 

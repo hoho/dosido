@@ -10,8 +10,9 @@
 
 
 typedef enum {
-    IOJS_RESPONSE_HEADERS = 1,
-    IOJS_RESPONSE_DATA,
+    IOJS_READ_REQUEST_BODY = 1,
+    IOJS_RESPONSE_HEADERS,
+    IOJS_RESPONSE_BODY,
     IOJS_SUBREQUEST_HEADERS,
     IOJS_SUBREQUEST_BODY,
     IOJS_LOG,
@@ -32,7 +33,7 @@ typedef struct {
 } iojsFromJS;
 
 
-typedef int64_t (*iojsAtomicFetchAdd)(int64_t value, int64_t add);
+typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
 
 
 typedef struct {

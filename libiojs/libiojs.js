@@ -102,41 +102,40 @@
         module = module.exports;
 
         var READ_REQUEST_BODY = 1,
-            SEND_RESPONSE_HEADERS = 2,
-            SEND_RESPONSE_BODY = 3,
-            MAKE_SUBREQUEST = 4;
+            RESPONSE_HEADERS = 2,
+            RESPONSE_BODY = 3,
+            SUBREQUEST = 4;
 
-        return function(requestHeaders, callback) {
+        return function(requestHeaders, callback, payload) {
             var requestBodyRequested = false;
             var headersSent = false;
 
             var i = new Request(requestHeaders, function() {
+                process.stderr.write('ahahahha\n');
                 if (!requestBodyRequested) {
-                    callback(READ_REQUEST_BODY);
+                    callback(READ_REQUEST_BODY, payload, function(chunk) {
+                        i.push(chunk);
+                    });
                     requestBodyRequested = true;
                 }
             });
 
             var o = new Response(function(chunk, encoding, cb) {
                 if (!headersSent) {
-                    callback(SEND_RESPONSE_HEADERS, this._headers);
+                    callback(RESPONSE_HEADERS, payload, this._headers);
                     headersSent = true;
                 }
 
-                callback(SEND_RESPONSE_BODY, chunk.toString());
+                callback(RESPONSE_BODY, payload, chunk.toString());
 
                 cb();
             });
 
             o.on('finish', function() {
-                callback(SEND_RESPONSE_BODY, null);
+                callback(RESPONSE_BODY, payload, null);
             });
 
             module(i, o);
-
-            return function(chunk) {
-                i.push(chunk);
-            };
         };
     });
 
