@@ -6,7 +6,7 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
 {
     iojsContext  *ret;
 
-    ret = (iojsContext*)malloc(sizeof(iojsContext));
+    ret = reinterpret_cast<iojsContext *>(malloc(sizeof(iojsContext)));
     if (ret == NULL)
         return ret;
 
@@ -34,17 +34,19 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
 
 int
-iojsCall(int id, iojsContext *jsCtx)
+iojsCall(int index, iojsContext *jsCtx)
 {
     jsCtx->afa(&jsCtx->refCount, 1);
 
     iojsCallData  *data;
 
-    data = (iojsCallData *)malloc(sizeof(iojsCallData));
+    data = reinterpret_cast<iojsCallData *>(malloc(sizeof(iojsCallData)));
     IOJS_CHECK_OUT_OF_MEMORY(data);
 
     data->type = IOJS_CALL;
-    data->id = id;
+    data->jsCtx = jsCtx;
+    data->index = index;
+
     iojsToJSSend((iojsToJS *)data);
 
     return 0;

@@ -46,8 +46,9 @@ typedef struct {
 
 typedef struct {
     IOJS_TO_JS_HEAD
-    int    id;
-    void  *headers;
+    iojsContext  *jsCtx;
+    int           index;
+    void         *headers;
 } iojsCallData;
 
 

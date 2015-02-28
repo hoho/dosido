@@ -85,9 +85,11 @@
     var stream = NativeModule.require('stream');
     var Readable = stream.Readable;
     var Writable = stream.Writable;
+    var Duplex = stream.Duplex;
     var util = NativeModule.require('util');
     util.inherits(Request, Readable);
     util.inherits(Response, Writable);
+    util.inherits(Subrequest, Duplex);
 
     return scripts.map(function(filename) {
         filename = Module._resolveFilename(path.resolve(filename), null);
@@ -110,8 +112,7 @@
             var requestBodyRequested = false;
             var headersSent = false;
 
-            var i = new Request(requestHeaders, function() {
-                process.stderr.write('ahahahha\n');
+            var i = new Request(requestHeaders, function read() {
                 if (!requestBodyRequested) {
                     callback(READ_REQUEST_BODY, payload, function(chunk) {
                         i.push(chunk);
@@ -120,7 +121,7 @@
                 }
             });
 
-            var o = new Response(function(chunk, encoding, cb) {
+            var o = new Response(function write(chunk, encoding, cb) {
                 if (!headersSent) {
                     callback(RESPONSE_HEADERS, payload, this._headers);
                     headersSent = true;
@@ -131,11 +132,20 @@
                 cb();
             });
 
-            o.on('finish', function() {
+            o.on('finish', function finish() {
                 callback(RESPONSE_BODY, payload, null);
             });
 
-            module(i, o);
+            module(i, o, function subrequest() {
+                return new Subrequest(
+                    function read() {
+
+                    },
+                    function write() {
+
+                    }
+                );
+            });
         };
     });
 
@@ -156,4 +166,12 @@
     Response.prototype.setHeader = function setHeader(name, value) {
         this._headers[name] = value;
     };
+
+
+    function Subrequest(read, write) {
+        Duplex.call(this, {
+            read: read,
+            write: write
+        })
+    }
 });

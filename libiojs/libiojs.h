@@ -23,14 +23,14 @@ typedef enum {
 typedef struct {
     char        *filename;
     size_t       len;
-    int          id;
+    int          index;
 } iojsJS;
 
 
 typedef struct {
-    iojsFromJSCommandType   type;
-    void                   *data;
-} iojsFromJS;
+    size_t                  len;
+    char                   *data;
+} iojsString;
 
 
 typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
@@ -39,9 +39,17 @@ typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
 typedef struct {
     void                   *r;
     unsigned                refused:1;
+    unsigned                done:1;
     int64_t                 refCount;
     iojsAtomicFetchAdd      afa;
 } iojsContext;
+
+
+typedef struct {
+    iojsFromJSCommandType   type;
+    iojsContext            *jsCtx;
+    void                   *data;
+} iojsFromJS;
 
 
 #ifdef __cplusplus
@@ -65,7 +73,7 @@ LIBIOJSPUBFUN void LIBIOJSCALL
         iojsContextAttemptFree   (iojsContext *jsCtx);
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsCall                 (int id, iojsContext *jsCtx);
+        iojsCall                 (int index, iojsContext *jsCtx);
 
 
 #ifdef __cplusplus

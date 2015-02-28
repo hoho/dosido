@@ -30,7 +30,7 @@ typedef struct {
 
 typedef struct {
     ngx_str_t                  js;
-    int                        jsId;
+    int                        js_index;
     ngx_array_t               *params;       /* ngx_http_iojs_param_t */
     ngx_str_t                  root;
 } ngx_http_iojs_loc_conf_t;
@@ -136,9 +136,9 @@ ngx_module_t ngx_http_iojs_module = {
 
 typedef struct ngx_http_iojs_ctx_s ngx_http_iojs_ctx_t;
 struct ngx_http_iojs_ctx_s {
-    size_t                subrequestId;
-    int                   jsId;
-    iojsContext          *jsctx;
+    size_t                subrequest_index;
+    int                   js_index;
+    iojsContext          *js_ctx;
     ngx_http_iojs_ctx_t  *main_ctx;
     unsigned              headers_sent:1;
     unsigned              run_post_subrequest:1;
@@ -161,7 +161,7 @@ ngx_http_iojs_cleanup_context(void *data)
 
 
 ngx_inline static ngx_http_iojs_ctx_t *
-ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
+ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
     ngx_http_iojs_ctx_t       *ctx;
     ngx_http_iojs_loc_conf_t  *conf;
     //ngx_uint_t                 i, j;
@@ -175,7 +175,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
         return NULL;
     }
 
-    if (id == 0) {
+    if (index == 0) {
         ngx_pool_cleanup_t  *cln;
 
         cln = ngx_pool_cleanup_add(r->pool, 0);
@@ -206,29 +206,29 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t id) {
             //iojsParams = NULL;
         }
 
-        ctx->jsId = conf->jsId;
-        ctx->jsctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
-        ctx->subrequestId = 0;
+        ctx->js_index = conf->js_index;
+        ctx->js_ctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
+        ctx->subrequest_index = 0;
         ctx->main_ctx = ctx;
 
-        if (ctx->jsctx == NULL) {
+        if (ctx->js_ctx == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "Failed to create iojs context");
         }
 
         cln->handler = ngx_http_iojs_cleanup_context;
-        cln->data = ctx->jsctx;
+        cln->data = ctx->js_ctx;
     } else {
         ngx_http_iojs_ctx_t  *main_ctx;
 
         main_ctx = ngx_http_get_module_ctx(r->main, ngx_http_iojs_module);
 
-        if (main_ctx == NULL || main_ctx->jsctx == NULL) {
+        if (main_ctx == NULL || main_ctx->js_ctx == NULL) {
             return NULL;
         }
 
-        ctx->jsctx = main_ctx->jsctx;
-        ctx->subrequestId = id;
+        ctx->js_ctx = main_ctx->js_ctx;
+        ctx->subrequest_index = index;
         ctx->main_ctx = main_ctx;
     }
 
@@ -244,20 +244,96 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
     cmd = iojsFromJSRecv();
     if (cmd != NULL) {
+        iojsContext *js_ctx = cmd->jsCtx;
+        ngx_http_request_t *r = js_ctx == NULL ?
+                NULL
+                :
+                (ngx_http_request_t *)js_ctx->r;
+
         switch (cmd->type) {
             case IOJS_READ_REQUEST_BODY:
+                if (js_ctx == NULL || js_ctx->done)
+                    break;
                 break;
 
             case IOJS_RESPONSE_HEADERS:
+                if (js_ctx == NULL || js_ctx->done)
+                    break;
+
+                dd("Sending response headers");
+
+                if (ngx_http_send_header(r->main) != NGX_OK) {
+                    ngx_http_finalize_request(r, NGX_ERROR);
+                    return;
+                }
+
                 break;
 
             case IOJS_RESPONSE_BODY:
+                if (js_ctx == NULL || js_ctx->done)
+                    break;
+
+                if (cmd->data) {
+                    iojsString          *s = (iojsString *)cmd->data;
+
+                    ngx_buf_t           *b;
+                    ngx_chain_t          out;
+                    ngx_http_request_t  *ar; /* active request */
+                    ngx_int_t            rc;
+
+                    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + s->len);
+                    if (b == NULL) {
+                        iojsFromJSFree(cmd);
+                        ngx_http_finalize_request(r, NGX_ERROR);
+                        return;
+                    }
+
+                    b->start = (u_char *)&b[1];
+                    (void)ngx_copy(b->start, s->data, s->len);
+                    b->pos = b->start;
+                    b->last = b->end = b->start + s->len;
+                    b->temporary = 1;
+                    b->last_in_chain = 1;
+                    b->flush = 1;
+                    b->last_buf = 0;
+
+                    out.buf = b;
+                    out.next = NULL;
+
+                    dd("Sending response chunk (len: %zd)", s->len);
+
+                    ar = r->connection->data;
+
+                    if (ar != r->main) {
+                        /* bypass ngx_http_postpone_filter_module */
+                        r->connection->data = r->main;
+                        rc = ngx_http_output_filter(r->main, &out);
+                        r->connection->data = ar;
+                    } else {
+                        rc = ngx_http_output_filter(r->main, &out);
+                    }
+
+                    if (rc == NGX_ERROR) {
+                        iojsFromJSFree(cmd);
+                        ngx_http_finalize_request(r, NGX_ERROR);
+                        return;
+                    }
+                } else {
+                    // Got end of response mark, finalize request.
+                    js_ctx->done = 1;
+                    iojsContextAttemptFree(js_ctx);
+                    ngx_http_finalize_request(r, NGX_OK);
+                }
                 break;
 
             case IOJS_SUBREQUEST_HEADERS:
+                if (js_ctx == NULL || !js_ctx->done)
+                    break;
                 break;
 
             case IOJS_SUBREQUEST_BODY:
+                if (js_ctx == NULL || !js_ctx->done)
+                    break;
                 break;
 
             case IOJS_LOG:
@@ -267,7 +343,6 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
         }
 
-        fprintf(stderr, "Recv from JS: %d\n", cmd->type);
         iojsFromJSFree(cmd);
     }
 }
@@ -313,13 +388,13 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
 
         dd("add script `%s`", (&xlcf->js)->data);
 
-        xlcf->jsId = i;
+        xlcf->js_index = i;
 
         script = &scripts[i];
         filename = &xlcf->js;
         script->filename = (char *)filename->data;
         script->len = filename->len;
-        script->id = i;
+        script->index = i;
     }
 
     rc = iojsStart(scripts, jsLocations.nelts, &fd);
@@ -551,13 +626,10 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    dd("aaaa");
-
-    rc = iojsCall(ctx->jsId, ctx->jsctx);
+    rc = iojsCall(ctx->js_index, ctx->js_ctx);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    dd("aaaa222");
 
     r->main->count++;
 

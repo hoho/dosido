@@ -3658,16 +3658,15 @@ Environment* CreateEnvironment(Isolate* isolate,
 }
 
 
-// We'll store loaded environment here.
-Environment *iojsEnv = NULL;
-
-
 static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   Environment *env = Environment::GetCurrent(args.GetIsolate());
 
   int32_t _type = args[0]->ToInteger(env->isolate())->Int32Value();
   iojsByJSCommandType type;
   Local<v8::External> payload = Local<v8::External>::Cast(args[1]);
+  Local<Value> arg = args[2];
+  bool isstr;
+  Local<String> strval;
 
   int sz = 0;
   type = static_cast<iojsByJSCommandType>(_type);
@@ -3683,6 +3682,11 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
 
     case BY_JS_RESPONSE_BODY:
       sz = sizeof(iojsFromJS);
+      isstr = arg->IsString();
+      if (isstr) {
+        strval = arg->ToString();
+        sz += sizeof(iojsString) + strval->Utf8Length();
+      }
       break;
 
     case BY_JS_SUBREQUEST:
@@ -3693,19 +3697,35 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   if (sz == 0)
     return;
 
-  iojsFromJS *cmd = static_cast<iojsFromJS *>(malloc(sz));
+  iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
+  cmd->jsCtx = reinterpret_cast<iojsContext *>(payload->Value());
 
   switch (type) {
     case BY_JS_READ_REQUEST_BODY:
       cmd->type = IOJS_READ_REQUEST_BODY;
-      cmd->data = static_cast<void *>(payload->Value());
       iojsFromJSSend(cmd);
       break;
 
     case BY_JS_RESPONSE_HEADERS:
+      cmd->type = IOJS_RESPONSE_HEADERS;
+      iojsFromJSSend(cmd);
       break;
 
     case BY_JS_RESPONSE_BODY:
+      cmd->type = IOJS_RESPONSE_BODY;
+
+      if (isstr) {
+        cmd->data = &cmd[1];
+        iojsString *s = reinterpret_cast<iojsString *>(cmd->data);
+        s->len = strval->Utf8Length();
+        s->data = reinterpret_cast<char *>(&cmd[1]) + sizeof(iojsString);
+        Utf8Value chunk(env->isolate(), strval);
+        memcpy(s->data, *chunk, s->len);
+      } else {
+        cmd->data = nullptr;
+      }
+
+      iojsFromJSSend(cmd);
       break;
 
     case BY_JS_SUBREQUEST:
@@ -3714,23 +3734,18 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
 }
 
 
-void CallLoadedScript(Environment *env, int id) {
+void CallLoadedScript(Environment *env, int index, iojsContext *jsCtx) {
   HandleScope handle_scope(env->isolate());
 
-  TryCatch try_catch;
-
   Local<Array>  scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
-  Local<Function> f = Local<Function>::Cast(scripts->Get(id));
 
   Local<Object> headers = Object::New(env->isolate());
   Local<Function> callback = env->NewFunctionTemplate(CallLoadedScriptCallback)->GetFunction();
-  Local<v8::External> payload = v8::External::New(env->isolate(), (void *)0x05);
+  Local<v8::External> payload = v8::External::New(env->isolate(), jsCtx);
 
   Local<Value> args[3] = {headers, callback, payload};
 
-  f->Call(env->context()->Global(), 3, args);
-
-  env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
+  MakeCallback(env, scripts, index, 3, args);
 }
 
 
@@ -3740,11 +3755,13 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
   cmd = iojsToJSRecv();
     
   if (cmd != NULL) {
-    fprintf(stderr, "ToJSRecv %d!!1\n", cmd->type);
-
     switch (cmd->type) {
       case IOJS_CALL:
-        CallLoadedScript(iojsEnv, ((iojsCallData *)cmd)->id);
+        CallLoadedScript(
+            reinterpret_cast<Environment *>(handle->data),
+            reinterpret_cast<iojsCallData *>(cmd)->index,
+            reinterpret_cast<iojsCallData *>(cmd)->jsCtx
+        );
         break;
 
       case IOJS_REQUEST_BODY:
@@ -3768,8 +3785,6 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
 
 void LoadScripts(Environment *env) {
   int ret = 0;
-
-  iojsEnv = env;
 
   HandleScope handle_scope(env->isolate());
 
@@ -3801,7 +3816,7 @@ void LoadScripts(Environment *env) {
 
   for (i = 0; i < iojsScriptsLen; i++) {
     script = &iojsScripts[i];
-    scripts->Set(script->id,
+    scripts->Set(script->index,
                  OneByteString(env->isolate(), script->filename, script->len));
   }
 
@@ -3822,6 +3837,7 @@ void LoadScripts(Environment *env) {
   if (ret)
     goto done;
 
+  iojsCommandPoll.data = env;
   ret = uv_poll_start(&iojsCommandPoll, UV_READABLE, RunIncomingTask);
   if (ret)
     goto done;
@@ -3840,8 +3856,6 @@ done:
 void UnloadScripts(void) {
   if (!iojsLoadedScripts.IsEmpty())
     iojsLoadedScripts.Reset();
-
-  iojsEnv = NULL;
 }
 
 
@@ -3964,11 +3978,7 @@ void iojsClosePipes(void) {
 void
 iojsRunnerThread(void *arg) {
   int argc = 1;
-  char **argv;
-
-  argv = new char*[1];
-  argv[0] = (char*)"dosido";
-
+  char *argv[1] = {(char *)"dosido"};
   node::Start(argc, argv);
 }
 
@@ -4020,7 +4030,7 @@ iojsStart(iojsJS *scripts, size_t len, int *fd) {
 
   uv_barrier_init(&iojsStartBlocker, 2);
 
-  iojsScripts = (iojsJS *)scripts;
+  iojsScripts = reinterpret_cast<iojsJS *>(scripts);
   iojsScriptsLen = len;
   iojsError = -1;
 
@@ -4042,7 +4052,7 @@ error:
 // To call from nginx thread.
 void
 iojsStop(void) {
-  iojsToJS *cmd = (iojsToJS *)malloc(sizeof(iojsToJS));
+  iojsToJS *cmd = reinterpret_cast<iojsToJS *>(malloc(sizeof(iojsToJS)));
   cmd->type = IOJS_EXIT;
   iojsToJSSend(cmd);
   uv_thread_join(&iojsThreadId);
@@ -4056,7 +4066,7 @@ iojsToJSSend(iojsToJS *cmd) {
   ssize_t sz;
   while (sent < (ssize_t)sizeof(cmd)) {
     sz = write(iojsIncomingPipeFd[1],
-               (char *)&cmd + sent,
+               reinterpret_cast<char *>(&cmd) + sent,
                sizeof(cmd) - sent);
     if (sz < 0) {
       fprintf(stderr, "iojsToJSSend fatal error: %d %s\n", errno,
@@ -4074,11 +4084,11 @@ iojsToJS  *iojsCurToJSRecvCmd;
 iojsToJS*
 iojsToJSRecv(void) {
   ssize_t sz = read(iojsIncomingPipeFd[0],
-                    (char *)&iojsCurToJSRecvCmd + iojsCurToJSRecvLen,
+                    reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
                     sizeof(iojsToJS *) - iojsCurToJSRecvLen);
   if (sz > 0) {
     iojsCurToJSRecvLen += sz;
-    if (iojsCurToJSRecvLen == sizeof(iojsToJS*)) {
+    if (iojsCurToJSRecvLen == sizeof(iojsToJS *)) {
       iojsCurToJSRecvLen = 0;
       return iojsCurToJSRecvCmd;
     }
@@ -4095,7 +4105,7 @@ iojsFromJSSend(iojsFromJS *cmd) {
   ssize_t sz;
   while (sent < (ssize_t)sizeof(cmd)) {
     sz = write(iojsOutgoingPipeFd[1],
-               (char *)&cmd + sent,
+               reinterpret_cast<char *>(&cmd) + sent,
                sizeof(cmd) - sent);
     if (sz < 0) {
       fprintf(stderr, "iojsFromJSSend fatal error: %d %s\n", errno,
@@ -4113,11 +4123,11 @@ iojsFromJS  *iojsCurFromJSRecvCmd;
 iojsFromJS*
 iojsFromJSRecv(void) {
   ssize_t sz = read(iojsOutgoingPipeFd[0],
-                    (char *)&iojsCurFromJSRecvCmd + iojsCurFromJSRecvLen,
-                     sizeof(iojsFromJS*) - iojsCurFromJSRecvLen);
+                    reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
+                    sizeof(iojsFromJS *) - iojsCurFromJSRecvLen);
   if (sz > 0) {
     iojsCurFromJSRecvLen += sz;
-    if (iojsCurFromJSRecvLen == sizeof(iojsFromJS*)) {
+    if (iojsCurFromJSRecvLen == sizeof(iojsFromJS *)) {
       iojsCurFromJSRecvLen = 0;
       return iojsCurFromJSRecvCmd;
     }
@@ -4130,7 +4140,6 @@ iojsFromJSRecv(void) {
 // To call from iojs thread.
 void
 iojsToJSFree(iojsToJS *cmd) {
-  fprintf(stderr, "Free ToJS: %p\n", cmd);
   free(cmd);
 }
 
@@ -4138,6 +4147,5 @@ iojsToJSFree(iojsToJS *cmd) {
 // To call from nginx thread.
 void
 iojsFromJSFree(iojsFromJS *cmd) {
-  fprintf(stderr, "Free FromJS: %p\n", cmd);
   free(cmd);
 }
