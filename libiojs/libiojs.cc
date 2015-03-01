@@ -3658,7 +3658,8 @@ Environment* CreateEnvironment(Isolate* isolate,
 }
 
 
-static void PayloadWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data) {
+static void DestroyWeakCallback(const v8::WeakCallbackData<Object,
+                                iojsContext>& data) {
   iojsContext *jsCtx = data.GetParameter();
 
   Persistent<Object> *destroy = static_cast<Persistent<Object> *>(jsCtx->_p);
@@ -3686,7 +3687,7 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
     Local<Object> tmp = Object::New(env->isolate());
     Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
 
-    destroy->SetWeak(jsCtx, PayloadWeakCallback);
+    destroy->SetWeak(jsCtx, DestroyWeakCallback);
     destroy->MarkIndependent();
 
     jsCtx->_p = destroy;
@@ -3772,7 +3773,8 @@ void CallLoadedScript(Environment *env, int index, iojsContext *jsCtx) {
   Local<Array>  scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
 
   Local<Object> headers = Object::New(env->isolate());
-  Local<Function> callback = env->NewFunctionTemplate(CallLoadedScriptCallback)->GetFunction();
+  Local<Function> callback = \
+      env->NewFunctionTemplate(CallLoadedScriptCallback)->GetFunction();
   Local<v8::External> payload = v8::External::New(env->isolate(), jsCtx);
 
   Local<Value> args[3] = {headers, callback, payload};
@@ -4115,9 +4117,11 @@ ssize_t    iojsCurToJSRecvLen = 0;
 iojsToJS  *iojsCurToJSRecvCmd;
 iojsToJS*
 iojsToJSRecv(void) {
-  ssize_t sz = read(iojsIncomingPipeFd[0],
-                    reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
-                    sizeof(iojsToJS *) - iojsCurToJSRecvLen);
+  ssize_t sz = read(
+      iojsIncomingPipeFd[0],
+      reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
+      sizeof(iojsToJS *) - iojsCurToJSRecvLen
+  );
   if (sz > 0) {
     iojsCurToJSRecvLen += sz;
     if (iojsCurToJSRecvLen == sizeof(iojsToJS *)) {
@@ -4154,9 +4158,11 @@ ssize_t      iojsCurFromJSRecvLen = 0;
 iojsFromJS  *iojsCurFromJSRecvCmd;
 iojsFromJS*
 iojsFromJSRecv(void) {
-  ssize_t sz = read(iojsOutgoingPipeFd[0],
-                    reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
-                    sizeof(iojsFromJS *) - iojsCurFromJSRecvLen);
+  ssize_t sz = read(
+      iojsOutgoingPipeFd[0],
+      reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
+      sizeof(iojsFromJS *) - iojsCurFromJSRecvLen
+  );
   if (sz > 0) {
     iojsCurFromJSRecvLen += sz;
     if (iojsCurFromJSRecvLen == sizeof(iojsFromJS *)) {
