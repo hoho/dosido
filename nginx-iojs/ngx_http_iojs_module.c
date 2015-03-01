@@ -236,6 +236,60 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
 }
 
 
+ngx_inline static ngx_int_t
+ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
+                         short last)
+{
+    ngx_buf_t           *b;
+    ngx_chain_t          out;
+    ngx_http_request_t  *ar; /* active request */
+    ngx_int_t            rc;
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + len);
+    if (b == NULL) {
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return NGX_ERROR;
+    }
+
+    if (len) {
+        b->start = (u_char *)&b[1];
+        (void)ngx_copy(b->start, data, len);
+        b->pos = b->start;
+        b->last = b->end = b->start + len;
+        b->temporary = 1;
+    } else{
+        b->start = b->pos = b->last = b->end = NULL;
+    }
+
+    b->last_in_chain = 1;
+    b->flush = 1;
+    b->last_buf = last;
+
+    out.buf = b;
+    out.next = NULL;
+
+    dd("Sending response chunk (len: %zd, last: %d)", len, last);
+
+    ar = r->connection->data;
+
+    if (ar != r->main) {
+        /* bypass ngx_http_postpone_filter_module */
+        r->connection->data = r->main;
+        rc = ngx_http_output_filter(r->main, &out);
+        r->connection->data = ar;
+    } else {
+        rc = ngx_http_output_filter(r->main, &out);
+    }
+
+    if (rc == NGX_ERROR) {
+        ngx_http_finalize_request(r, NGX_ERROR);
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
 static void
 ngx_http_iojs_receive(ngx_event_t *ev)
 {
@@ -274,55 +328,13 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     break;
 
                 if (cmd->data) {
-                    iojsString          *s = (iojsString *)cmd->data;
-
-                    ngx_buf_t           *b;
-                    ngx_chain_t          out;
-                    ngx_http_request_t  *ar; /* active request */
-                    ngx_int_t            rc;
-
-                    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + s->len);
-                    if (b == NULL) {
-                        iojsFromJSFree(cmd);
-                        ngx_http_finalize_request(r, NGX_ERROR);
-                        return;
-                    }
-
-                    b->start = (u_char *)&b[1];
-                    (void)ngx_copy(b->start, s->data, s->len);
-                    b->pos = b->start;
-                    b->last = b->end = b->start + s->len;
-                    b->temporary = 1;
-                    b->last_in_chain = 1;
-                    b->flush = 1;
-                    b->last_buf = 0;
-
-                    out.buf = b;
-                    out.next = NULL;
-
-                    dd("Sending response chunk (len: %zd)", s->len);
-
-                    ar = r->connection->data;
-
-                    if (ar != r->main) {
-                        /* bypass ngx_http_postpone_filter_module */
-                        r->connection->data = r->main;
-                        rc = ngx_http_output_filter(r->main, &out);
-                        r->connection->data = ar;
-                    } else {
-                        rc = ngx_http_output_filter(r->main, &out);
-                    }
-
-                    if (rc == NGX_ERROR) {
-                        iojsFromJSFree(cmd);
-                        ngx_http_finalize_request(r, NGX_ERROR);
-                        return;
-                    }
+                    iojsString  *s = (iojsString *)cmd->data;
+                    ngx_http_iojs_send_chunk(r, s->data, s->len, 0);
                 } else {
                     // Got end of response mark, finalize request.
                     js_ctx->done = 1;
-                    iojsContextAttemptFree(js_ctx);
-                    ngx_http_finalize_request(r, NGX_OK);
+                    ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                    ngx_http_finalize_request(r, NGX_DONE);
                 }
                 break;
 

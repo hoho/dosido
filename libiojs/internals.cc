@@ -25,7 +25,7 @@ iojsContextAttemptFree(iojsContext *jsCtx)
     if (jsCtx == NULL)
         return;
 
-    int refs = jsCtx->afa(&jsCtx->refCount, -1);
+    int64_t refs = jsCtx->afa(&jsCtx->refCount, -1) - 1;
 
     if (refs <= 0) {
         free(jsCtx);

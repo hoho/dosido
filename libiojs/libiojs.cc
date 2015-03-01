@@ -3658,12 +3658,44 @@ Environment* CreateEnvironment(Isolate* isolate,
 }
 
 
+static void PayloadWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data) {
+  iojsContext *jsCtx = data.GetParameter();
+
+  Persistent<Object> *destroy = static_cast<Persistent<Object> *>(jsCtx->_p);
+  destroy->ClearWeak();
+  destroy->Reset();
+  delete destroy;
+  jsCtx->_p = destroy = nullptr;
+
+  iojsContextAttemptFree(jsCtx);
+}
+
+
 static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   Environment *env = Environment::GetCurrent(args.GetIsolate());
 
+  HandleScope scope(env->isolate());
+
   int32_t _type = args[0]->ToInteger(env->isolate())->Int32Value();
-  iojsByJSCommandType type;
   Local<v8::External> payload = Local<v8::External>::Cast(args[1]);
+  iojsContext *jsCtx = reinterpret_cast<iojsContext *>(payload->Value());
+
+  if (_type == 0) {
+    // Destroy indicator. When JavaScript is finished, this object will be
+    // garbage collected and PayloadWeakCallback() will cleanup the context.
+    Local<Object> tmp = Object::New(env->isolate());
+    Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
+
+    destroy->SetWeak(jsCtx, PayloadWeakCallback);
+    destroy->MarkIndependent();
+
+    jsCtx->_p = destroy;
+
+    args.GetReturnValue().Set(*destroy);
+    return;
+  }
+
+  iojsByJSCommandType type;
   Local<Value> arg = args[2];
   bool isstr;
   Local<String> strval;
@@ -3698,7 +3730,7 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
     return;
 
   iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
-  cmd->jsCtx = reinterpret_cast<iojsContext *>(payload->Value());
+  cmd->jsCtx = jsCtx;
 
   switch (type) {
     case BY_JS_READ_REQUEST_BODY:

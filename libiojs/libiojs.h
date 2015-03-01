@@ -42,6 +42,8 @@ typedef struct {
     unsigned                done:1;
     int64_t                 refCount;
     iojsAtomicFetchAdd      afa;
+    void                   *_p; // To hold a persistent handle of destroy
+                                // indicator.
 } iojsContext;
 
 

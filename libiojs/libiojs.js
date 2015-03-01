@@ -103,12 +103,16 @@
 
         module = module.exports;
 
-        var READ_REQUEST_BODY = 1,
+        var INIT_DESTRUCTOR = 0,
+            READ_REQUEST_BODY = 1,
             RESPONSE_HEADERS = 2,
             RESPONSE_BODY = 3,
             SUBREQUEST = 4;
 
         return function(requestHeaders, callback, payload) {
+            // To free iojsContext when this thing is garbage collected.
+            var destroy = callback(INIT_DESTRUCTOR, payload);
+
             var requestBodyRequested = false;
             var headersSent = false;
 
