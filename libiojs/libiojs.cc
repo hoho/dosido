@@ -3672,6 +3672,42 @@ static void DestroyWeakCallback(const v8::WeakCallbackData<Object,
 }
 
 
+static void FreePersistentFunction(void *cmd) {
+  CHECK(cmd != NULL);
+  iojsFromJS *c = reinterpret_cast<iojsFromJS *>(cmd);
+  CHECK(c->data != NULL);
+  Persistent<Function> *f = static_cast<Persistent<Function> *>(c->data);
+  f->Reset();
+  delete f;
+  c->data = NULL;
+}
+
+
+static void FreeSubrequestPersistentFunctions(void *cmd) {
+  CHECK(cmd != NULL);
+  iojsFromJS *c = reinterpret_cast<iojsFromJS *>(cmd);
+
+  CHECK(c->data != NULL);
+  iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(c->data);
+
+  if (sr->srCallback) {
+    Persistent<Function> *f = \
+        static_cast<Persistent<Function> *>(sr->srCallback);
+    f->Reset();
+    delete f;
+    sr->srCallback = NULL;
+  }
+
+  if (sr->chunkCallback) {
+    Persistent<Function> *f = \
+        static_cast<Persistent<Function> *>(sr->chunkCallback);
+    f->Reset();
+    delete f;
+    sr->chunkCallback = NULL;
+  }
+}
+
+
 static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   Environment *env = Environment::GetCurrent(args.GetIsolate());
 
@@ -3731,17 +3767,24 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
     return;
 
   iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
+  IOJS_CHECK_OUT_OF_MEMORY(cmd);
   cmd->jsCtx = jsCtx;
+  cmd->free = NULL;
 
   switch (type) {
     case BY_JS_READ_REQUEST_BODY:
+      CHECK(arg->IsFunction());
       cmd->type = IOJS_READ_REQUEST_BODY;
-      iojsFromJSSend(cmd);
+      {
+        Persistent<Function> *f = \
+            new Persistent<Function>(env->isolate(), Local<Function>::Cast(arg));
+        cmd->data = f;
+        cmd->free = FreePersistentFunction;
+      }
       break;
 
     case BY_JS_RESPONSE_HEADERS:
       cmd->type = IOJS_RESPONSE_HEADERS;
-      iojsFromJSSend(cmd);
       break;
 
     case BY_JS_RESPONSE_BODY:
@@ -3758,12 +3801,143 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
         cmd->data = nullptr;
       }
 
-      iojsFromJSSend(cmd);
       break;
 
     case BY_JS_SUBREQUEST:
+      cmd->type = IOJS_SUBREQUEST;
+      {
+        Local<String> url = args[2]->ToString(); // url.
+        Local<String> method = args[3]->ToString(); // method.
+        Local<Object> headers = args[4]->ToObject(); // headers.
+        Local<String> body;
+
+        CHECK(args[6]->IsFunction());
+        CHECK(args[7]->IsFunction());
+
+        int urlLen = url->Utf8Length();
+        int methodLen = method->Utf8Length();
+        int bodyLen;
+
+        bool noBody = args[5]->IsNull();
+
+        if (noBody) {
+          bodyLen = 0;
+        } else {
+          body = args[5]->ToString();
+          bodyLen = body->Utf8Length();
+        }
+
+        std::vector<std::pair<std::string, std::string>> h;
+        std::vector<std::pair<std::string, std::string>>::reverse_iterator it;
+        Local<Array> names = headers->GetOwnPropertyNames();
+        Local<String> val;
+        uint32_t i;
+        int keyLen;
+        int valLen;
+
+        // XXX: Headers aggregation should probably be done better and more
+        //      efficient. Maybe someday.
+        sz = 0;
+        for (i = names->Length(); i--;) {
+          strval = names->Get(i)->ToString();
+          val = headers->Get(strval)->ToString();
+
+          Utf8Value _key(env->isolate(), strval);
+          Utf8Value _val(env->isolate(), val);
+
+          keyLen = strval->Utf8Length();
+          valLen = val->Utf8Length();
+
+          h.push_back(std::make_pair(
+              std::string(*_key, keyLen),
+              std::string(*_val, valLen)
+          ));
+
+          sz += sizeof(iojsString) + sizeof(iojsString) + keyLen + valLen;
+        }
+
+        sz += urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
+
+        iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
+        IOJS_CHECK_OUT_OF_MEMORY(sr);
+        cmd->data = sr;
+        cmd->free = FreeSubrequestPersistentFunctions;
+
+        // sr callback
+        Persistent<Function> *srCallback = \
+            new Persistent<Function>(env->isolate(),
+                                     Local<Function>::Cast(args[6]));
+        // push chunk callback
+        Persistent<Function> *chunkCallback = \
+            new Persistent<Function>(env->isolate(),
+                                     Local<Function>::Cast(args[7]));
+
+        sr->srCallback = srCallback;
+        sr->chunkCallback = chunkCallback;
+
+        char *ptr = reinterpret_cast<char *>(&sr[1]);
+
+        sr->url.len = urlLen;
+        if (urlLen) {
+          Utf8Value _url(env->isolate(), url);
+          sr->url.data = ptr;
+          memcpy(sr->url.data, *_url, urlLen);
+          ptr += urlLen;
+        } else {
+          sr->url.data = nullptr;
+        }
+
+        sr->method.len = methodLen;
+        if (methodLen) {
+          Utf8Value _method(env->isolate(), method);
+          sr->method.data = ptr;
+          memcpy(sr->method.data, *_method, methodLen);
+          ptr += methodLen;
+        } else {
+          sr->method.data = nullptr;
+        }
+
+        sr->body.len = urlLen;
+        if (bodyLen) {
+          Utf8Value _body(env->isolate(), body);
+          sr->body.data = ptr;
+          memcpy(sr->body.data, *_body, bodyLen);
+          ptr += bodyLen;
+        } else {
+          sr->body.data = nullptr;
+        }
+
+        if (h.size()) {
+          iojsString *harr = reinterpret_cast<iojsString *>(ptr);
+          ptr += sizeof(iojsString) * h.size() * 2;
+          sr->headers = harr;
+
+          i = 0;
+
+          for (it = h.rbegin(); it != h.rend(); ++it) {
+            sz = it->first.length();
+            harr[i].len = sz;
+            harr[i++].data = ptr;
+            memcpy(ptr, it->first.c_str(), sz);
+            ptr += sz;
+
+            sz = it->second.length();
+            harr[i].len = sz;
+            harr[i++].data = ptr;
+            memcpy(ptr, it->second.c_str(), sz);
+            ptr += sz;
+          }
+        }
+      }
       break;
+
+    default:
+      // This should never happen.
+      iojsFromJSFree(cmd);
+      return;
   }
+
+  iojsFromJSSend(cmd);
 }
 
 
@@ -3789,16 +3963,22 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
   cmd = iojsToJSRecv();
     
   if (cmd != NULL) {
+    Environment *env = reinterpret_cast<Environment *>(handle->data);
+    HandleScope scope(env->isolate());
+
     switch (cmd->type) {
       case IOJS_CALL:
         CallLoadedScript(
-            reinterpret_cast<Environment *>(handle->data),
+            env,
             reinterpret_cast<iojsCallData *>(cmd)->index,
             reinterpret_cast<iojsCallData *>(cmd)->jsCtx
         );
         break;
 
       case IOJS_REQUEST_BODY:
+        {
+
+        };
         break;
 
       case IOJS_SUBREQUEST_RESPONSE_HEADERS:
@@ -4185,5 +4365,11 @@ iojsToJSFree(iojsToJS *cmd) {
 // To call from nginx thread.
 void
 iojsFromJSFree(iojsFromJS *cmd) {
+  if (cmd->free != NULL) {
+    cmd->free(cmd);
+  }
+  if (cmd->type == IOJS_SUBREQUEST && cmd->data) {
+    free(cmd->data);
+  }
   free(cmd);
 }

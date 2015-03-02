@@ -28,6 +28,9 @@ iojsContextAttemptFree(iojsContext *jsCtx)
     int64_t refs = jsCtx->afa(&jsCtx->refCount, -1) - 1;
 
     if (refs <= 0) {
+        if (jsCtx->free) {
+            jsCtx->free(jsCtx->jsCallback);
+        }
         free(jsCtx);
     }
 }

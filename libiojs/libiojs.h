@@ -13,8 +13,7 @@ typedef enum {
     IOJS_READ_REQUEST_BODY = 1,
     IOJS_RESPONSE_HEADERS,
     IOJS_RESPONSE_BODY,
-    IOJS_SUBREQUEST_HEADERS,
-    IOJS_SUBREQUEST_BODY,
+    IOJS_SUBREQUEST,
     IOJS_LOG,
     IOJS_EXIT_MAIN
 } iojsFromJSCommandType;
@@ -34,6 +33,7 @@ typedef struct {
 
 
 typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
+typedef void (*iojsFreeFunc)(void *data);
 
 
 typedef struct {
@@ -44,6 +44,8 @@ typedef struct {
     iojsAtomicFetchAdd      afa;
     void                   *_p; // To hold a persistent handle of destroy
                                 // indicator.
+    void                   *jsCallback;
+    iojsFreeFunc            free;
 } iojsContext;
 
 
@@ -51,7 +53,19 @@ typedef struct {
     iojsFromJSCommandType   type;
     iojsContext            *jsCtx;
     void                   *data;
+    iojsFreeFunc            free;
 } iojsFromJS;
+
+
+typedef struct {
+    iojsString      url;
+    iojsString      method;
+    iojsString      body;
+    iojsString     *headers;
+    void           *srCallback;
+    void           *chunkCallback;
+    iojsFreeFunc    free;
+} iojsSubrequest;
 
 
 #ifdef __cplusplus

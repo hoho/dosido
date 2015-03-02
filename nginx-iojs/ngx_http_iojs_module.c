@@ -139,7 +139,6 @@ struct ngx_http_iojs_ctx_s {
     size_t                subrequest_index;
     int                   js_index;
     iojsContext          *js_ctx;
-    ngx_http_iojs_ctx_t  *main_ctx;
     unsigned              headers_sent:1;
     unsigned              run_post_subrequest:1;
     unsigned              refused:1;
@@ -164,6 +163,7 @@ ngx_inline static ngx_http_iojs_ctx_t *
 ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
     ngx_http_iojs_ctx_t       *ctx;
     ngx_http_iojs_loc_conf_t  *conf;
+    iojsContext               *js_ctx;
     //ngx_uint_t                 i, j;
     //ngx_http_iojs_param_t     *params;
     //char                     **iojsParams;
@@ -175,16 +175,32 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
         return NULL;
     }
 
+    ngx_pool_cleanup_t  *cln;
+
+    cln = ngx_pool_cleanup_add(r->pool, 0);
+    if (cln == NULL) {
+        return NULL;
+    }
+
+    dd("context creation");
+
+    js_ctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
+    if (js_ctx == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "Failed to create iojs context");
+        return NULL;
+    }
+
+    js_ctx->jsCallback = js_ctx->free = NULL;
+
+    ctx->js_ctx = js_ctx;
+
+    cln->handler = ngx_http_iojs_cleanup_context;
+    cln->data = js_ctx;
+
+    ctx->subrequest_index = index;
+
     if (index == 0) {
-        ngx_pool_cleanup_t  *cln;
-
-        cln = ngx_pool_cleanup_add(r->pool, 0);
-        if (cln == NULL) {
-            return NULL;
-        }
-
-        dd("context creation");
-
         if (conf->params != NULL && conf->params->nelts > 0) {
             //params = conf->params->elts;
 
@@ -205,31 +221,6 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
         } else {
             //iojsParams = NULL;
         }
-
-        ctx->js_index = conf->js_index;
-        ctx->js_ctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
-        ctx->subrequest_index = 0;
-        ctx->main_ctx = ctx;
-
-        if (ctx->js_ctx == NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "Failed to create iojs context");
-        }
-
-        cln->handler = ngx_http_iojs_cleanup_context;
-        cln->data = ctx->js_ctx;
-    } else {
-        ngx_http_iojs_ctx_t  *main_ctx;
-
-        main_ctx = ngx_http_get_module_ctx(r->main, ngx_http_iojs_module);
-
-        if (main_ctx == NULL || main_ctx->js_ctx == NULL) {
-            return NULL;
-        }
-
-        ctx->js_ctx = main_ctx->js_ctx;
-        ctx->subrequest_index = index;
-        ctx->main_ctx = main_ctx;
     }
 
     return ctx;
@@ -308,6 +299,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
             case IOJS_READ_REQUEST_BODY:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
+
                 break;
 
             case IOJS_RESPONSE_HEADERS:
@@ -338,14 +330,12 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 }
                 break;
 
-            case IOJS_SUBREQUEST_HEADERS:
-                if (js_ctx == NULL || !js_ctx->done)
+            case IOJS_SUBREQUEST:
+                if (js_ctx == NULL || js_ctx->done)
                     break;
-                break;
-
-            case IOJS_SUBREQUEST_BODY:
-                if (js_ctx == NULL || !js_ctx->done)
-                    break;
+                {
+                    //iojsSubrequest *sr = (iojsSubrequest *)cmd->data;
+                }
                 break;
 
             case IOJS_LOG:

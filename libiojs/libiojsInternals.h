@@ -11,6 +11,9 @@
 #include "node_natives.h"
 #include "v8.h"
 
+#include <string>
+#include <vector>
+
 
 typedef enum {
     IOJS_CALL = 1,
