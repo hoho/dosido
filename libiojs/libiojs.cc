@@ -303,8 +303,8 @@ DestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
 }
 
 
-static void
-FreePersistentFunction(void *fn)
+static inline void
+iojsFreePersistentFunction(void *fn)
 {
     CHECK(fn != NULL);
     Persistent<Function> *f = static_cast<Persistent<Function> *>(fn);
@@ -314,22 +314,14 @@ FreePersistentFunction(void *fn)
 
 
 static void
-FreeSubrequestData(void *sr)
-{
-    if (sr != NULL)
-        free(sr);
-}
-
-
-static void
-CallJSCallback(Environment *env, void *cb, int what, void *arg)
+iojsCallJSCallback(Environment *env, void *cb, int what, void *arg)
 {
 
 }
 
 
 static void
-CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
+iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 {
     Environment *env = Environment::GetCurrent(args.GetIsolate());
 
@@ -485,7 +477,7 @@ CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                 iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
                 IOJS_CHECK_OUT_OF_MEMORY(sr);
                 cmd->data = sr;
-                cmd->free = FreeSubrequestData;
+                cmd->free = free;
 
                 // sr callback
                 Persistent<Function> *srCallback = new Persistent<Function>(
@@ -560,8 +552,8 @@ CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 }
 
 
-void
-CallLoadedScript(Environment *env, int index, iojsContext *jsCtx)
+static inline void
+iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx)
 {
     HandleScope handle_scope(env->isolate());
 
@@ -569,7 +561,7 @@ CallLoadedScript(Environment *env, int index, iojsContext *jsCtx)
 
     Local<Object> headers = Object::New(env->isolate());
     Local<Function> callback = \
-            env->NewFunctionTemplate(CallLoadedScriptCallback)->GetFunction();
+            env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
     Local<v8::External> payload = v8::External::New(env->isolate(), jsCtx);
 
     Local<Value> args[3] = {headers, callback, payload};
@@ -591,7 +583,7 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
 
         switch (cmd->type) {
             case IOJS_CALL:
-                CallLoadedScript(
+                iojsCallLoadedScript(
                         env,
                         reinterpret_cast<iojsCallCmd *>(cmd)->index,
                         reinterpret_cast<iojsCallCmd *>(cmd)->jsCtx
@@ -601,7 +593,7 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
             case IOJS_CHUNK:
                 {
                     iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
-                    CallJSCallback(env, c->jsCallback, 5, &c->chunk);
+                    iojsCallJSCallback(env, c->jsCallback, 5, &c->chunk);
                 }
                 break;
 
@@ -729,9 +721,17 @@ iojsContextAttemptFree(iojsContext *jsCtx)
     int64_t refs = jsCtx->afa(&jsCtx->refCount, -1) - 1;
 
     if (refs <= 0) {
-        //if (jsCtx->freeCallback) {
-        //    jsCtx->freeCallback(jsCtx->jsCallback);
-        //}
+        if (jsCtx->jsCallback) {
+            if (iojsThreadId == uv_thread_self())
+                // It is safe to free the callback from iojs thread,
+                // this will mostly be the case, because nginx request is
+                // usually completed and finalized before V8 garbage collects
+                // request's data.
+                iojsFreePersistentFunction(jsCtx->jsCallback);
+            else
+                // Otherwise, we need to send free command to iojs.
+                void; // TODO: Implement.
+        }
         free(jsCtx);
     }
 }
