@@ -18,6 +18,8 @@ using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::HandleScope;
 using v8::Local;
+using v8::Null;
+using v8::Number;
 using v8::Object;
 using v8::Persistent;
 using v8::String;
@@ -334,9 +336,44 @@ iojsFreePersistentFunction(void *fn)
 
 
 static void
-iojsCallJSCallback(Environment *env, void *cb, int what, void *arg)
+iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
+                   iojsContext *jsCtx, void *cmd)
 {
+    HandleScope scope(env->isolate());
 
+    Persistent<Function> *_f = \
+            static_cast<Persistent<Function> *>(jsCtx->jsCallback);
+    Local<Function> f = Local<Function>::New(env->isolate(), *_f);
+    Local<Value> args[2];
+
+    args[0] = Number::New(env->isolate(), what);
+
+    switch (what) {
+        case TO_JS_CALLBACK_CHUNK:
+            {
+                iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
+                args[1] = String::NewFromUtf8(env->isolate(),
+                                              c->chunk.data,
+                                              String::kNormalString,
+                                              c->chunk.len);
+                if (c->last) {
+                    f->Call(env->process_object(), 2, args);
+                    args[1] = Null(env->isolate());
+                }
+            }
+            break;
+
+        case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
+            break;
+
+        case TO_JS_CALLBACK_REQUEST_ERROR:
+            break;
+
+        case TO_JS_CALLBACK_RESPONSE_ERROR:
+            break;
+    }
+
+    f->Call(env->process_object(), 2, args);
 }
 
 
@@ -612,8 +649,12 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
 
             case IOJS_CHUNK:
                 {
-                    iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
-                    iojsCallJSCallback(env, c->jsCallback, 5, &c->chunk);
+                    iojsCallJSCallback(
+                            env,
+                            TO_JS_CALLBACK_CHUNK,
+                            reinterpret_cast<iojsChunkCmd *>(cmd)->jsCtx,
+                            cmd
+                    );
                 }
                 break;
 
@@ -780,8 +821,6 @@ iojsCall(int index, iojsContext *jsCtx)
 int
 iojsChunk(iojsContext *jsCtx, char *data, size_t len, short last)
 {
-    fprintf(stderr, "Chunkie\n");
-
     iojsChunkCmd *cmd;
 
     cmd = reinterpret_cast<iojsChunkCmd *>(malloc(sizeof(iojsChunkCmd) + len));
@@ -789,9 +828,9 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len, short last)
 
     cmd->type = IOJS_CHUNK;
     cmd->jsCtx = jsCtx;
-    cmd->jsCallback = jsCtx->jsCallback;
     cmd->chunk.len = len;
     cmd->chunk.data = (char *)&cmd[1];
+    cmd->last = last;
     memcpy(cmd->chunk.data, data, len);
 
     iojsToJSSend((iojsToJS *)cmd);

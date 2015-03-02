@@ -191,7 +191,7 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
         return NULL;
     }
 
-    js_ctx->jsCallback = js_ctx->free = NULL;
+    js_ctx->jsCallback = NULL;
 
     ctx->js_ctx = js_ctx;
 
@@ -282,6 +282,51 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
 
 static void
+ngx_http_iojs_read_request_body(ngx_http_request_t *r)
+{
+    if (r != r->main) { return; }
+
+    ngx_http_iojs_ctx_t  *ctx;
+    ngx_chain_t          *cl;
+    ngx_int_t             rc;
+    iojsString            s;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    if (ctx == NULL) {
+        ngx_http_finalize_request(r, NGX_ERROR);
+        return;
+    }
+
+    dd("Read request body (r: %p)", r);
+
+    if (r->request_body->bufs == NULL) {
+        rc = iojsChunk(ctx->js_ctx, NULL, 0, 1);
+        if (rc) {
+            ngx_http_finalize_request(r, NGX_ERROR);
+            return;
+        }
+    } else {
+        for (cl = r->request_body->bufs; cl; cl = cl->next) {
+            s.data = (char *)cl->buf->pos;
+            s.len = cl->buf->last - cl->buf->pos;
+
+            rc = iojsChunk(ctx->js_ctx,
+                           (char *)cl->buf->pos,
+                           cl->buf->last - cl->buf->pos,
+                           cl->buf->last_buf);
+            if (rc) {
+                ngx_http_finalize_request(r, NGX_ERROR);
+                return;
+            }
+
+            cl->buf->pos = cl->buf->last;
+            cl->buf->file_pos = cl->buf->file_last;
+        }
+    }
+}
+
+
+static void
 ngx_http_iojs_receive(ngx_event_t *ev)
 {
     // Something is available to read.
@@ -289,16 +334,35 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
     cmd = iojsFromJSRecv();
     if (cmd != NULL) {
-        iojsContext *js_ctx = cmd->jsCtx;
-        ngx_http_request_t *r = js_ctx == NULL ?
+        ngx_int_t            rc;
+        iojsContext         *js_ctx = cmd->jsCtx;
+        ngx_http_request_t  *r = js_ctx == NULL ?
                 NULL
                 :
                 (ngx_http_request_t *)js_ctx->r;
 
         switch (cmd->type) {
+            case IOJS_JS_CALLBACK:
+                if (js_ctx == NULL || js_ctx->done || js_ctx->jsCallback)
+                    break;
+
+                js_ctx->jsCallback = cmd->jsCallback;
+                cmd->jsCallback = NULL;
+
+                break;
+
             case IOJS_READ_REQUEST_BODY:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
+
+                rc = ngx_http_read_client_request_body(
+                    r, ngx_http_iojs_read_request_body
+                );
+
+                if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+                    ngx_http_finalize_request(r, NGX_ERROR);
+                    return;
+                }
 
                 break;
 
@@ -399,7 +463,10 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
         script->index = i;
     }
 
-    rc = iojsStart(scripts, jsLocations.nelts, &fd);
+    iojsJSArray s;
+    s.js = scripts;
+    s.len = jsLocations.nelts;
+    rc = iojsStart(&s, &fd);
 
     ngx_array_destroy(&jsLocations);
     ngx_pfree(cycle->pool, scripts);

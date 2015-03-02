@@ -91,16 +91,16 @@
     util.inherits(Subrequest, Readable);
 
     //  Codes to come from this script.
-    var INIT_DESTRUCTOR = 0,
-        READ_REQUEST_BODY = 1,
-        RESPONSE_HEADERS = 2,
-        RESPONSE_BODY = 3,
-        SUBREQUEST = 4,
+    var INIT_DESTRUCTOR = 1,
+        READ_REQUEST_BODY = 2,
+        RESPONSE_HEADERS = 3,
+        RESPONSE_BODY = 4,
+        SUBREQUEST = 5,
     //  Codes to come from nginx.
-        CHUNK = 5,
-        SUBREQUEST_HEADERS = 6,
-        REQUEST_ERROR = 7,
-        RESPONSE_ERROR = 8;
+        CHUNK = 6,
+        SUBREQUEST_HEADERS = 7,
+        REQUEST_ERROR = 8,
+        RESPONSE_ERROR = 9;
 
     return scripts.map(function(filename) {
         filename = Module._resolveFilename(path.resolve(filename), null);
