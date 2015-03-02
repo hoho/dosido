@@ -6,10 +6,9 @@
 #define __LIBIOJSINTERNALS_H__
 
 #include "node.h"
-#include "libiojs.h"
-#include "uv.h"
-#include "node_natives.h"
 #include "v8.h"
+#include "uv.h"
+#include "libiojs.h"
 
 #include <string>
 #include <vector>
@@ -65,17 +64,19 @@ typedef struct {
 } iojsChunkCmd;
 
 
-void
-        iojsClosePipes   (void);
+
+typedef v8::Local<v8::Value> (*ExecuteStringFunc)(node::Environment* env,
+                                                  v8::Handle<v8::String> source,
+                                                  v8::Handle<v8::String> filename);
+typedef void (*ReportExceptionFunc)(node::Environment* env,
+                                    const v8::TryCatch& try_catch);
 
 
+int
+        iojsLoadScripts(node::Environment *env,
+                        ExecuteStringFunc execute, ReportExceptionFunc report);
 void
-        iojsToJSSend     (iojsToJS *cmd);
-void
-        iojsFromJSSend   (iojsFromJS *cmd);
-iojsToJS*
-        iojsToJSRecv     (void);
-void
-        iojsToJSFree     (iojsToJS *cmd);
+        iojsUnloadScripts(void);
+
 
 #endif /* __LIBIOJSINTERNALS_H__ */

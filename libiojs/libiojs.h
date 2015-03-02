@@ -28,6 +28,12 @@ typedef struct {
 
 
 typedef struct {
+    iojsJS      *js;
+    size_t       len;
+} iojsJSArray;
+
+
+typedef struct {
     size_t                  len;
     char                   *data;
 } iojsString;
@@ -72,7 +78,7 @@ extern "C" {
 
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsStart                (iojsJS *scripts, size_t len, int *fd);
+        iojsStart                (iojsJSArray *scripts, int *fd);
 LIBIOJSPUBFUN void LIBIOJSCALL
         iojsStop                 (void);
 

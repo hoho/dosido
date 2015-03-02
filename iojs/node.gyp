@@ -190,8 +190,8 @@
             '../libiojs',
           ],
           'sources': [
+            '../libiojs/node.cc',
             '../libiojs/libiojs.cc',
-            '../libiojs/internals.cc',
             '../libiojs/libiojs.h',
             '../libiojs/libiojsExports.h',
           ],
