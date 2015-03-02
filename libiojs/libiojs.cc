@@ -3672,39 +3672,22 @@ static void DestroyWeakCallback(const v8::WeakCallbackData<Object,
 }
 
 
-static void FreePersistentFunction(void *cmd) {
-  CHECK(cmd != NULL);
-  iojsFromJS *c = reinterpret_cast<iojsFromJS *>(cmd);
-  CHECK(c->data != NULL);
-  Persistent<Function> *f = static_cast<Persistent<Function> *>(c->data);
+static void FreePersistentFunction(void *fn) {
+  CHECK(fn != NULL);
+  Persistent<Function> *f = static_cast<Persistent<Function> *>(fn);
   f->Reset();
   delete f;
-  c->data = NULL;
 }
 
 
-static void FreeSubrequestPersistentFunctions(void *cmd) {
-  CHECK(cmd != NULL);
-  iojsFromJS *c = reinterpret_cast<iojsFromJS *>(cmd);
+static void FreeSubrequestData(void *sr) {
+  if (sr != NULL)
+    free(sr);
+}
 
-  CHECK(c->data != NULL);
-  iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(c->data);
 
-  if (sr->srCallback) {
-    Persistent<Function> *f = \
-        static_cast<Persistent<Function> *>(sr->srCallback);
-    f->Reset();
-    delete f;
-    sr->srCallback = NULL;
-  }
+static void CallJSCallback(Environment *env, void *cb, int what, void *arg) {
 
-  if (sr->chunkCallback) {
-    Persistent<Function> *f = \
-        static_cast<Persistent<Function> *>(sr->chunkCallback);
-    f->Reset();
-    delete f;
-    sr->chunkCallback = NULL;
-  }
 }
 
 
@@ -3741,11 +3724,10 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   type = static_cast<iojsByJSCommandType>(_type);
 
   switch (type) {
+    case BY_JS_INIT_DESTRUCTOR:
     case BY_JS_READ_REQUEST_BODY:
-      sz = sizeof(iojsFromJS);
-      break;
-
     case BY_JS_RESPONSE_HEADERS:
+    case BY_JS_SUBREQUEST:
       sz = sizeof(iojsFromJS);
       break;
 
@@ -3757,10 +3739,6 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
         sz += sizeof(iojsString) + strval->Utf8Length();
       }
       break;
-
-    case BY_JS_SUBREQUEST:
-      sz = sizeof(iojsFromJS);
-      break;
   }
 
   if (sz == 0)
@@ -3769,18 +3747,22 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
   iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
   IOJS_CHECK_OUT_OF_MEMORY(cmd);
   cmd->jsCtx = jsCtx;
+  cmd->data = NULL;
   cmd->free = NULL;
+  cmd->jsCallback = NULL;
 
   switch (type) {
-    case BY_JS_READ_REQUEST_BODY:
+    case BY_JS_INIT_DESTRUCTOR:
       CHECK(arg->IsFunction());
-      cmd->type = IOJS_READ_REQUEST_BODY;
+      cmd->type = IOJS_JS_CALLBACK;
       {
         Persistent<Function> *f = \
             new Persistent<Function>(env->isolate(), Local<Function>::Cast(arg));
-        cmd->data = f;
-        cmd->free = FreePersistentFunction;
+        cmd->jsCallback = f;
       }
+
+    case BY_JS_READ_REQUEST_BODY:
+      cmd->type = IOJS_READ_REQUEST_BODY;
       break;
 
     case BY_JS_RESPONSE_HEADERS:
@@ -3812,7 +3794,6 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
         Local<String> body;
 
         CHECK(args[6]->IsFunction());
-        CHECK(args[7]->IsFunction());
 
         int urlLen = url->Utf8Length();
         int methodLen = method->Utf8Length();
@@ -3861,19 +3842,13 @@ static void CallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args) {
         iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
         IOJS_CHECK_OUT_OF_MEMORY(sr);
         cmd->data = sr;
-        cmd->free = FreeSubrequestPersistentFunctions;
+        cmd->free = FreeSubrequestData;
 
         // sr callback
         Persistent<Function> *srCallback = \
             new Persistent<Function>(env->isolate(),
                                      Local<Function>::Cast(args[6]));
-        // push chunk callback
-        Persistent<Function> *chunkCallback = \
-            new Persistent<Function>(env->isolate(),
-                                     Local<Function>::Cast(args[7]));
-
-        sr->srCallback = srCallback;
-        sr->chunkCallback = chunkCallback;
+        cmd->jsCallback = srCallback;
 
         char *ptr = reinterpret_cast<char *>(&sr[1]);
 
@@ -3959,9 +3934,9 @@ void CallLoadedScript(Environment *env, int index, iojsContext *jsCtx) {
 
 void RunIncomingTask(uv_poll_t *handle, int status, int events) {
   iojsToJS *cmd;
-    
+
   cmd = iojsToJSRecv();
-    
+
   if (cmd != NULL) {
     Environment *env = reinterpret_cast<Environment *>(handle->data);
     HandleScope scope(env->isolate());
@@ -3970,21 +3945,25 @@ void RunIncomingTask(uv_poll_t *handle, int status, int events) {
       case IOJS_CALL:
         CallLoadedScript(
             env,
-            reinterpret_cast<iojsCallData *>(cmd)->index,
-            reinterpret_cast<iojsCallData *>(cmd)->jsCtx
+            reinterpret_cast<iojsCallCmd *>(cmd)->index,
+            reinterpret_cast<iojsCallCmd *>(cmd)->jsCtx
         );
         break;
 
-      case IOJS_REQUEST_BODY:
+      case IOJS_CHUNK:
         {
-
-        };
+          iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
+          CallJSCallback(env, c->jsCallback, 5, &c->chunk);
+        }
         break;
 
-      case IOJS_SUBREQUEST_RESPONSE_HEADERS:
+      case IOJS_REQUEST_ERROR:
         break;
 
-      case IOJS_SUBREQUEST_RESPONSE_DATA:
+      case IOJS_RESPONSE_ERROR:
+        break;
+
+      case IOJS_FREE_CALLBACK:
         break;
 
       case IOJS_EXIT:
@@ -4365,11 +4344,7 @@ iojsToJSFree(iojsToJS *cmd) {
 // To call from nginx thread.
 void
 iojsFromJSFree(iojsFromJS *cmd) {
-  if (cmd->free != NULL) {
-    cmd->free(cmd);
-  }
-  if (cmd->type == IOJS_SUBREQUEST && cmd->data) {
-    free(cmd->data);
-  }
+  if (cmd->free != NULL)
+    cmd->free(cmd->data);
   free(cmd);
 }

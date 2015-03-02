@@ -17,14 +17,16 @@
 
 typedef enum {
     IOJS_CALL = 1,
-    IOJS_REQUEST_BODY,
-    IOJS_SUBREQUEST_RESPONSE_HEADERS,
-    IOJS_SUBREQUEST_RESPONSE_DATA,
+    IOJS_CHUNK,
+    IOJS_REQUEST_ERROR,
+    IOJS_RESPONSE_ERROR,
+    IOJS_FREE_CALLBACK,
     IOJS_EXIT
 } iojsToJSCommandType;
 
 
 typedef enum {
+    BY_JS_INIT_DESTRUCTOR = 0,
     BY_JS_READ_REQUEST_BODY = 1,
     BY_JS_RESPONSE_HEADERS = 2,
     BY_JS_RESPONSE_BODY = 3,
@@ -52,7 +54,15 @@ typedef struct {
     iojsContext  *jsCtx;
     int           index;
     void         *headers;
-} iojsCallData;
+} iojsCallCmd;
+
+
+typedef struct {
+    IOJS_TO_JS_HEAD
+    iojsContext  *jsCtx;
+    void         *jsCallback;
+    iojsString    chunk;
+} iojsChunkCmd;
 
 
 void

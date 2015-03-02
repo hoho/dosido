@@ -10,7 +10,8 @@
 
 
 typedef enum {
-    IOJS_READ_REQUEST_BODY = 1,
+    IOJS_JS_CALLBACK = 0,
+    IOJS_READ_REQUEST_BODY,
     IOJS_RESPONSE_HEADERS,
     IOJS_RESPONSE_BODY,
     IOJS_SUBREQUEST,
@@ -45,7 +46,6 @@ typedef struct {
     void                   *_p; // To hold a persistent handle of destroy
                                 // indicator.
     void                   *jsCallback;
-    iojsFreeFunc            free;
 } iojsContext;
 
 
@@ -54,6 +54,7 @@ typedef struct {
     iojsContext            *jsCtx;
     void                   *data;
     iojsFreeFunc            free;
+    void                   *jsCallback;
 } iojsFromJS;
 
 
@@ -62,9 +63,6 @@ typedef struct {
     iojsString      method;
     iojsString      body;
     iojsString     *headers;
-    void           *srCallback;
-    void           *chunkCallback;
-    iojsFreeFunc    free;
 } iojsSubrequest;
 
 
@@ -90,7 +88,9 @@ LIBIOJSPUBFUN void LIBIOJSCALL
 
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsCall                 (int index, iojsContext *jsCtx);
-
+LIBIOJSPUBFUN int LIBIOJSCALL
+        iojsChunk                (iojsContext *jsCtx, char *data, size_t len,
+                                  short last);
 
 #ifdef __cplusplus
 }

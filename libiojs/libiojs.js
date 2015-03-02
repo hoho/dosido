@@ -90,11 +90,17 @@
     util.inherits(Response, Writable);
     util.inherits(Subrequest, Readable);
 
+    //  Codes to come from this script.
     var INIT_DESTRUCTOR = 0,
         READ_REQUEST_BODY = 1,
         RESPONSE_HEADERS = 2,
         RESPONSE_BODY = 3,
-        SUBREQUEST = 4;
+        SUBREQUEST = 4,
+    //  Codes to come from nginx.
+        CHUNK = 5,
+        SUBREQUEST_HEADERS = 6,
+        REQUEST_ERROR = 7,
+        RESPONSE_ERROR = 8;
 
     return scripts.map(function(filename) {
         filename = Module._resolveFilename(path.resolve(filename), null);
@@ -109,11 +115,26 @@
         module = module.exports;
 
         return function(requestHeaders, callback, payload) {
-            // To free iojsContext when this thing is garbage collected.
-            var destroy = callback(INIT_DESTRUCTOR, payload);
-
             var i = new Request(requestHeaders, callback, payload);
             var o = new Response(callback, payload);
+
+            // To free iojsContext when this thing is garbage collected and
+            // to pass a from-nginx-to-js callback.
+            var destroy = callback(INIT_DESTRUCTOR, payload, function(what, arg) {
+                switch (what) {
+                    case CHUNK:
+                        i.push(arg);
+                        break;
+
+                    case REQUEST_ERROR:
+                        i.emit('error', arg);
+                        break;
+
+                    case RESPONSE_ERROR:
+                        o.emit('error', arg);
+                        break;
+                }
+            });
 
             o.on('finish', function finish() {
                 callback(RESPONSE_BODY, payload, null);
@@ -134,12 +155,21 @@
                     method,
                     headers,
                     body,
-                    function(error, srResponseHeaders) {
-                        sr = new Subrequest(srResponseHeaders, callback);
-                        cb(error, sr);
-                    },
-                    function(chunk) {
-                        if (sr) { sr.push(chunk); }
+                    function(what, arg) {
+                        switch (what) {
+                            case SUBREQUEST_HEADERS:
+                                sr = new Subrequest(arg, callback);
+                                cb(undefined, sr);
+                                break;
+
+                            case REQUEST_ERROR:
+                                cb(arg);
+                                break;
+
+                            case CHUNK:
+                                if (sr) { sr.push(arg); }
+                                break;
+                        }
                     }
                 );
             });
@@ -149,15 +179,14 @@
 
     function Request(headers, callback, payload) {
         var requestBodyRequested = false;
+        var self = this;
 
         this._headers = headers;
 
         Readable.call(this, {
             read: function read() {
                 if (!requestBodyRequested) {
-                    callback(READ_REQUEST_BODY, payload, function(chunk) {
-                        i.push(chunk);
-                    });
+                    callback(READ_REQUEST_BODY, payload);
                     requestBodyRequested = true;
                 }
             }
