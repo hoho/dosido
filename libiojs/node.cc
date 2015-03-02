@@ -34,7 +34,8 @@
 #include "env.h"
 #include "env-inl.h"
 #include "handle_wrap.h"
-#include "req_wrap.h"
+#include "req-wrap.h"
+#include "req-wrap-inl.h"
 #include "string_bytes.h"
 #include "util.h"
 #include "uv.h"
@@ -49,6 +50,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #if defined(_MSC_VER)
 #include <direct.h>
@@ -97,7 +99,8 @@ using v8::Message;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
-using v8::Persistent;
+using v8::Promise;
+using v8::PromiseRejectMessage;
 using v8::PropertyCallbackInfo;
 using v8::String;
 using v8::TryCatch;
@@ -110,6 +113,7 @@ static bool print_eval = false;
 static bool force_repl = false;
 static bool trace_deprecation = false;
 static bool throw_deprecation = false;
+static bool abort_on_uncaught_exception = false;
 static const char* eval_string = nullptr;
 static bool use_debug_agent = false;
 static bool debug_wait_connect = false;
@@ -982,6 +986,37 @@ void SetupNextTick(const FunctionCallbackInfo<Value>& args) {
       FIXED_ONE_BYTE_STRING(args.GetIsolate(), "_setupNextTick"));
 }
 
+void PromiseRejectCallback(PromiseRejectMessage message) {
+  Local<Promise> promise = message.GetPromise();
+  Isolate* isolate = promise->GetIsolate();
+  Local<Value> value = message.GetValue();
+  Local<Integer> event = Integer::New(isolate, message.GetEvent());
+
+  Environment* env = Environment::GetCurrent(isolate);
+  Local<Function> callback = env->promise_reject_function();
+
+  if (value.IsEmpty())
+    value = Undefined(isolate);
+
+  Local<Value> args[] = { event, promise, value };
+  Local<Object> process = env->process_object();
+
+  callback->Call(process, ARRAY_SIZE(args), args);
+}
+
+void SetupPromises(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  Isolate* isolate = env->isolate();
+
+  CHECK(args[0]->IsFunction());
+
+  isolate->SetPromiseRejectCallback(PromiseRejectCallback);
+  env->set_promise_reject_function(args[0].As<Function>());
+
+  env->process_object()->Delete(
+      FIXED_ONE_BYTE_STRING(args.GetIsolate(), "_setupPromises"));
+}
+
 
 Handle<Value> MakeCallback(Environment* env,
                            Handle<Value> recv,
@@ -1030,7 +1065,7 @@ Handle<Value> MakeCallback(Environment* env,
     try_catch.SetVerbose(false);
     env->async_hooks_pre_function()->Call(object, 0, nullptr);
     if (try_catch.HasCaught())
-      FatalError("node:;MakeCallback", "pre hook threw");
+      FatalError("node::MakeCallback", "pre hook threw");
     try_catch.SetVerbose(true);
   }
 
@@ -1487,15 +1522,11 @@ static void GetActiveRequests(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
   Local<Array> ary = Array::New(args.GetIsolate());
-  QUEUE* q = nullptr;
   int i = 0;
 
-  QUEUE_FOREACH(q, env->req_wrap_queue()) {
-    ReqWrap<uv_req_t>* w = ContainerOf(&ReqWrap<uv_req_t>::req_wrap_queue_, q);
-    if (w->persistent().IsEmpty())
-      continue;
-    ary->Set(i++, w->object());
-  }
+  for (auto w : *env->req_wrap_queue())
+    if (w->persistent().IsEmpty() == false)
+      ary->Set(i++, w->object());
 
   args.GetReturnValue().Set(ary);
 }
@@ -1507,13 +1538,11 @@ void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
   Local<Array> ary = Array::New(env->isolate());
-  QUEUE* q = nullptr;
   int i = 0;
 
   Local<String> owner_sym = env->owner_string();
 
-  QUEUE_FOREACH(q, env->handle_wrap_queue()) {
-    HandleWrap* w = ContainerOf(&HandleWrap::handle_wrap_queue_, q);
+  for (auto w : *env->handle_wrap_queue()) {
     if (w->persistent().IsEmpty() || (w->flags_ & HandleWrap::kUnref))
       continue;
     Local<Object> object = w->object();
@@ -1688,23 +1717,21 @@ static const char* name_by_gid(gid_t gid) {
 #endif
 
 
-static uid_t uid_by_name(Handle<Value> value) {
+static uid_t uid_by_name(Isolate* isolate, Handle<Value> value) {
   if (value->IsUint32()) {
     return static_cast<uid_t>(value->Uint32Value());
   } else {
-    // TODO(trevnorris): Fix to not use GetCurrent().
-    node::Utf8Value name(Isolate::GetCurrent(), value);
+    node::Utf8Value name(isolate, value);
     return uid_by_name(*name);
   }
 }
 
 
-static gid_t gid_by_name(Handle<Value> value) {
+static gid_t gid_by_name(Isolate* isolate, Handle<Value> value) {
   if (value->IsUint32()) {
     return static_cast<gid_t>(value->Uint32Value());
   } else {
-    // TODO(trevnorris): Fix to not use GetCurrent().
-    node::Utf8Value name(Isolate::GetCurrent(), value);
+    node::Utf8Value name(isolate, value);
     return gid_by_name(*name);
   }
 }
@@ -1729,7 +1756,7 @@ static void SetGid(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowTypeError("setgid argument must be a number or a string");
   }
 
-  gid_t gid = gid_by_name(args[0]);
+  gid_t gid = gid_by_name(env->isolate(), args[0]);
 
   if (gid == gid_not_found) {
     return env->ThrowError("setgid group id does not exist");
@@ -1748,7 +1775,7 @@ static void SetUid(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowTypeError("setuid argument must be a number or a string");
   }
 
-  uid_t uid = uid_by_name(args[0]);
+  uid_t uid = uid_by_name(env->isolate(), args[0]);
 
   if (uid == uid_not_found) {
     return env->ThrowError("setuid user id does not exist");
@@ -1810,7 +1837,7 @@ static void SetGroups(const FunctionCallbackInfo<Value>& args) {
   gid_t* groups = new gid_t[size];
 
   for (size_t i = 0; i < size; i++) {
-    gid_t gid = gid_by_name(groups_list->Get(i));
+    gid_t gid = gid_by_name(env->isolate(), groups_list->Get(i));
 
     if (gid == gid_not_found) {
       delete[] groups;
@@ -1857,7 +1884,7 @@ static void InitGroups(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowError("initgroups user not found");
   }
 
-  extra_group = gid_by_name(args[1]);
+  extra_group = gid_by_name(env->isolate(), args[1]);
 
   if (extra_group == gid_not_found) {
     if (must_free)
@@ -2580,6 +2607,14 @@ void StopProfilerIdleNotifier(const FunctionCallbackInfo<Value>& args) {
     obj->ForceSet(OneByteString(env->isolate(), str), var, v8::ReadOnly);     \
   } while (0)
 
+#define READONLY_DONT_ENUM_PROPERTY(obj, str, var)                            \
+  do {                                                                        \
+    obj->ForceSet(OneByteString(env->isolate(), str),                         \
+                  var,                                                        \
+                  static_cast<v8::PropertyAttribute>(v8::ReadOnly |           \
+                                                     v8::DontEnum));          \
+  } while (0)
+
 
 void SetupProcessObject(Environment* env,
                         int argc,
@@ -2639,6 +2674,20 @@ void SetupProcessObject(Environment* env,
       versions,
       "modules",
       FIXED_ONE_BYTE_STRING(env->isolate(), node_modules_version));
+
+  // process._promiseRejectEvent
+  Local<Object> promiseRejectEvent = Object::New(env->isolate());
+  READONLY_DONT_ENUM_PROPERTY(process,
+                              "_promiseRejectEvent",
+                              promiseRejectEvent);
+  READONLY_PROPERTY(promiseRejectEvent,
+                    "unhandled",
+                    Integer::New(env->isolate(),
+                                 v8::kPromiseRejectWithNoHandler));
+  READONLY_PROPERTY(promiseRejectEvent,
+                    "handled",
+                    Integer::New(env->isolate(),
+                                 v8::kPromiseHandlerAddedAfterReject));
 
 #if HAVE_OPENSSL
   // Stupid code to slice out the version string.
@@ -2798,6 +2847,7 @@ void SetupProcessObject(Environment* env,
   env->SetMethod(process, "_linkedBinding", LinkedBinding);
 
   env->SetMethod(process, "_setupNextTick", SetupNextTick);
+  env->SetMethod(process, "_setupPromises", SetupPromises);
   env->SetMethod(process, "_setupDomainUse", SetupDomainUse);
 
   // pre-set _events object for faster emit checks
@@ -3061,6 +3111,9 @@ static void ParseArgs(int* argc,
       trace_deprecation = true;
     } else if (strcmp(arg, "--throw-deprecation") == 0) {
       throw_deprecation = true;
+    } else if (strcmp(arg, "--abort-on-uncaught-exception") == 0 ||
+               strcmp(arg, "--abort_on_uncaught_exception") == 0) {
+      abort_on_uncaught_exception = true;
     } else if (strcmp(arg, "--v8-options") == 0) {
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
@@ -3374,7 +3427,22 @@ inline void PlatformInit() {
   sigset_t sigmask;
   sigemptyset(&sigmask);
   sigaddset(&sigmask, SIGUSR1);
-  CHECK_EQ(0, pthread_sigmask(SIG_SETMASK, &sigmask, nullptr));
+  const int err = pthread_sigmask(SIG_SETMASK, &sigmask, nullptr);
+
+  // Make sure file descriptors 0-2 are valid before we start logging anything.
+  for (int fd = STDIN_FILENO; fd <= STDERR_FILENO; fd += 1) {
+    struct stat ignored;
+    if (fstat(fd, &ignored) == 0)
+      continue;
+    // Anything but EBADF means something is seriously wrong.  We don't
+    // have to special-case EINTR, fstat() is not interruptible.
+    if (errno != EBADF)
+      abort();
+    if (fd != open("/dev/null", O_RDWR))
+      abort();
+  }
+
+  CHECK_EQ(err, 0);
 
   // Restore signal dispositions, the parent process may have changed them.
   struct sigaction act;
@@ -3573,6 +3641,30 @@ int EmitExit(Environment* env) {
 }
 
 
+// Just a convenience method
+Environment* CreateEnvironment(Isolate* isolate,
+                               Handle<Context> context,
+                               int argc,
+                               const char* const* argv,
+                               int exec_argc,
+                               const char* const* exec_argv) {
+  Environment* env;
+  Context::Scope context_scope(context);
+
+  env = CreateEnvironment(isolate,
+                          uv_default_loop(),
+                          context,
+                          argc,
+                          argv,
+                          exec_argc,
+                          exec_argv);
+
+  LoadEnvironment(env);
+
+  return env;
+}
+
+
 static void HandleCloseCb(uv_handle_t* handle) {
   Environment* env = reinterpret_cast<Environment*>(handle->data);
   env->FinishHandleCleanup(handle);
@@ -3683,7 +3775,6 @@ int Start(int argc, char** argv) {
   V8::InitializePlatform(new Platform(4));
 
   int code;
-
   V8::Initialize();
 
   // Fetch a reference to the main isolate, so we have a reference to it
@@ -3703,7 +3794,7 @@ int Start(int argc, char** argv) {
         exec_argc,
         exec_argv);
     Context::Scope context_scope(context);
-
+    env->set_using_abort_on_uncaught_exc(abort_on_uncaught_exception);
     // Start debug agent when argv has --debug
     if (use_debug_agent)
       StartDebug(env, debug_wait_connect);

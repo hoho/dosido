@@ -3,11 +3,12 @@
 
 #include "ares.h"
 #include "debug-agent.h"
+#include "handle_wrap.h"
+#include "req-wrap.h"
 #include "tree.h"
 #include "util.h"
 #include "uv.h"
 #include "v8.h"
-#include "queue.h"
 
 #include <stdint.h>
 
@@ -66,6 +67,7 @@ namespace node {
   V(dev_string, "dev")                                                        \
   V(disposed_string, "_disposed")                                             \
   V(domain_string, "domain")                                                  \
+  V(domain_abort_uncaught_exc_string, "_makeCallbackAbortOnUncaught")         \
   V(exchange_string, "exchange")                                              \
   V(idle_string, "idle")                                                      \
   V(irq_string, "irq")                                                        \
@@ -106,6 +108,8 @@ namespace node {
   V(ipv4_string, "IPv4")                                                      \
   V(ipv6_lc_string, "ipv6")                                                   \
   V(ipv6_string, "IPv6")                                                      \
+  V(isalive_string, "isAlive")                                                \
+  V(isclosing_string, "isClosing")                                            \
   V(issuer_string, "issuer")                                                  \
   V(issuercert_string, "issuerCertificate")                                   \
   V(kill_signal_string, "killSignal")                                         \
@@ -140,9 +144,13 @@ namespace node {
   V(onnewsessiondone_string, "onnewsessiondone")                              \
   V(onocspresponse_string, "onocspresponse")                                  \
   V(onread_string, "onread")                                                  \
+  V(onreadstart_string, "onreadstart")                                        \
+  V(onreadstop_string, "onreadstop")                                          \
   V(onselect_string, "onselect")                                              \
+  V(onshutdown_string, "onshutdown")                                          \
   V(onsignal_string, "onsignal")                                              \
   V(onstop_string, "onstop")                                                  \
+  V(onwrite_string, "onwrite")                                                \
   V(output_string, "output")                                                  \
   V(order_string, "order")                                                    \
   V(owner_string, "owner")                                                    \
@@ -224,17 +232,21 @@ namespace node {
   V(context, v8::Context)                                                     \
   V(domain_array, v8::Array)                                                  \
   V(fs_stats_constructor_function, v8::Function)                              \
+  V(jsstream_constructor_template, v8::FunctionTemplate)                      \
   V(module_load_list_array, v8::Array)                                        \
   V(pipe_constructor_template, v8::FunctionTemplate)                          \
   V(process_object, v8::Object)                                               \
+  V(promise_reject_function, v8::Function)                                    \
   V(script_context_constructor_template, v8::FunctionTemplate)                \
   V(script_data_constructor_function, v8::Function)                           \
   V(secure_context_constructor_template, v8::FunctionTemplate)                \
   V(tcp_constructor_template, v8::FunctionTemplate)                           \
   V(tick_callback_function, v8::Function)                                     \
   V(tls_wrap_constructor_function, v8::Function)                              \
+  V(tls_wrap_constructor_template, v8::FunctionTemplate)                      \
   V(tty_constructor_template, v8::FunctionTemplate)                           \
   V(udp_constructor_function, v8::Function)                                   \
+  V(write_wrap_constructor_function, v8::Function)                            \
 
 class Environment;
 
@@ -333,13 +345,12 @@ class Environment {
         : handle_(handle),
           cb_(cb),
           arg_(arg) {
-      QUEUE_INIT(&handle_cleanup_queue_);
     }
 
     uv_handle_t* handle_;
     HandleCleanupCb cb_;
     void* arg_;
-    QUEUE handle_cleanup_queue_;
+    ListNode<HandleCleanup> handle_cleanup_queue_;
   };
 
   static inline Environment* GetCurrent(v8::Isolate* isolate);
@@ -391,6 +402,9 @@ class Environment {
 
   inline bool using_smalloc_alloc_cb() const;
   inline void set_using_smalloc_alloc_cb(bool value);
+
+  inline bool using_abort_on_uncaught_exc() const;
+  inline void set_using_abort_on_uncaught_exc(bool value);
 
   inline bool using_domains() const;
   inline void set_using_domains(bool value);
@@ -453,8 +467,12 @@ class Environment {
     return &debugger_agent_;
   }
 
-  inline QUEUE* handle_wrap_queue() { return &handle_wrap_queue_; }
-  inline QUEUE* req_wrap_queue() { return &req_wrap_queue_; }
+  typedef ListHead<HandleWrap, &HandleWrap::handle_wrap_queue_> HandleWrapQueue;
+  typedef ListHead<ReqWrap<uv_req_t>, &ReqWrap<uv_req_t>::req_wrap_queue_>
+          ReqWrapQueue;
+
+  inline HandleWrapQueue* handle_wrap_queue() { return &handle_wrap_queue_; }
+  inline ReqWrapQueue* req_wrap_queue() { return &req_wrap_queue_; }
 
  private:
   static const int kIsolateSlot = NODE_ISOLATE_SLOT;
@@ -482,13 +500,15 @@ class Environment {
   ares_task_list cares_task_list_;
   bool using_smalloc_alloc_cb_;
   bool using_domains_;
+  bool using_abort_on_uncaught_exc_;
   bool using_asyncwrap_;
   bool printed_error_;
   debugger::Agent debugger_agent_;
 
-  QUEUE handle_wrap_queue_;
-  QUEUE req_wrap_queue_;
-  QUEUE handle_cleanup_queue_;
+  HandleWrapQueue handle_wrap_queue_;
+  ReqWrapQueue req_wrap_queue_;
+  ListHead<HandleCleanup,
+           &HandleCleanup::handle_cleanup_queue_> handle_cleanup_queue_;
   int handle_cleanup_waiting_;
 
   v8::Persistent<v8::External> external_;

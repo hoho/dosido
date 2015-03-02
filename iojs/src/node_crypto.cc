@@ -3,7 +3,7 @@
 #include "node_crypto.h"
 #include "node_crypto_bio.h"
 #include "node_crypto_groups.h"
-#include "tls_wrap.h"  // TLSCallbacks
+#include "tls_wrap.h"  // TLSWrap
 
 #include "async-wrap.h"
 #include "async-wrap-inl.h"
@@ -98,28 +98,28 @@ const char* const root_certs[] = {
 X509_STORE* root_cert_store;
 
 // Just to generate static methods
-template class SSLWrap<TLSCallbacks>;
-template void SSLWrap<TLSCallbacks>::AddMethods(Environment* env,
-                                                Handle<FunctionTemplate> t);
-template void SSLWrap<TLSCallbacks>::InitNPN(SecureContext* sc);
-template SSL_SESSION* SSLWrap<TLSCallbacks>::GetSessionCallback(
+template class SSLWrap<TLSWrap>;
+template void SSLWrap<TLSWrap>::AddMethods(Environment* env,
+                                           Handle<FunctionTemplate> t);
+template void SSLWrap<TLSWrap>::InitNPN(SecureContext* sc);
+template SSL_SESSION* SSLWrap<TLSWrap>::GetSessionCallback(
     SSL* s,
     unsigned char* key,
     int len,
     int* copy);
-template int SSLWrap<TLSCallbacks>::NewSessionCallback(SSL* s,
-                                                       SSL_SESSION* sess);
-template void SSLWrap<TLSCallbacks>::OnClientHello(
+template int SSLWrap<TLSWrap>::NewSessionCallback(SSL* s,
+                                                  SSL_SESSION* sess);
+template void SSLWrap<TLSWrap>::OnClientHello(
     void* arg,
     const ClientHelloParser::ClientHello& hello);
 
 #ifdef OPENSSL_NPN_NEGOTIATED
-template int SSLWrap<TLSCallbacks>::AdvertiseNextProtoCallback(
+template int SSLWrap<TLSWrap>::AdvertiseNextProtoCallback(
     SSL* s,
     const unsigned char** data,
     unsigned int* len,
     void* arg);
-template int SSLWrap<TLSCallbacks>::SelectNextProtoCallback(
+template int SSLWrap<TLSWrap>::SelectNextProtoCallback(
     SSL* s,
     unsigned char** out,
     unsigned char* outlen,
@@ -127,7 +127,7 @@ template int SSLWrap<TLSCallbacks>::SelectNextProtoCallback(
     unsigned int inlen,
     void* arg);
 #endif
-template int SSLWrap<TLSCallbacks>::TLSExtStatusCallback(SSL* s, void* arg);
+template int SSLWrap<TLSWrap>::TLSExtStatusCallback(SSL* s, void* arg);
 
 
 static void crypto_threadid_cb(CRYPTO_THREADID* tid) {
@@ -973,7 +973,7 @@ void SSLWrap<Base>::AddMethods(Environment* env, Handle<FunctionTemplate> t) {
   env->SetProtoMethod(t, "getCurrentCipher", GetCurrentCipher);
   env->SetProtoMethod(t, "endParser", EndParser);
   env->SetProtoMethod(t, "renegotiate", Renegotiate);
-  env->SetProtoMethod(t, "shutdown", Shutdown);
+  env->SetProtoMethod(t, "shutdownSSL", Shutdown);
   env->SetProtoMethod(t, "getTLSTicket", GetTLSTicket);
   env->SetProtoMethod(t, "newSessionDone", NewSessionDone);
   env->SetProtoMethod(t, "setOCSPResponse", SetOCSPResponse);
@@ -1099,15 +1099,9 @@ void SSLWrap<Base>::OnClientHello(void* arg,
 
 
 static bool SafeX509ExtPrint(BIO* out, X509_EXTENSION* ext) {
-  // Only alt_name is escaped at the moment
-  if (OBJ_obj2nid(ext->object) != NID_subject_alt_name)
-    return false;
-
   const X509V3_EXT_METHOD* method = X509V3_EXT_get(ext);
-  if (method == NULL || method->it == NULL)
-    return false;
 
-  if (method->i2v != reinterpret_cast<X509V3_EXT_I2V>(i2v_GENERAL_NAMES))
+  if (method != X509V3_EXT_get_nid(NID_subject_alt_name))
     return false;
 
   const unsigned char* p = ext->value->data;

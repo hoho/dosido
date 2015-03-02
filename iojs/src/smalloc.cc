@@ -472,8 +472,7 @@ const char RetainedAllocInfo::label_[] = "smalloc";
 
 
 RetainedAllocInfo::RetainedAllocInfo(Handle<Value> wrapper) {
-  // TODO(trevnorris): Fix to properly acquire the Isolate.
-  Local<Object> obj = wrapper->ToObject(Isolate::GetCurrent());
+  Local<Object> obj = wrapper.As<Object>();
   length_ = obj->GetIndexedPropertiesExternalArrayDataLength();
   data_ = static_cast<char*>(obj->GetIndexedPropertiesExternalArrayData());
 }
@@ -507,6 +506,56 @@ intptr_t RetainedAllocInfo::GetSizeInBytes() {
 
 RetainedObjectInfo* WrapperInfo(uint16_t class_id, Handle<Value> wrapper) {
   return new RetainedAllocInfo(wrapper);
+}
+
+
+// User facing API.
+
+void Alloc(Isolate* isolate,
+           Handle<Object> obj,
+           size_t length,
+           enum ExternalArrayType type) {
+  Alloc(Environment::GetCurrent(isolate), obj, length, type);
+}
+
+
+void Alloc(Isolate* isolate,
+           Handle<Object> obj,
+           char* data,
+           size_t length,
+           enum ExternalArrayType type) {
+  Alloc(Environment::GetCurrent(isolate), obj, data, length, type);
+}
+
+
+void Alloc(Isolate* isolate,
+           Handle<Object> obj,
+           size_t length,
+           FreeCallback fn,
+           void* hint,
+           enum ExternalArrayType type) {
+  Alloc(Environment::GetCurrent(isolate), obj, length, fn, hint, type);
+}
+
+
+void Alloc(Isolate* isolate,
+           Handle<Object> obj,
+           char* data,
+           size_t length,
+           FreeCallback fn,
+           void* hint,
+           enum ExternalArrayType type) {
+  Alloc(Environment::GetCurrent(isolate), obj, data, length, fn, hint, type);
+}
+
+
+void AllocDispose(Isolate* isolate, Handle<Object> obj) {
+  AllocDispose(Environment::GetCurrent(isolate), obj);
+}
+
+
+bool HasExternalData(Isolate* isolate, Local<Object> obj) {
+  return HasExternalData(Environment::GetCurrent(isolate), obj);
 }
 
 

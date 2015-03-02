@@ -16,8 +16,7 @@ libiojs:
 
 .PHONY: nginx-configure
 nginx-configure:
-	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi
-	cd nginx && ./configure --prefix=/usr/local \
+	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./configure --prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
 		--sbin-path=/usr/local/bin/dosido \
 		--http-log-path=/var/log/dosido/access.log \
@@ -43,7 +42,7 @@ nginx-configure:
 
 .PHONY: nginx
 nginx:
-	$(MAKE) -C nginx
+	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && $(MAKE) -C nginx
 
 
 .PHONY: clean

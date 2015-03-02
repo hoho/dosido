@@ -2,8 +2,9 @@
 #define SRC_ASYNC_WRAP_H_
 
 #include "base-object.h"
-#include "env.h"
 #include "v8.h"
+
+#include <stdint.h>
 
 namespace node {
 
@@ -16,6 +17,7 @@ namespace node {
   V(FSREQWRAP)                                                                \
   V(GETADDRINFOREQWRAP)                                                       \
   V(GETNAMEINFOREQWRAP)                                                       \
+  V(JSSTREAM)                                                                 \
   V(PIPEWRAP)                                                                 \
   V(PROCESSWRAP)                                                              \
   V(QUERYWRAP)                                                                \
@@ -30,6 +32,8 @@ namespace node {
   V(UDPWRAP)                                                                  \
   V(WRITEWRAP)                                                                \
   V(ZLIB)
+
+class Environment;
 
 class AsyncWrap : public BaseObject {
  public:
@@ -47,7 +51,7 @@ class AsyncWrap : public BaseObject {
 
   inline virtual ~AsyncWrap() override = default;
 
-  inline uint32_t provider_type() const;
+  inline ProviderType provider_type() const;
 
   // Only call these within a valid HandleScope.
   v8::Handle<v8::Value> MakeCallback(const v8::Handle<v8::Function> cb,
@@ -62,12 +66,12 @@ class AsyncWrap : public BaseObject {
 
  private:
   inline AsyncWrap();
+  inline bool has_async_queue() const;
 
   // When the async hooks init JS function is called from the constructor it is
   // expected the context object will receive a _asyncQueue object property
   // that will be used to call pre/post in MakeCallback.
-  bool has_async_queue_;
-  ProviderType provider_type_;
+  uint32_t bits_;
 };
 
 }  // namespace node

@@ -1,6 +1,6 @@
 # File System
 
-    Stability: 3 - Stable
+    Stability: 2 - Stable
 
 <!--name=fs-->
 
@@ -29,7 +29,7 @@ Here is the synchronous version:
 
     var fs = require('fs');
 
-    fs.unlinkSync('/tmp/hello')
+    fs.unlinkSync('/tmp/hello');
     console.log('successfully deleted /tmp/hello');
 
 With the asynchronous methods there is no guaranteed ordering. So the
@@ -106,7 +106,8 @@ Synchronous ftruncate(2).
 ## fs.truncate(path, len, callback)
 
 Asynchronous truncate(2). No arguments other than a possible exception are
-given to the completion callback.
+given to the completion callback. A file descriptor can also be passed as the
+first argument. In this case, `fs.ftruncate()` is called.
 
 ## fs.truncateSync(path, len)
 
@@ -517,7 +518,7 @@ The synchronous version of `fs.writeFile`.
   * `flag` {String} default = `'a'`
 * `callback` {Function}
 
-Asynchronously append data to a file, creating the file if it not yet exists.
+Asynchronously append data to a file, creating the file if it does not yet exist.
 `data` can be a string or a buffer.
 
 Example:

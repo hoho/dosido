@@ -1,13 +1,12 @@
 'use strict';
 
-const buffer = process.binding('buffer');
+const binding = process.binding('buffer');
 const smalloc = process.binding('smalloc');
 const util = require('util');
 const alloc = smalloc.alloc;
 const truncate = smalloc.truncate;
 const sliceOnto = smalloc.sliceOnto;
 const kMaxLength = smalloc.kMaxLength;
-var internal = {};
 
 exports.Buffer = Buffer;
 exports.SlowBuffer = SlowBuffer;
@@ -85,7 +84,9 @@ function Buffer(subject, encoding) {
       var prevLen = this.length;
       this.length = len;
       truncate(this, this.length);
-      poolOffset -= (prevLen - len);
+      // Only need to readjust the poolOffset if the allocation is a slice.
+      if (this.parent != undefined)
+        poolOffset -= (prevLen - len);
     }
 
   } else if (subject instanceof Buffer) {
@@ -124,7 +125,7 @@ NativeBuffer.prototype = Buffer.prototype;
 
 
 // add methods to Buffer prototype
-buffer.setupBufferJS(NativeBuffer, internal);
+binding.setupBufferJS(NativeBuffer);
 
 
 // Static methods
@@ -142,7 +143,7 @@ Buffer.compare = function compare(a, b) {
   if (a === b)
     return 0;
 
-  return internal.compare(a, b);
+  return binding.compare(a, b);
 };
 
 
@@ -215,7 +216,7 @@ Buffer.byteLength = function(str, enc) {
       ret = str.length >>> 1;
       break;
     default:
-      ret = internal.byteLength(str, enc);
+      ret = binding.byteLength(str, enc);
   }
   return ret;
 };
@@ -274,7 +275,7 @@ Buffer.prototype.equals = function equals(b) {
   if (this === b)
     return true;
 
-  return internal.compare(this, b) === 0;
+  return binding.compare(this, b) === 0;
 };
 
 
@@ -298,7 +299,7 @@ Buffer.prototype.compare = function compare(b) {
   if (this === b)
     return 0;
 
-  return internal.compare(this, b);
+  return binding.compare(this, b);
 };
 
 
@@ -319,7 +320,7 @@ Buffer.prototype.fill = function fill(val, start, end) {
       val = code;
   }
 
-  internal.fill(this, val, start, end);
+  binding.fill(this, val, start, end);
 
   return this;
 };
@@ -663,7 +664,7 @@ Buffer.prototype.readFloatLE = function readFloatLE(offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkOffset(offset, 4, this.length);
-  return internal.readFloatLE(this, offset);
+  return binding.readFloatLE(this, offset);
 };
 
 
@@ -671,7 +672,7 @@ Buffer.prototype.readFloatBE = function readFloatBE(offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkOffset(offset, 4, this.length);
-  return internal.readFloatBE(this, offset);
+  return binding.readFloatBE(this, offset);
 };
 
 
@@ -679,7 +680,7 @@ Buffer.prototype.readDoubleLE = function readDoubleLE(offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkOffset(offset, 8, this.length);
-  return internal.readDoubleLE(this, offset);
+  return binding.readDoubleLE(this, offset);
 };
 
 
@@ -687,7 +688,7 @@ Buffer.prototype.readDoubleBE = function readDoubleBE(offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkOffset(offset, 8, this.length);
-  return internal.readDoubleBE(this, offset);
+  return binding.readDoubleBE(this, offset);
 };
 
 
@@ -910,7 +911,7 @@ Buffer.prototype.writeFloatLE = function writeFloatLE(val, offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkFloat(this, val, offset, 4);
-  internal.writeFloatLE(this, val, offset);
+  binding.writeFloatLE(this, val, offset);
   return offset + 4;
 };
 
@@ -920,7 +921,7 @@ Buffer.prototype.writeFloatBE = function writeFloatBE(val, offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkFloat(this, val, offset, 4);
-  internal.writeFloatBE(this, val, offset);
+  binding.writeFloatBE(this, val, offset);
   return offset + 4;
 };
 
@@ -930,7 +931,7 @@ Buffer.prototype.writeDoubleLE = function writeDoubleLE(val, offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkFloat(this, val, offset, 8);
-  internal.writeDoubleLE(this, val, offset);
+  binding.writeDoubleLE(this, val, offset);
   return offset + 8;
 };
 
@@ -940,7 +941,7 @@ Buffer.prototype.writeDoubleBE = function writeDoubleBE(val, offset, noAssert) {
   offset = offset >>> 0;
   if (!noAssert)
     checkFloat(this, val, offset, 8);
-  internal.writeDoubleBE(this, val, offset);
+  binding.writeDoubleBE(this, val, offset);
   return offset + 8;
 };
 

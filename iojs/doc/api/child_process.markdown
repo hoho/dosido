@@ -1,6 +1,6 @@
 # Child Process
 
-    Stability: 3 - Stable
+    Stability: 2 - Stable
 
 io.js provides a tri-directional `popen(3)` facility through the
 `child_process` module.
@@ -177,7 +177,7 @@ Example:
 
 ### child.connected
 
-* {Boolean} Set to false after `.disconnect' is called
+* {Boolean} Set to false after `.disconnect` is called
 
 If `.connected` is false, it is no longer possible to send messages.
 
