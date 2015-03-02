@@ -47,10 +47,12 @@ iojsToJSSend(iojsToJS *cmd)
         sz = write(iojsIncomingPipeFd[1],
                    reinterpret_cast<char *>(&cmd) + sent,
                    sizeof(cmd) - sent);
+
         if (sz < 0) {
             fprintf(stderr, "iojsToJSSend fatal error: %d\n", errno);
             abort();
         }
+
         sent += sz;
     }
 }
@@ -67,6 +69,12 @@ iojsToJSRecv(void)
             reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
             sizeof(iojsToJS *) - iojsCurToJSRecvLen
     );
+
+    if (sz < 0) {
+        fprintf(stderr, "iojsToJSRecv fatal error: %d\n", errno);
+        abort();
+    }
+
     if (sz > 0) {
         iojsCurToJSRecvLen += sz;
         if (iojsCurToJSRecvLen == sizeof(iojsToJS *)) {
@@ -89,10 +97,12 @@ iojsFromJSSend(iojsFromJS *cmd)
         sz = write(iojsOutgoingPipeFd[1],
                    reinterpret_cast<char *>(&cmd) + sent,
                    sizeof(cmd) - sent);
+
         if (sz < 0) {
             fprintf(stderr, "iojsFromJSSend fatal error: %d\n", errno);
             abort();
         }
+
         sent += sz;
     }
 }
@@ -109,6 +119,11 @@ iojsFromJSRecv(void)
             reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
             sizeof(iojsFromJS *) - iojsCurFromJSRecvLen
     );
+
+    if (sz < 0) {
+        fprintf(stderr, "iojsFromJSRecv fatal error: %d\n", errno);
+        abort();
+    }
 
     if (sz > 0) {
         iojsCurFromJSRecvLen += sz;
@@ -136,6 +151,11 @@ iojsFromJSFree(iojsFromJS *cmd)
 {
     if (cmd->free != NULL)
         cmd->free(cmd->data);
+
+    if (cmd->jsCallback)
+        // TODO: Send free command to iojs.
+        void;
+
     free(cmd);
 }
 
