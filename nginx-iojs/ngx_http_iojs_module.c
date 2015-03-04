@@ -40,6 +40,10 @@ static ngx_connection_t          jsPipe;
 static ngx_event_t               jsPipeEv;
 static ngx_str_t                 jsArgs = ngx_null_string;
 static ngx_array_t               jsLocations;
+static ngx_atomic_t              subrequestId = 1;
+
+static ngx_str_t                 ngx_http_iojs_content_length_key = \
+                                     ngx_string("Content-Length");
 
 
 static ngx_int_t   ngx_http_iojs_init          (ngx_cycle_t *cycle);
@@ -326,6 +330,182 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
 }
 
 
+static ngx_int_t
+ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
+{
+    ngx_table_elt_t  *h;
+    u_char           *p;
+
+    memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
+
+    sr->headers_in.content_length_n = len;
+
+    if (ngx_list_init(&sr->headers_in.headers, sr->pool, 20,
+                      sizeof(ngx_table_elt_t)) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    h = ngx_list_push(&sr->headers_in.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->key = ngx_http_iojs_content_length_key;
+    h->lowcase_key = ngx_pnalloc(sr->pool, h->key.len);
+    if (h->lowcase_key == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_strlow(h->lowcase_key, h->key.data, h->key.len);
+
+    sr->headers_in.content_length = h;
+
+    p = ngx_palloc(sr->pool, NGX_OFF_T_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->value.data = p;
+
+    h->value.len = ngx_sprintf(h->value.data, "%O", len) - h->value.data;
+
+    h->hash = ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(
+        ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(
+        ngx_hash('c', 'o'), 'n'), 't'), 'e'), 'n'), 't'), '-'), 'l'), 'e'),
+        'n'), 'g'), 't'), 'h');
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_iojs_post_sr(ngx_http_request_t *sr, void *data, ngx_int_t rc)
+{
+    //ngx_http_iojs_ctx_t  *sr_ctx = data;
+
+    dd("post subrequest %ld", rc);
+
+    if (sr != sr->connection->data) {
+        sr->connection->data = sr;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
+{
+    iojsSubrequest              *data;
+    ngx_http_iojs_ctx_t         *sr_ctx;
+    ngx_http_request_t          *sr;
+    ngx_http_post_subrequest_t  *psr;
+    ngx_http_request_body_t     *rb;
+    ngx_buf_t                   *b;
+    //ngx_table_elt_t             *h;
+    ngx_http_core_main_conf_t   *cmcf;
+    ngx_str_t                   sr_url;
+    //ngx_str_t                    sr_querystring;
+    ngx_str_t                   sr_body;
+
+    data = (iojsSubrequest *)cmd->data;
+    if (data == NULL) {
+        return NGX_ERROR;
+    }
+
+    psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+    if (psr == NULL) {
+        return NGX_ERROR;
+    }
+
+    psr->handler = ngx_http_iojs_post_sr;
+
+    sr_url.len = data->url.len;
+    sr_url.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->url);
+    //sr_url.data = (u_char *)data->url.data;
+
+    fprintf(stderr, "uuuuuuuu: %s %zu\n", sr_url.data, sr_url.len);
+
+    if (data->body.len) {
+        sr_body.len = data->body.len;
+        sr_body.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->body);
+        //sr_body.data = (u_char *)data->body.data;
+    } else {
+        memset(&sr_body, 0, sizeof(ngx_str_t));
+    }
+
+    if (ngx_http_subrequest(r->main, &sr_url, /*&sr_querystring*/NULL, &sr,
+                            psr, 0) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    dd("Performing subrequest");
+
+    // Don't inherit parent request variables. Content-Length is
+    // cacheable in proxy module and we don't need Content-Length from
+    // another subrequest.
+    cmcf = ngx_http_get_module_main_conf(sr, ngx_http_core_module);
+
+    sr->variables = ngx_pcalloc(sr->pool, cmcf->variables.nelts
+                                * sizeof(ngx_http_variable_value_t));
+    if (sr->variables == NULL) {
+        return NGX_ERROR;
+    }
+
+    sr->method = NGX_HTTP_GET;
+
+    if (ngx_http_iojs_init_subrequest_headers(sr, sr_body.len) == NGX_ERROR)
+    {
+        return NGX_ERROR;
+    }
+
+    sr_ctx = ngx_http_iojs_create_ctx(sr, ngx_atomic_fetch_add(&subrequestId, 1));
+    if (sr_ctx == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_http_set_ctx(sr, sr_ctx, ngx_http_iojs_module);
+
+    psr->data = sr_ctx;
+
+    sr_ctx->js_ctx->jsCallback = cmd->jsCallback;
+    cmd->jsCallback = NULL;
+
+    if (sr_body.len > 0) {
+        rb = ngx_pcalloc(r->pool, sizeof(ngx_http_request_body_t));
+        if (rb == NULL) {
+            return NGX_ERROR;
+        }
+
+        b = ngx_calloc_buf(r->pool);
+        if (b == NULL) {
+            return NGX_ERROR;
+        }
+
+        rb->bufs = ngx_alloc_chain_link(r->pool);
+        if (rb->bufs == NULL) {
+            return NGX_ERROR;
+        }
+
+        b->temporary = 1;
+        b->start = b->pos = sr_body.data;
+        b->end = b->last = sr_body.data + sr_body.len;
+        b->last_buf = 1;
+        b->last_in_chain = 1;
+
+        rb->bufs->buf = b;
+        rb->bufs->next = NULL;
+        rb->buf = b;
+
+        sr->request_body = rb;
+    }
+
+    return NGX_OK;
+}
+
+
 static void
 ngx_http_iojs_receive(ngx_event_t *ev)
 {
@@ -367,12 +547,12 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
 
             case IOJS_RESPONSE_HEADERS:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->done || r != r->main)
                     break;
 
                 dd("Sending response headers");
 
-                if (ngx_http_send_header(r->main) != NGX_OK) {
+                if (ngx_http_send_header(r) != NGX_OK) {
                     ngx_http_finalize_request(r, NGX_ERROR);
                     return;
                 }
@@ -392,14 +572,18 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     ngx_http_iojs_send_chunk(r, NULL, 0, 1);
                     ngx_http_finalize_request(r, NGX_DONE);
                 }
+
                 break;
 
             case IOJS_SUBREQUEST:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
-                {
-                    //iojsSubrequest *sr = (iojsSubrequest *)cmd->data;
+
+                if (ngx_http_iojs_subrequest(r, cmd) == NGX_ERROR) {
+                    ngx_http_finalize_request(r, NGX_ERROR);
+                    return;
                 }
+
                 break;
 
             case IOJS_LOG:
@@ -523,14 +707,6 @@ ngx_http_iojs_process_headers(ngx_http_request_t *r, ngx_http_iojs_ctx_t *ctx)
 }
 
 
-ngx_inline static ngx_int_t
-ngx_http_iojs_process_sr_body(ngx_http_request_t *r, ngx_http_iojs_ctx_t *ctx,
-                              ngx_str_t *chunk)
-{
-    return NGX_OK;
-}
-
-
 static ngx_int_t
 ngx_http_iojs_header_filter(ngx_http_request_t *r)
 {
@@ -560,7 +736,6 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_http_iojs_ctx_t  *ctx;
     ngx_chain_t          *cl;
     ngx_int_t             rc;
-    ngx_str_t             chunk;
 
     if (r == r->main) {
         // It's a main response, just passing to the next filter.
@@ -569,18 +744,19 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     // It's a subrequest response body. Eating it up and passing to iojs.
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->js_ctx == NULL) {
         return NGX_ERROR;
     }
 
     for (cl = in; cl; cl = cl->next) {
-        chunk.data = cl->buf->pos;
-        chunk.len = cl->buf->last - cl->buf->pos;
-
+        fprintf(stderr, "aaaaaaaa %s\n", cl->buf->pos);
         if (!ctx->refused) {
-            rc = ngx_http_iojs_process_sr_body(r, ctx, &chunk);
+            rc = iojsChunk(ctx->js_ctx,
+                           (char *)cl->buf->pos,
+                           cl->buf->last - cl->buf->pos,
+                           cl->buf->last_buf);
 
-            if (rc == NGX_ERROR) {
+            if (rc) {
                 return NGX_ERROR;
             }
         }
@@ -606,53 +782,6 @@ ngx_http_iojs_postconf(ngx_conf_t *cf)
 
     return NGX_OK;
 }
-
-
-/*
-static void
-ngx_http_iojs_post_request_body(ngx_http_request_t *r)
-{
-    ngx_http_iojs_ctx_t  *ctx;
-//    ngx_chain_t          *cl;
-//    ngx_int_t             rc;
-    //xrltString            s;
-
-    if (r != r->main) { return; }
-
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
-
-    dd("post request body (r: %p)", r);
-
-    if (r->request_body->bufs == NULL) {
-        s.data = NULL;
-        s.len = 0;
-
-        rc = ngx_http_xrlt_transform_body(r, ctx, 0, &s, TRUE, FALSE);
-
-        if (rc == NGX_ERROR) {
-            ngx_http_finalize_request(r, NGX_ERROR);
-
-            return;
-        }
-    } else {
-        for (cl = r->request_body->bufs; cl; cl = cl->next) {
-            s.data = (char *)cl->buf->pos;
-            s.len = cl->buf->last - cl->buf->pos;
-
-            rc = ngx_http_xrlt_transform_body(r, ctx, 0, &s, cl->buf->last_buf,
-                    FALSE);
-
-            if (rc == NGX_ERROR) {
-                ngx_http_finalize_request(r, NGX_ERROR);
-
-                return;
-            }
-
-            cl->buf->pos = cl->buf->last;
-            cl->buf->file_pos = cl->buf->file_last;
-        }
-    }
-}    */
 
 
 static void

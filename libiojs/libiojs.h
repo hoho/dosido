@@ -33,6 +33,7 @@ typedef struct {
 } iojsJSArray;
 
 
+// Should be the same to ngx_str_t structure.
 typedef struct {
     size_t                  len;
     char                   *data;
