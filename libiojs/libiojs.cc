@@ -311,7 +311,7 @@ iojsStop(void)
 
 
 static void
-DestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
+iojsDestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
 {
     iojsContext *jsCtx = data.GetParameter();
 
@@ -357,7 +357,9 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
                                               String::kNormalString,
                                               c->chunk.len);
                 if (c->last) {
-                    f->Call(env->process_object(), 2, args);
+                    // Call the callback in the context of itself.
+                    MakeCallback(env, f, f, 2, args);
+
                     args[1] = Null(env->isolate());
                 }
             }
@@ -373,7 +375,8 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
             break;
     }
 
-    f->Call(env->process_object(), 2, args);
+    // Call the callback in the context of itself.
+    MakeCallback(env, f, f, 2, args);
 }
 
 
@@ -394,7 +397,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         Local<Object> tmp = Object::New(env->isolate());
         Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
 
-        destroy->SetWeak(jsCtx, DestroyWeakCallback);
+        destroy->SetWeak(jsCtx, iojsDestroyWeakCallback);
         destroy->MarkIndependent();
 
         jsCtx->_p = destroy;
@@ -783,15 +786,16 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
     if (refs <= 0) {
         if (jsCtx->jsCallback) {
-            if (iojsThreadId == uv_thread_self())
+            if (iojsThreadId == uv_thread_self()) {
                 // It is safe to free the callback from iojs thread,
                 // this will mostly be the case, because nginx request is
                 // usually completed and finalized before V8 garbage collects
                 // request's data.
                 iojsFreePersistentFunction(jsCtx->jsCallback);
-            else
+            } else {
                 // Otherwise, we need to send free command to iojs.
-                void; // TODO: Implement.
+                // TODO: Implement.
+            }
         }
         free(jsCtx);
     }
