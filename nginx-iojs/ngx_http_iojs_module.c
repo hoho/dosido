@@ -165,7 +165,7 @@ ngx_http_iojs_cleanup_context(void *data)
 
 
 ngx_inline static ngx_http_iojs_ctx_t *
-ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
+ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t sr_index) {
     ngx_http_iojs_ctx_t       *ctx;
     ngx_http_iojs_loc_conf_t  *conf;
     iojsContext               *js_ctx;
@@ -198,14 +198,15 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r, size_t index) {
 
     js_ctx->jsCallback = NULL;
 
+    ctx->js_index = conf->js_index;
     ctx->js_ctx = js_ctx;
 
     cln->handler = ngx_http_iojs_cleanup_context;
     cln->data = js_ctx;
 
-    ctx->subrequest_index = index;
+    ctx->subrequest_index = sr_index;
 
-    if (index == 0) {
+    if (sr_index == 0) {
         if (conf->params != NULL && conf->params->nelts > 0) {
             //params = conf->params->elts;
 
@@ -295,6 +296,7 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
     ngx_chain_t          *cl;
     ngx_int_t             rc;
     iojsString            s;
+    short                 last = 0;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
     if (ctx == NULL) {
@@ -306,28 +308,36 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
 
     if (r->request_body->bufs == NULL) {
         rc = iojsChunk(ctx->js_ctx, NULL, 0, 1);
-        if (rc) {
-            ngx_http_finalize_request(r, NGX_ERROR);
-            return;
-        }
+        last = 1;
+        if (rc)
+            goto error;
     } else {
         for (cl = r->request_body->bufs; cl; cl = cl->next) {
             s.data = (char *)cl->buf->pos;
             s.len = cl->buf->last - cl->buf->pos;
 
+            last = cl->buf->last_buf;
+
             rc = iojsChunk(ctx->js_ctx,
                            (char *)cl->buf->pos,
                            cl->buf->last - cl->buf->pos,
-                           cl->buf->last_buf);
-            if (rc) {
-                ngx_http_finalize_request(r, NGX_ERROR);
-                return;
-            }
+                           last);
+            if (rc)
+                goto error;
 
             cl->buf->pos = cl->buf->last;
             cl->buf->file_pos = cl->buf->file_last;
         }
     }
+
+    if (last)
+        r->count--;
+
+    return;
+
+error:
+    r->count--;
+    ngx_http_finalize_request(r, NGX_ERROR);
 }
 
 
@@ -462,7 +472,8 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         return NGX_ERROR;
     }
 
-    sr_ctx = ngx_http_iojs_create_ctx(sr, ngx_atomic_fetch_add(&subrequestId, 1));
+    sr_ctx = ngx_http_iojs_create_ctx(sr,
+                                      ngx_atomic_fetch_add(&subrequestId, 1));
     if (sr_ctx == NULL) {
         return NGX_ERROR;
     }
