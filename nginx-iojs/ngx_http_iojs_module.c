@@ -10,12 +10,13 @@
 #endif
 
 #include "ddebug.h"
-#include "ngx_string.h"
-#include "ngx_array.h"
 
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+
+#include <ngx_string.h>
+#include <ngx_array.h>
 
 #include <unistd.h>
 #include <libiojs.h>
@@ -74,7 +75,7 @@ ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 
 static ngx_command_t ngx_http_iojs_commands[] = {
-    { ngx_string("iojs_param"),
+    { ngx_string("js_param"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF
                          | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE2,
       ngx_http_iojs_param,
@@ -82,7 +83,7 @@ static ngx_command_t ngx_http_iojs_commands[] = {
       0,
       NULL },
 
-    { ngx_string("iojs_root"),
+    { ngx_string("js_root"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF
                          | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE1,
       ngx_http_iojs_root,
@@ -90,14 +91,14 @@ static ngx_command_t ngx_http_iojs_commands[] = {
       0,
       NULL },
 
-    { ngx_string("iojs_args"),
+    { ngx_string("js_args"),
       NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
       ngx_http_iojs_args,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       NULL },
 
-    { ngx_string("iojs"),
+    { ngx_string("js_pass"),
       NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE1,
       ngx_http_iojs,
       NGX_HTTP_LOC_CONF_OFFSET,
