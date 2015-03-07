@@ -6,6 +6,8 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
+#include <libiojs.h>
+#include <libiojsInternals.h>
 
 
 using node::Environment;
@@ -341,10 +343,40 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 {
     HandleScope scope(env->isolate());
 
-    Persistent<Function> *_f = \
-            static_cast<Persistent<Function> *>(jsCtx->jsCallback);
-    Local<Function> f = Local<Function>::New(env->isolate(), *_f);
     Local<Value> args[2];
+    Persistent<Function> *_f = NULL;
+    Local<Function> f;
+    unsigned isSubrequest;
+
+    switch (what) {
+        case TO_JS_CALLBACK_CHUNK:
+            isSubrequest = reinterpret_cast<iojsChunkCmd *>(cmd)->sr;
+            break;
+
+        case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
+            isSubrequest = 0;
+            break;
+
+        case TO_JS_CALLBACK_REQUEST_ERROR:
+            isSubrequest = 0;
+            break;
+
+        case TO_JS_CALLBACK_RESPONSE_ERROR:
+            isSubrequest = 0;
+            break;
+    }
+
+    if (!isSubrequest && jsCtx->jsCallback) {
+        _f = static_cast<Persistent<Function> *>(jsCtx->jsCallback);
+        f = Local<Function>::New(env->isolate(), *_f);
+    } else if (isSubrequest && jsCtx->jsSubrequestCallback) {
+        _f = static_cast<Persistent<Function> *>(jsCtx->jsSubrequestCallback);
+        f = Local<Function>::New(env->isolate(), *_f);
+    }
+
+    if (_f == NULL) {
+        return;
+    }
 
     args[0] = Number::New(env->isolate(), what);
 
@@ -352,15 +384,19 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
         case TO_JS_CALLBACK_CHUNK:
             {
                 iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
-                args[1] = String::NewFromUtf8(env->isolate(),
-                                              c->chunk.data,
-                                              String::kNormalString,
-                                              c->chunk.len);
-                if (c->last) {
+
+                if (c->chunk.len > 0) {
+                    args[1] = String::NewFromUtf8(env->isolate(),
+                                                  c->chunk.data,
+                                                  String::kNormalString,
+                                                  c->chunk.len);
                     // Call the callback in the context of itself.
                     MakeCallback(env, f, f, 2, args);
+                }
 
+                if (c->last) {
                     args[1] = Null(env->isolate());
+                    MakeCallback(env, f, f, 2, args);
                 }
             }
             break;
@@ -374,9 +410,6 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
         case TO_JS_CALLBACK_RESPONSE_ERROR:
             break;
     }
-
-    // Call the callback in the context of itself.
-    MakeCallback(env, f, f, 2, args);
 }
 
 
@@ -556,6 +589,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     ptr += urlLen;
                 } else {
                     sr->url.data = nullptr;
+                    sr->url.len = 0;
                 }
 
                 sr->method.len = methodLen;
@@ -566,6 +600,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     ptr += methodLen;
                 } else {
                     sr->method.data = nullptr;
+                    sr->method.len = 0;
                 }
 
                 sr->body.len = urlLen;
@@ -576,6 +611,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     ptr += bodyLen;
                 } else {
                     sr->body.data = nullptr;
+                    sr->body.len = 0;
                 }
 
                 if (h.size()) {
@@ -606,6 +642,10 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
             // This should never happen.
             iojsFromJSFree(cmd);
             return;
+    }
+
+    if (cmd->type == IOJS_SUBREQUEST) {
+        fprintf(stderr, "SRSRSRSRRSRSRS\n");
     }
 
     iojsFromJSSend(cmd);
@@ -767,9 +807,10 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
     if (ret == NULL)
         return ret;
 
+    memset(ret, 0, sizeof(iojsContext));
+
     ret->refCount = 1;
     ret->r = r;
-    ret->refused = 0;
     ret->afa = afa;
 
     return ret;
@@ -785,13 +826,16 @@ iojsContextAttemptFree(iojsContext *jsCtx)
     int64_t refs = jsCtx->afa(&jsCtx->refCount, -1) - 1;
 
     if (refs <= 0) {
-        if (jsCtx->jsCallback) {
+        if (jsCtx->jsCallback || jsCtx->jsSubrequestCallback) {
             if (iojsThreadId == uv_thread_self()) {
                 // It is safe to free the callback from iojs thread,
                 // this will mostly be the case, because nginx request is
                 // usually completed and finalized before V8 garbage collects
                 // request's data.
-                iojsFreePersistentFunction(jsCtx->jsCallback);
+                if (jsCtx->jsCallback)
+                    iojsFreePersistentFunction(jsCtx->jsCallback);
+                if (jsCtx->jsSubrequestCallback)
+                    iojsFreePersistentFunction(jsCtx->jsSubrequestCallback);
             } else {
                 // Otherwise, we need to send free command to iojs.
                 // TODO: Implement.
@@ -823,7 +867,8 @@ iojsCall(int index, iojsContext *jsCtx)
 
 
 int
-iojsChunk(iojsContext *jsCtx, char *data, size_t len, short last)
+iojsChunk(iojsContext *jsCtx, char *data, size_t len,
+          unsigned last, unsigned sr)
 {
     iojsChunkCmd *cmd;
 
@@ -835,6 +880,7 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len, short last)
     cmd->chunk.len = len;
     cmd->chunk.data = (char *)&cmd[1];
     cmd->last = last;
+    cmd->sr = sr;
     memcpy(cmd->chunk.data, data, len);
 
     iojsToJSSend((iojsToJS *)cmd);

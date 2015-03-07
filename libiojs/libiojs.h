@@ -53,6 +53,7 @@ typedef struct {
     void                   *_p; // To hold a persistent handle of destroy
                                 // indicator.
     void                   *jsCallback;
+    void                   *jsSubrequestCallback;
 } iojsContext;
 
 
@@ -97,7 +98,7 @@ LIBIOJSPUBFUN int LIBIOJSCALL
         iojsCall                 (int index, iojsContext *jsCtx);
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsChunk                (iojsContext *jsCtx, char *data, size_t len,
-                                  short last);
+                                  unsigned last, unsigned sr);
 
 #ifdef __cplusplus
 }

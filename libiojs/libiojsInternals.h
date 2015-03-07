@@ -69,6 +69,7 @@ typedef struct {
     iojsContext  *jsCtx;
     iojsString    chunk;
     unsigned      last:1;
+    unsigned      sr:1;
 } iojsChunkCmd;
 
 

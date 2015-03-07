@@ -159,15 +159,19 @@
                         switch (what) {
                             case SUBREQUEST_HEADERS:
                                 sr = new Subrequest(arg, callback);
-                                cb(undefined, sr);
+                                cb && cb(undefined, sr);
                                 break;
 
                             case REQUEST_ERROR:
-                                cb(arg);
+                                cb && cb(arg);
                                 break;
 
                             case CHUNK:
-                                if (sr) { sr.push(arg); }
+                                if (!sr) {
+                                    sr = new Subrequest(arg, callback);
+                                    cb && cb(undefined, sr);
+                                }
+                                sr && sr.push(arg);
                                 break;
                         }
                     }
