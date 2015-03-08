@@ -236,17 +236,6 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
     dd("Sending response chunk (len: %zd, last: %d)", len, last);
 
-    //ar = r->connection->data;
-
-    //if (ar != r->main) {
-    //    /* bypass ngx_http_postpone_filter_module */
-    //    r->connection->data = r->main;
-    //    rc = ngx_http_output_filter(r->main, &out);
-    //    r->connection->data = ar;
-    //} else {
-    //    rc = ngx_http_output_filter(r->main, &out);
-    //}
-
     rc = ngx_http_output_filter(r, &out);
 
     if (rc == NGX_ERROR) {
@@ -265,7 +254,7 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
     ngx_chain_t          *cl;
     ngx_int_t             rc;
     iojsString            s;
-    short                 last = 0;
+    unsigned              last = 0;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
     if (ctx == NULL) {
