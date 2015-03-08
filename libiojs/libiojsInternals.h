@@ -41,9 +41,6 @@ typedef enum {
 } iojsToJSCallbackCommandType;
 
 
-#define IOJS_TO_JS_HEAD                                                      \
-    iojsToJSCommandType   type;
-
 #define IOJS_CHECK_OUT_OF_MEMORY(ptr)                                        \
     if (ptr == NULL) {                                                       \
         fprintf(stderr, "Out of memory\n");                                  \
@@ -51,21 +48,19 @@ typedef enum {
     }
 
 
-typedef struct {
-    IOJS_TO_JS_HEAD
+typedef struct _iojsToJS {
+    iojsToJSCommandType   type;
 } iojsToJS;
 
 
-typedef struct {
-    IOJS_TO_JS_HEAD
+typedef struct _iojsCallCmd : _iojsToJS {
     iojsContext  *jsCtx;
     int           index;
     void         *headers;
 } iojsCallCmd;
 
 
-typedef struct {
-    IOJS_TO_JS_HEAD
+typedef struct iojsChunkCmd : _iojsToJS {
     iojsContext  *jsCtx;
     iojsString    chunk;
     unsigned      last:1;
@@ -73,8 +68,7 @@ typedef struct {
 } iojsChunkCmd;
 
 
-typedef struct {
-    IOJS_TO_JS_HEAD
+typedef struct _iojsFreeCallbackCmd : _iojsToJS {
     void  *cb;
 } iojsFreeCallbackCmd;
 

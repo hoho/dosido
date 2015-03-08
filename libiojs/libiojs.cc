@@ -161,7 +161,7 @@ iojsFreeCallback(void *cb)
     cmd->type = IOJS_FREE_CALLBACK;
     cmd->cb = cb;
 
-    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
+    iojsToJSSend(cmd);
 }
 
 
@@ -705,14 +705,12 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 break;
 
             case IOJS_CHUNK:
-                {
-                    iojsCallJSCallback(
-                            env,
-                            TO_JS_CALLBACK_CHUNK,
-                            reinterpret_cast<iojsChunkCmd *>(cmd)->jsCtx,
-                            cmd
-                    );
-                }
+                iojsCallJSCallback(
+                        env,
+                        TO_JS_CALLBACK_CHUNK,
+                        reinterpret_cast<iojsChunkCmd *>(cmd)->jsCtx,
+                        cmd
+                );
                 break;
 
             case IOJS_REQUEST_ERROR:
@@ -880,7 +878,7 @@ iojsCall(int index, iojsContext *jsCtx)
     cmd->jsCtx = jsCtx;
     cmd->index = index;
 
-    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
+    iojsToJSSend(cmd);
 
     return 0;
 }
@@ -903,7 +901,7 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
     cmd->sr = sr;
     memcpy(cmd->chunk.data, data, len);
 
-    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
+    iojsToJSSend(cmd);
 
     return 0;
 }
