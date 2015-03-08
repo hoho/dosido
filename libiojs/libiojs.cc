@@ -617,7 +617,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     sr->method.len = 0;
                 }
 
-                sr->body.len = urlLen;
+                sr->body.len = bodyLen;
                 if (bodyLen) {
                     Utf8Value _body(env->isolate(), body);
                     sr->body.data = ptr;
