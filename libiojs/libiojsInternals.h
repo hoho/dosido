@@ -73,6 +73,11 @@ typedef struct {
 } iojsChunkCmd;
 
 
+typedef struct {
+    IOJS_TO_JS_HEAD
+    void  *cb;
+} iojsFreeCallbackCmd;
+
 
 typedef v8::Local<v8::Value> (*ExecuteStringFunc)(node::Environment* env,
                                                   v8::Handle<v8::String> source,

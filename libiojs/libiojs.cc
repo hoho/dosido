@@ -148,6 +148,24 @@ iojsToJSFree(iojsToJS *cmd)
 
 
 // To call from nginx thread.
+static inline void
+iojsFreeCallback(void *cb)
+{
+    iojsFreeCallbackCmd  *cmd;
+
+    cmd = reinterpret_cast<iojsFreeCallbackCmd *>(
+            malloc(sizeof(iojsFreeCallbackCmd))
+    );
+    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+
+    cmd->type = IOJS_FREE_CALLBACK;
+    cmd->cb = cb;
+
+    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
+}
+
+
+// To call from nginx thread.
 void
 iojsFromJSFree(iojsFromJS *cmd)
 {
@@ -155,8 +173,7 @@ iojsFromJSFree(iojsFromJS *cmd)
         cmd->free(cmd->data);
 
     if (cmd->jsCallback)
-        // TODO: Send free command to iojs.
-        void;
+        iojsFreeCallback(cmd->jsCallback);
 
     free(cmd);
 }
@@ -468,10 +485,9 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
     iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
     IOJS_CHECK_OUT_OF_MEMORY(cmd);
+    memset(cmd, 0, sizeof(iojsFromJS));
+
     cmd->jsCtx = jsCtx;
-    cmd->data = NULL;
-    cmd->free = NULL;
-    cmd->jsCallback = NULL;
 
     switch (type) {
         case BY_JS_INIT_DESTRUCTOR:
@@ -706,6 +722,9 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 break;
 
             case IOJS_FREE_CALLBACK:
+                iojsFreePersistentFunction(
+                        reinterpret_cast<iojsFreeCallbackCmd *>(cmd)->cb
+                );
                 break;
 
             case IOJS_EXIT:
@@ -836,7 +855,10 @@ iojsContextAttemptFree(iojsContext *jsCtx)
                     iojsFreePersistentFunction(jsCtx->jsSubrequestCallback);
             } else {
                 // Otherwise, we need to send free command to iojs.
-                // TODO: Implement.
+                if (jsCtx->jsCallback)
+                    iojsFreeCallback(jsCtx->jsCallback);
+                if (jsCtx->jsSubrequestCallback)
+                    iojsFreeCallback(jsCtx->jsSubrequestCallback);
             }
         }
         free(jsCtx);
@@ -858,7 +880,7 @@ iojsCall(int index, iojsContext *jsCtx)
     cmd->jsCtx = jsCtx;
     cmd->index = index;
 
-    iojsToJSSend((iojsToJS *)cmd);
+    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
 
     return 0;
 }
@@ -881,7 +903,7 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
     cmd->sr = sr;
     memcpy(cmd->chunk.data, data, len);
 
-    iojsToJSSend((iojsToJS *)cmd);
+    iojsToJSSend(reinterpret_cast<iojsToJS *>(cmd));
 
     return 0;
 }
