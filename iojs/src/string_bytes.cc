@@ -28,8 +28,7 @@ class ExternString: public ResourceType {
   public:
     ~ExternString() override {
       delete[] data_;
-      int64_t change_in_bytes = -static_cast<int64_t>(length_);
-      isolate()->AdjustAmountOfExternalAllocatedMemory(change_in_bytes);
+      isolate()->AdjustAmountOfExternalAllocatedMemory(-byte_length());
     }
 
     const TypeName* data() const override {
@@ -38,6 +37,10 @@ class ExternString: public ResourceType {
 
     size_t length() const override {
       return length_;
+    }
+
+    int64_t byte_length() const {
+      return length() * sizeof(*data());
     }
 
     static Local<String> NewFromCopy(Isolate* isolate,
@@ -69,7 +72,7 @@ class ExternString: public ResourceType {
                                                                      data,
                                                                      length);
       Local<String> str = String::NewExternal(isolate, h_str);
-      isolate->AdjustAmountOfExternalAllocatedMemory(length);
+      isolate->AdjustAmountOfExternalAllocatedMemory(h_str->byte_length());
 
       return scope.Escape(str);
     }
@@ -260,7 +263,7 @@ bool StringBytes::GetExternalParts(Isolate* isolate,
     const String::ExternalStringResource* ext;
     ext = str->GetExternalStringResource();
     *data = reinterpret_cast<const char*>(ext->data());
-    *len = ext->length();
+    *len = ext->length() * sizeof(*ext->data());
     return true;
   }
 
@@ -276,82 +279,83 @@ size_t StringBytes::Write(Isolate* isolate,
                           int* chars_written) {
   HandleScope scope(isolate);
   const char* data = nullptr;
-  size_t len = 0;
-  bool is_extern = GetExternalParts(isolate, val, &data, &len);
-  size_t extlen = len;
+  size_t nbytes = 0;
+  const bool is_extern = GetExternalParts(isolate, val, &data, &nbytes);
+  const size_t external_nbytes = nbytes;
 
   CHECK(val->IsString() == true);
   Local<String> str = val.As<String>();
-  len = len < buflen ? len : buflen;
 
-  int flags = String::NO_NULL_TERMINATION |
-              String::HINT_MANY_WRITES_EXPECTED;
+  if (nbytes > buflen)
+    nbytes = buflen;
+
+  int flags = String::HINT_MANY_WRITES_EXPECTED |
+              String::NO_NULL_TERMINATION |
+              String::REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case ASCII:
     case BINARY:
     case BUFFER:
-      if (is_extern)
-        memcpy(buf, data, len);
-      else
-        len = str->WriteOneByte(reinterpret_cast<uint8_t*>(buf),
-                                0,
-                                buflen,
-                                flags);
+      if (is_extern && str->IsOneByte()) {
+        memcpy(buf, data, nbytes);
+      } else {
+        uint8_t* const dst = reinterpret_cast<uint8_t*>(buf);
+        nbytes = str->WriteOneByte(dst, 0, buflen, flags);
+      }
       if (chars_written != nullptr)
-        *chars_written = len;
+        *chars_written = nbytes;
       break;
 
     case UTF8:
-      if (is_extern)
-        // TODO(tjfontaine) should this validate invalid surrogate pairs as
-        // well?
-        memcpy(buf, data, len);
-      else
-        len = str->WriteUtf8(buf, buflen, chars_written, WRITE_UTF8_FLAGS);
+      nbytes = str->WriteUtf8(buf, buflen, chars_written, flags);
       break;
 
-    case UCS2:
-      if (is_extern)
-        memcpy(buf, data, len * 2);
-      else
-        len = str->Write(reinterpret_cast<uint16_t*>(buf), 0, buflen, flags);
+    case UCS2: {
+      uint16_t* const dst = reinterpret_cast<uint16_t*>(buf);
+      size_t nchars;
+      if (is_extern && !str->IsOneByte()) {
+        memcpy(buf, data, nbytes);
+        nchars = nbytes / sizeof(*dst);
+      } else {
+        nchars = buflen / sizeof(*dst);
+        nchars = str->Write(dst, 0, nchars, flags);
+        nbytes = nchars * sizeof(*dst);
+      }
       if (IsBigEndian()) {
         // Node's "ucs2" encoding wants LE character data stored in
         // the Buffer, so we need to reorder on BE platforms.  See
         // http://nodejs.org/api/buffer.html regarding Node's "ucs2"
         // encoding specification
-        uint16_t* buf16 = reinterpret_cast<uint16_t*>(buf);
-        for (size_t i = 0; i < len; i++) {
-          buf16[i] = (buf16[i] << 8) | (buf16[i] >> 8);
-        }
+        for (size_t i = 0; i < nchars; i++)
+          dst[i] = dst[i] << 8 | dst[i] >> 8;
       }
       if (chars_written != nullptr)
-        *chars_written = len;
-      len = len * sizeof(uint16_t);
+        *chars_written = nchars;
       break;
+    }
 
     case BASE64:
       if (is_extern) {
-        len = base64_decode(buf, buflen, data, extlen);
+        nbytes = base64_decode(buf, buflen, data, external_nbytes);
       } else {
         String::Value value(str);
-        len = base64_decode(buf, buflen, *value, value.length());
+        nbytes = base64_decode(buf, buflen, *value, value.length());
       }
       if (chars_written != nullptr) {
-        *chars_written = len;
+        *chars_written = nbytes;
       }
       break;
 
     case HEX:
       if (is_extern) {
-        len = hex_decode(buf, buflen, data, extlen);
+        nbytes = hex_decode(buf, buflen, data, external_nbytes);
       } else {
         String::Value value(str);
-        len = hex_decode(buf, buflen, *value, value.length());
+        nbytes = hex_decode(buf, buflen, *value, value.length());
       }
       if (chars_written != nullptr) {
-        *chars_written = len * 2;
+        *chars_written = nbytes;
       }
       break;
 
@@ -360,7 +364,7 @@ size_t StringBytes::Write(Isolate* isolate,
       break;
   }
 
-  return len;
+  return nbytes;
 }
 
 
@@ -754,20 +758,16 @@ Local<Value> StringBytes::Encode(Isolate* isolate,
 Local<Value> StringBytes::Encode(Isolate* isolate,
                                  const uint16_t* buf,
                                  size_t buflen) {
-  const uint16_t* src = buf;
-
   Local<String> val;
+
   if (buflen < EXTERN_APEX) {
     val = String::NewFromTwoByte(isolate,
-                                 src,
+                                 buf,
                                  String::kNormalString,
                                  buflen);
   } else {
-    val = ExternTwoByteString::NewFromCopy(isolate, src, buflen);
+    val = ExternTwoByteString::NewFromCopy(isolate, buf, buflen);
   }
-
-  if (src != buf)
-    delete[] src;
 
   return val;
 }

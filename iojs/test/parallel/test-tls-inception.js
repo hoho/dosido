@@ -1,14 +1,15 @@
-if (!process.versions.openssl) {
-  console.error('Skipping because node compiled without OpenSSL.');
-  process.exit(0);
-}
-
 var common = require('../common');
+var assert = require('assert');
+
+if (!common.hasCrypto) {
+  console.log('1..0 # Skipped: missing crypto');
+  process.exit();
+}
+var tls = require('tls');
+
 var fs = require('fs');
 var path = require('path');
 var net = require('net');
-var tls = require('tls');
-var assert = require('assert');
 
 var options, a, b, portA, portB;
 var gotHello = false;
@@ -28,6 +29,10 @@ a = tls.createServer(options, function (socket) {
   var dest = net.connect(options);
   dest.pipe(socket);
   socket.pipe(dest);
+
+  dest.on('close', function() {
+    socket.destroy();
+  });
 });
 
 // the "target" server

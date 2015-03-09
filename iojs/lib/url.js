@@ -276,7 +276,6 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
     var p = this.port ? ':' + this.port : '';
     var h = this.hostname || '';
     this.host = h + p;
-    this.href += this.host;
 
     // strip [ and ] from the hostname
     // the host field still retains them, though
@@ -353,7 +352,13 @@ function urlFormat(obj) {
   // this way, you can call url_format() on strings
   // to clean up potentially wonky urls.
   if (typeof obj === 'string') obj = urlParse(obj);
-  if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
+
+  else if (typeof obj !== 'object' || obj === null)
+    throw new TypeError("Parameter 'urlObj' must be an object, not " +
+                        obj === null ? 'null' : typeof obj);
+
+  else if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
+
   return obj.format();
 }
 

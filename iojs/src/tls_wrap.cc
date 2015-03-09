@@ -26,7 +26,6 @@ using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::Handle;
-using v8::HandleScope;
 using v8::Integer;
 using v8::Local;
 using v8::Null;
@@ -38,17 +37,14 @@ using v8::Value;
 TLSWrap::TLSWrap(Environment* env,
                  Kind kind,
                  StreamBase* stream,
-                 Handle<Object> stream_obj,
-                 Handle<Object> sc)
-    : SSLWrap<TLSWrap>(env, Unwrap<SecureContext>(sc), kind),
+                 SecureContext* sc)
+    : SSLWrap<TLSWrap>(env, sc, kind),
       StreamBase(env),
       AsyncWrap(env,
                 env->tls_wrap_constructor_function()->NewInstance(),
                 AsyncWrap::PROVIDER_TLSWRAP),
-      sc_(Unwrap<SecureContext>(sc)),
-      sc_handle_(env->isolate(), sc),
+      sc_(sc),
       stream_(stream),
-      stream_handle_(env->isolate(), stream_obj),
       enc_in_(nullptr),
       enc_out_(nullptr),
       clear_in_(nullptr),
@@ -85,9 +81,6 @@ TLSWrap::~TLSWrap() {
   clear_in_ = nullptr;
 
   sc_ = nullptr;
-  sc_handle_.Reset();
-  stream_handle_.Reset();
-  persistent().Reset();
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   sni_context_.Reset();
@@ -134,6 +127,8 @@ void TLSWrap::InitSSL() {
   // Initialize SSL
   enc_in_ = NodeBIO::New();
   enc_out_ = NodeBIO::New();
+  NodeBIO::FromBIO(enc_in_)->AssignEnvironment(env());
+  NodeBIO::FromBIO(enc_out_)->AssignEnvironment(env());
 
   SSL_set_bio(ssl_, enc_in_, enc_out_);
 
@@ -169,6 +164,7 @@ void TLSWrap::InitSSL() {
 
   // Initialize ring for queud clear data
   clear_in_ = new NodeBIO();
+  clear_in_->AssignEnvironment(env());
 }
 
 
@@ -197,9 +193,9 @@ void TLSWrap::Wrap(const FunctionCallbackInfo<Value>& args) {
   });
   CHECK_NE(stream, nullptr);
 
-  TLSWrap* res = new TLSWrap(env, kind, stream, stream_obj, sc);
+  TLSWrap* res = new TLSWrap(env, kind, stream, Unwrap<SecureContext>(sc));
 
-  args.GetReturnValue().Set(res->persistent());
+  args.GetReturnValue().Set(res->object());
 }
 
 
@@ -251,8 +247,6 @@ void TLSWrap::SSLInfoCallback(const SSL* ssl_, int where, int ret) {
   SSL* ssl = const_cast<SSL*>(ssl_);
   TLSWrap* c = static_cast<TLSWrap*>(SSL_get_app_data(ssl));
   Environment* env = c->env();
-  HandleScope handle_scope(env->isolate());
-  Context::Scope context_scope(env->context());
   Local<Object> object = c->object();
 
   if (where & SSL_CB_HANDSHAKE_START) {
@@ -304,16 +298,16 @@ void TLSWrap::EncOut() {
 
   Local<Object> req_wrap_obj =
       env()->write_wrap_constructor_function()->NewInstance();
-  char* storage = new char[sizeof(WriteWrap)];
-  WriteWrap* write_req = new(storage) WriteWrap(env(),
-                                                req_wrap_obj,
-                                                this,
-                                                EncOutCb);
+  WriteWrap* write_req = WriteWrap::New(env(),
+                                        req_wrap_obj,
+                                        this,
+                                        EncOutCb);
 
   uv_buf_t buf[ARRAY_SIZE(data)];
   for (size_t i = 0; i < count; i++)
     buf[i] = uv_buf_init(data[i], size[i]);
   int r = stream_->DoWrite(write_req, buf, count, nullptr);
+  write_req->Dispatched();
 
   // Ignore errors, this should be already handled in js
   if (!r)
@@ -323,6 +317,7 @@ void TLSWrap::EncOut() {
 
 void TLSWrap::EncOutCb(WriteWrap* req_wrap, int status) {
   TLSWrap* wrap = req_wrap->wrap()->Cast<TLSWrap>();
+  req_wrap->Dispose();
 
   // Handle error
   if (status) {
@@ -395,9 +390,6 @@ void TLSWrap::ClearOut() {
   if (eof_)
     return;
 
-  HandleScope handle_scope(env()->isolate());
-  Context::Scope context_scope(env()->context());
-
   CHECK_NE(ssl_, nullptr);
 
   char out[kClearOutChunkSize];
@@ -469,9 +461,6 @@ bool TLSWrap::ClearIn() {
     CHECK_GE(written, 0);
     return true;
   }
-
-  HandleScope handle_scope(env()->isolate());
-  Context::Scope context_scope(env()->context());
 
   // Error or partial write
   int err;
@@ -588,8 +577,6 @@ int TLSWrap::DoWrite(WriteWrap* w,
 
   if (i != count) {
     int err;
-    HandleScope handle_scope(env()->isolate());
-    Context::Scope context_scope(env()->context());
     Local<Value> arg = GetSSLError(written, &err, &error_);
     if (!arg.IsEmpty())
       return UV_EPROTO;
@@ -662,8 +649,6 @@ void TLSWrap::DoRead(ssize_t nread,
       eof_ = true;
     }
 
-    HandleScope handle_scope(env()->isolate());
-    Context::Scope context_scope(env()->context());
     OnRead(nread, nullptr);
     return;
   }
@@ -796,7 +781,6 @@ int TLSWrap::SelectSNIContextCallback(SSL* s, int* ad, void* arg) {
   if (servername == nullptr)
     return SSL_TLSEXT_ERR_OK;
 
-  HandleScope scope(env->isolate());
   // Call the SNI callback and use its return value as context
   Local<Object> object = p->object();
   Local<Value> ctx = object->Get(env->sni_context_string());

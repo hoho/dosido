@@ -24,82 +24,148 @@ function createPool() {
 }
 createPool();
 
+function Buffer(arg) {
+  if (!(this instanceof Buffer)) {
+    // Avoid going through an ArgumentsAdaptorTrampoline in the common case.
+    if (arguments.length > 1)
+      return new Buffer(arg, arguments[1]);
 
-function Buffer(subject, encoding) {
-  if (!(this instanceof Buffer))
-    return new Buffer(subject, encoding);
-
-  if (typeof subject === 'number') {
-    this.length = +subject;
-
-  } else if (typeof subject === 'string') {
-    if (typeof encoding !== 'string' || encoding.length === 0)
-      encoding = 'utf8';
-    this.length = Buffer.byteLength(subject, encoding);
-
-  // Handle Arrays, Buffers, Uint8Arrays or JSON.
-  } else if (subject !== null && typeof subject === 'object') {
-    if (subject.type === 'Buffer' && Array.isArray(subject.data))
-      subject = subject.data;
-    this.length = +subject.length;
-
-  } else {
-    throw new TypeError('must start with number, buffer, array or string');
+    return new Buffer(arg);
   }
 
-  if (this.length > kMaxLength) {
-    throw new RangeError('Attempt to allocate Buffer larger than maximum ' +
-                         'size: 0x' + kMaxLength.toString(16) + ' bytes');
-  }
-
-  if (this.length < 0)
-    this.length = 0;
-  else
-    this.length >>>= 0;  // Coerce to uint32.
-
+  this.length = 0;
   this.parent = undefined;
-  if (this.length <= (Buffer.poolSize >>> 1) && this.length > 0) {
-    if (this.length > poolSize - poolOffset)
-      createPool();
-    this.parent = sliceOnto(allocPool,
-                            this,
-                            poolOffset,
-                            poolOffset + this.length);
-    poolOffset += this.length;
-  } else {
-    alloc(this, this.length);
-  }
 
-  if (typeof subject === 'number') {
+  // Common case.
+  if (typeof(arg) === 'number') {
+    fromNumber(this, arg);
     return;
   }
 
-  if (typeof subject === 'string') {
-    // In the case of base64 it's possible that the size of the buffer
-    // allocated was slightly too large. In this case we need to rewrite
-    // the length to the actual length written.
-    var len = this.write(subject, encoding);
-    // Buffer was truncated after decode, realloc internal ExternalArray
-    if (len !== this.length) {
-      var prevLen = this.length;
-      this.length = len;
-      truncate(this, this.length);
-      // Only need to readjust the poolOffset if the allocation is a slice.
-      if (this.parent != undefined)
-        poolOffset -= (prevLen - len);
-    }
+  // Slightly less common case.
+  if (typeof(arg) === 'string') {
+    fromString(this, arg, arguments.length > 1 ? arguments[1] : 'utf8');
+    return;
+  }
 
-  } else if (subject instanceof Buffer) {
-    subject.copy(this, 0, 0, this.length);
+  // Unusual.
+  fromObject(this, arg);
+}
 
-  } else if (typeof subject.length === 'number' || Array.isArray(subject)) {
-    // Really crappy way to handle Uint8Arrays, but V8 doesn't give a simple
-    // way to access the data from the C++ API.
-    for (var i = 0; i < this.length; i++)
-      this[i] = subject[i];
+function fromNumber(that, length) {
+  allocate(that, length < 0 ? 0 : checked(length) | 0);
+}
+
+function fromString(that, string, encoding) {
+  if (typeof(encoding) !== 'string' || encoding === '')
+    encoding = 'utf8';
+
+  // Assumption: byteLength() return value is always < kMaxLength.
+  var length = byteLength(string, encoding) | 0;
+  allocate(that, length);
+
+  var actual = that.write(string, encoding) | 0;
+  if (actual !== length) {
+    // Fix up for truncated base64 input.  Don't bother returning
+    // the unused two or three bytes to the pool.
+    that.length = actual;
+    truncate(that, actual);
   }
 }
 
+function fromObject(that, object) {
+  if (object instanceof Buffer)
+    return fromBuffer(that, object);
+
+  if (Array.isArray(object))
+    return fromArray(that, object);
+
+  if (object == null)
+    throw new TypeError('must start with number, buffer, array or string');
+
+  if (object.buffer instanceof ArrayBuffer)
+    return fromTypedArray(that, object);
+
+  if (object.length)
+    return fromArrayLike(that, object);
+
+  return fromJsonObject(that, object);
+}
+
+function fromBuffer(that, buffer) {
+  var length = checked(buffer.length) | 0;
+  allocate(that, length);
+  buffer.copy(that, 0, 0, length);
+}
+
+function fromArray(that, array) {
+  var length = checked(array.length) | 0;
+  allocate(that, length);
+  for (var i = 0; i < length; i += 1)
+    that[i] = array[i] & 255;
+}
+
+// Duplicate of fromArray() to keep fromArray() monomorphic.
+function fromTypedArray(that, array) {
+  var length = checked(array.length) | 0;
+  allocate(that, length);
+  // Truncating the elements is probably not what people expect from typed
+  // arrays with BYTES_PER_ELEMENT > 1 but it's compatible with the behavior
+  // of the old Buffer constructor.
+  for (var i = 0; i < length; i += 1)
+    that[i] = array[i] & 255;
+}
+
+function fromArrayLike(that, array) {
+  var length = checked(array.length) | 0;
+  allocate(that, length);
+  for (var i = 0; i < length; i += 1)
+    that[i] = array[i] & 255;
+}
+
+// Deserialize { type: 'Buffer', data: [1,2,3,...] } into a Buffer object.
+// Returns a zero-length buffer for inputs that don't conform to the spec.
+function fromJsonObject(that, object) {
+  var array;
+  var length = 0;
+
+  if (object.type === 'Buffer' && Array.isArray(object.data)) {
+    array = object.data;
+    length = checked(array.length) | 0;
+  }
+  allocate(that, length);
+
+  for (var i = 0; i < length; i += 1)
+    that[i] = array[i] & 255;
+}
+
+function allocate(that, length) {
+  var fromPool = length !== 0 && length <= Buffer.poolSize >>> 1;
+  that.parent = fromPool ? palloc(that, length) : alloc(that, length);
+  that.length = length;
+}
+
+function palloc(that, length) {
+  if (length > poolSize - poolOffset)
+    createPool();
+
+  var start = poolOffset;
+  var end = start + length;
+  var buf = sliceOnto(allocPool, that, start, end);
+  poolOffset = end;
+
+  return buf;
+}
+
+function checked(length) {
+  // Note: cannot use `length < kMaxLength` here because that fails when
+  // length is NaN (which is otherwise coerced to zero.)
+  if (length >= kMaxLength) {
+    throw new RangeError('Attempt to allocate Buffer larger than maximum ' +
+                         'size: 0x' + kMaxLength.toString(16) + ' bytes');
+  }
+  return length >>> 0;
+}
 
 function SlowBuffer(length) {
   length = length >>> 0;
@@ -170,7 +236,7 @@ Buffer.isEncoding = function(encoding) {
 
 Buffer.concat = function(list, length) {
   if (!Array.isArray(list))
-    throw new TypeError('Usage: Buffer.concat(list[, length])');
+    throw new TypeError('list argument must be an Array of Buffers.');
 
   if (length === undefined) {
     length = 0;
@@ -197,30 +263,30 @@ Buffer.concat = function(list, length) {
 };
 
 
-Buffer.byteLength = function(str, enc) {
-  var ret;
-  str = str + '';
-  switch (enc) {
+function byteLength(string, encoding) {
+  if (typeof(string) !== 'string')
+    string = String(string);
+
+  switch (encoding) {
     case 'ascii':
     case 'binary':
     case 'raw':
-      ret = str.length;
-      break;
+      return string.length;
+
     case 'ucs2':
     case 'ucs-2':
     case 'utf16le':
     case 'utf-16le':
-      ret = str.length * 2;
-      break;
-    case 'hex':
-      ret = str.length >>> 1;
-      break;
-    default:
-      ret = binding.byteLength(str, enc);
-  }
-  return ret;
-};
+      return string.length * 2;
 
+    case 'hex':
+      return string.length >>> 1;
+  }
+
+  return binding.byteLength(string, encoding);
+}
+
+Buffer.byteLength = byteLength;
 
 // toString(encoding, start=0, end=buffer.length)
 Buffer.prototype.toString = function(encoding, start, end) {
@@ -300,6 +366,24 @@ Buffer.prototype.compare = function compare(b) {
     return 0;
 
   return binding.compare(this, b);
+};
+
+
+Buffer.prototype.indexOf = function indexOf(val, byteOffset) {
+  if (byteOffset > 0x7fffffff)
+    byteOffset = 0x7fffffff;
+  else if (byteOffset < -0x80000000)
+    byteOffset = -0x80000000;
+  byteOffset >>= 0;
+
+  if (typeof val === 'string')
+    return binding.indexOfString(this, val, byteOffset);
+  if (val instanceof Buffer)
+    return binding.indexOfBuffer(this, val, byteOffset);
+  if (typeof val === 'number')
+    return binding.indexOfNumber(this, val, byteOffset);
+
+  throw new TypeError('val must be string, number or Buffer');
 };
 
 
@@ -396,47 +480,45 @@ Buffer.prototype.write = function(string, offset, length, encoding) {
   if (length === undefined || length > remaining)
     length = remaining;
 
-  encoding = !!encoding ? (encoding + '').toLowerCase() : 'utf8';
-
   if (string.length > 0 && (length < 0 || offset < 0))
     throw new RangeError('attempt to write outside buffer bounds');
 
-  var ret;
-  switch (encoding) {
-    case 'hex':
-      ret = this.hexWrite(string, offset, length);
-      break;
+  if (!encoding)
+    encoding = 'utf8';
 
-    case 'utf8':
-    case 'utf-8':
-      ret = this.utf8Write(string, offset, length);
-      break;
+  var loweredCase = false;
+  for (;;) {
+    switch (encoding) {
+      case 'hex':
+        return this.hexWrite(string, offset, length);
 
-    case 'ascii':
-      ret = this.asciiWrite(string, offset, length);
-      break;
+      case 'utf8':
+      case 'utf-8':
+        return this.utf8Write(string, offset, length);
 
-    case 'binary':
-      ret = this.binaryWrite(string, offset, length);
-      break;
+      case 'ascii':
+        return this.asciiWrite(string, offset, length);
 
-    case 'base64':
-      // Warning: maxLength not taken into account in base64Write
-      ret = this.base64Write(string, offset, length);
-      break;
+      case 'binary':
+        return this.binaryWrite(string, offset, length);
 
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = this.ucs2Write(string, offset, length);
-      break;
+      case 'base64':
+        // Warning: maxLength not taken into account in base64Write
+        return this.base64Write(string, offset, length);
 
-    default:
-      throw new TypeError('Unknown encoding: ' + encoding);
+      case 'ucs2':
+      case 'ucs-2':
+      case 'utf16le':
+      case 'utf-16le':
+        return this.ucs2Write(string, offset, length);
+
+      default:
+        if (loweredCase)
+          throw new TypeError('Unknown encoding: ' + encoding);
+        encoding = ('' + encoding).toLowerCase();
+        loweredCase = true;
+    }
   }
-
-  return ret;
 };
 
 

@@ -16,6 +16,7 @@ const closeExpression = /close/i;
 const contentLengthExpression = /^Content-Length$/i;
 const dateExpression = /^Date$/i;
 const expectExpression = /^Expect$/i;
+const trailerExpression = /^Trailer$/i;
 
 const automaticHeaders = {
   connection: true,
@@ -56,6 +57,7 @@ function OutgoingMessage() {
   this.sendDate = false;
   this._removedHeader = {};
 
+  this._contentLength = null;
   this._hasBody = true;
   this._trailer = '';
 
@@ -78,6 +80,7 @@ exports.OutgoingMessage = OutgoingMessage;
 OutgoingMessage.prototype.setTimeout = function(msecs, callback) {
   if (callback)
     this.on('timeout', callback);
+
   if (!this.socket) {
     this.once('socket', function(socket) {
       socket.setTimeout(msecs);
@@ -133,32 +136,36 @@ OutgoingMessage.prototype._writeRaw = function(data, encoding, callback) {
     return true;
   }
 
-  if (this.connection &&
-      this.connection._httpMessage === this &&
-      this.connection.writable &&
-      !this.connection.destroyed) {
+  var connection = this.connection;
+  if (connection &&
+      connection._httpMessage === this &&
+      connection.writable &&
+      !connection.destroyed) {
     // There might be pending data in the this.output buffer.
-    while (this.output.length) {
-      if (!this.connection.writable) {
-        this._buffer(data, encoding, callback);
-        return false;
+    var outputLength = this.output.length;
+    if (outputLength > 0) {
+      var output = this.output;
+      var outputEncodings = this.outputEncodings;
+      var outputCallbacks = this.outputCallbacks;
+      for (var i = 0; i < outputLength; i++) {
+        connection.write(output[i], outputEncodings[i],
+                         outputCallbacks[i]);
       }
-      var c = this.output.shift();
-      var e = this.outputEncodings.shift();
-      var cb = this.outputCallbacks.shift();
-      this.connection.write(c, e, cb);
+
+      this.output = [];
+      this.outputEncodings = [];
+      this.outputCallbacks = [];
     }
 
     // Directly write to socket.
-    return this.connection.write(data, encoding, callback);
-  } else if (this.connection && this.connection.destroyed) {
+    return connection.write(data, encoding, callback);
+  } else if (connection && connection.destroyed) {
     // The socket was destroyed.  If we're still trying to write to it,
     // then we haven't gotten the 'close' event yet.
     return false;
   } else {
     // buffer, as long as we're not destroyed.
-    this._buffer(data, encoding, callback);
-    return false;
+    return this._buffer(data, encoding, callback);
   }
 };
 
@@ -180,10 +187,9 @@ OutgoingMessage.prototype._storeHeader = function(firstLine, headers) {
     sentTransferEncodingHeader: false,
     sentDateHeader: false,
     sentExpect: false,
+    sentTrailer: false,
     messageHeader: firstLine
   };
-
-  var field, value;
 
   if (headers) {
     var keys = Object.keys(headers);
@@ -254,16 +260,26 @@ OutgoingMessage.prototype._storeHeader = function(firstLine, headers) {
 
   if (state.sentContentLengthHeader === false &&
       state.sentTransferEncodingHeader === false) {
-    if (this._hasBody && !this._removedHeader['transfer-encoding']) {
-      if (this.useChunkedEncodingByDefault) {
+    if (!this._hasBody) {
+      // Make sure we don't end the 0\r\n\r\n at the end of the message.
+      this.chunkedEncoding = false;
+    } else if (!this.useChunkedEncodingByDefault) {
+      this._last = true;
+    } else {
+      if (!state.sentTrailer &&
+          !this._removedHeader['content-length'] &&
+          typeof this._contentLength === 'number') {
+        state.messageHeader += 'Content-Length: ' + this._contentLength +
+                               '\r\n';
+      } else if (!this._removedHeader['transfer-encoding']) {
         state.messageHeader += 'Transfer-Encoding: chunked\r\n';
         this.chunkedEncoding = true;
       } else {
-        this._last = true;
+        // We should only be able to get here if both Content-Length and
+        // Transfer-Encoding are removed by the user.
+        // See: test/parallel/test-http-remove-header-stays-removed.js
+        debug('Both Content-Length and Transfer-Encoding are removed');
       }
-    } else {
-      // Make sure we don't end the 0\r\n\r\n at the end of the message.
-      this.chunkedEncoding = false;
     }
   }
 
@@ -301,6 +317,8 @@ function storeHeader(self, state, field, value) {
     state.sentDateHeader = true;
   } else if (expectExpression.test(field)) {
     state.sentExpect = true;
+  } else if (trailerExpression.test(field)) {
+    state.sentTrailer = true;
   }
 }
 
@@ -365,14 +383,16 @@ OutgoingMessage.prototype._renderHeaders = function() {
     throw new Error('Can\'t render headers after they are sent to the client.');
   }
 
-  if (!this._headers) return {};
+  var headersMap = this._headers;
+  if (!headersMap) return {};
 
   var headers = {};
-  var keys = Object.keys(this._headers);
+  var keys = Object.keys(headersMap);
+  var headerNames = this._headerNames;
 
   for (var i = 0, l = keys.length; i < l; i++) {
     var key = keys[i];
-    headers[this._headerNames[key]] = this._headers[key];
+    headers[headerNames[key]] = headersMap[key];
   }
   return headers;
 };
@@ -504,6 +524,14 @@ OutgoingMessage.prototype.end = function(data, encoding, callback) {
     this.once('finish', callback);
 
   if (!this._header) {
+    if (data) {
+      if (typeof data === 'string')
+        this._contentLength = Buffer.byteLength(data, encoding);
+      else
+        this._contentLength = data.length;
+    } else {
+      this._contentLength = 0;
+    }
     this._implicitHeader();
   }
 
@@ -571,13 +599,24 @@ OutgoingMessage.prototype._finish = function() {
 // This function, outgoingFlush(), is called by both the Server and Client
 // to attempt to flush any pending messages out to the socket.
 OutgoingMessage.prototype._flush = function() {
-  if (this.socket && this.socket.writable) {
-    var ret;
-    while (this.output.length) {
-      var data = this.output.shift();
-      var encoding = this.outputEncodings.shift();
-      var cb = this.outputCallbacks.shift();
-      ret = this.socket.write(data, encoding, cb);
+  var socket = this.socket;
+  var outputLength, ret;
+
+  if (socket && socket.writable) {
+    // There might be remaining data in this.output; write it out
+    outputLength = this.output.length;
+    if (outputLength > 0) {
+      var output = this.output;
+      var outputEncodings = this.outputEncodings;
+      var outputCallbacks = this.outputCallbacks;
+      for (var i = 0; i < outputLength; i++) {
+        ret = socket.write(output[i], outputEncodings[i],
+                           outputCallbacks[i]);
+      }
+
+      this.output = [];
+      this.outputEncodings = [];
+      this.outputCallbacks = [];
     }
 
     if (this.finished) {

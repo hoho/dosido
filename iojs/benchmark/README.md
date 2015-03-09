@@ -3,13 +3,13 @@
 This folder contains benchmark tests to measure the performance for certain
 io.js APIs.
 
-## prerequisites
+## Prerequisites
 
-Most of the http benchmarks require `wrk` to be compiled beforehand.
+Most of the http benchmarks require [`wrk`][wrk] and [`ab`][ab] being installed.
+These are most often available through your preferred package manager.
 
-```sh
-make wrk
-```
+[wrk]: https://github.com/wg/wrk
+[ab]: http://httpd.apache.org/docs/2.2/programs/ab.html
 
 ## How to run tests
 
