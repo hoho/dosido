@@ -25,20 +25,29 @@ typedef enum {
 
 
 typedef enum {
-    BY_JS_INIT_DESTRUCTOR = 1,
+    BY_JS_INIT_DESTRUCTOR   = 1,
     BY_JS_READ_REQUEST_BODY = 2,
-    BY_JS_RESPONSE_HEADERS = 3,
-    BY_JS_RESPONSE_BODY = 4,
-    BY_JS_SUBREQUEST = 5
+    BY_JS_RESPONSE_HEADERS  = 3,
+    BY_JS_RESPONSE_BODY     = 4,
+    BY_JS_SUBREQUEST        = 5
 } iojsByJSCommandType;
 
 
 typedef enum {
-    TO_JS_CALLBACK_CHUNK = 6,
+    TO_JS_CALLBACK_CHUNK              = 6,
     TO_JS_CALLBACK_SUBREQUEST_HEADERS = 7,
-    TO_JS_CALLBACK_REQUEST_ERROR = 8,
-    TO_JS_CALLBACK_RESPONSE_ERROR = 9
+    TO_JS_CALLBACK_REQUEST_ERROR      = 8,
+    TO_JS_CALLBACK_RESPONSE_ERROR     = 9
 } iojsToJSCallbackCommandType;
+
+
+typedef enum {
+    SR_URL      = 2,
+    SR_METHOD   = 3,
+    SR_HEADERS  = 4,
+    SR_BODY     = 5,
+    SR_CALLBACK = 6
+} iojsSrArgument;
 
 
 #define IOJS_CHECK_OUT_OF_MEMORY(ptr)                                        \

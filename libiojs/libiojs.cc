@@ -529,23 +529,23 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         case BY_JS_SUBREQUEST:
             cmd->type = IOJS_SUBREQUEST;
             {
-                Local<String> url = args[2]->ToString(); // url.
-                Local<String> method = args[3]->ToString(); // method.
-                Local<Object> headers = args[4]->ToObject(); // headers.
+                Local<String> url = args[SR_URL]->ToString(); // url.
+                Local<String> method = args[SR_METHOD]->ToString(); // method.
+                Local<Object> headers = args[SR_HEADERS]->ToObject(); // headers.
                 Local<String> body;
 
-                CHECK(args[6]->IsFunction());
+                CHECK(args[SR_CALLBACK]->IsFunction());
 
                 int urlLen = url->Utf8Length();
                 int methodLen = method->Utf8Length();
                 int bodyLen;
 
-                bool noBody = args[5]->IsNull();
+                bool noBody = args[SR_BODY]->IsNull();
 
                 if (noBody) {
                     bodyLen = 0;
                 } else {
-                    body = args[5]->ToString();
+                    body = args[SR_BODY]->ToString();
                     bodyLen = body->Utf8Length();
                 }
 
@@ -589,7 +589,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                 // sr callback
                 Persistent<Function> *srCallback = new Persistent<Function>(
                         env->isolate(),
-                        Local<Function>::Cast(args[6])
+                        Local<Function>::Cast(args[SR_CALLBACK])
                 );
                 cmd->jsCallback = srCallback;
 

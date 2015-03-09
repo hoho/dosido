@@ -151,11 +151,11 @@
                 callback(
                     SUBREQUEST,
                     payload,
-                    url,
-                    method,
-                    headers,
-                    body,
-                    function(what, arg) {
+                    url, // SR_URL
+                    method, // SR_METHOD
+                    headers, // SR_HEADERS
+                    body, // SR_BODY
+                    function(what, arg) { // SR_CALLBACK
                         switch (what) {
                             case SUBREQUEST_HEADERS:
                                 sr = new Subrequest(arg, callback);
