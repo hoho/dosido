@@ -3801,13 +3801,14 @@ static void StartNodeInstance(void* arg) {
       }
     } while (more == true);
 
+done:
+    iojsUnloadScripts();
+
     int exit_code = EmitExit(env);
     if (instance_data->is_main())
       instance_data->set_exit_code(exit_code);
     RunAtExit(env);
 
-done:
-    iojsUnloadScripts();
     env->Dispose();
     env = nullptr;
   }
