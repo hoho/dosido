@@ -151,27 +151,25 @@
                 callback(
                     SUBREQUEST,
                     payload,
-                    url, // SR_URL
-                    method, // SR_METHOD
-                    headers, // SR_HEADERS
-                    body, // SR_BODY
-                    function(what, arg) { // SR_CALLBACK
-                        switch (what) {
-                            case SUBREQUEST_HEADERS:
-                                sr = new Subrequest(arg, callback);
-                                cb && cb(undefined, sr);
-                                break;
+                    url,                   // SR_URL
+                    method,                // SR_METHOD
+                    headers,               // SR_HEADERS
+                    body,                  // SR_BODY
+                    function(what, arg) {  // SR_CALLBACK
+                        if (!sr) {
+                            sr = new Subrequest((what === SUBREQUEST_HEADERS) && arg);
+                            if (cb) {
+                                cb(sr);
+                            }
+                        }
 
+                        switch (what) {
                             case REQUEST_ERROR:
-                                cb && cb(arg);
+                                sr.emit('error', arg);
                                 break;
 
                             case CHUNK:
-                                if (!sr) {
-                                    sr = new Subrequest(arg, callback);
-                                    cb && cb(undefined, sr);
-                                }
-                                sr && sr.push(arg);
+                                sr.push(arg);
                                 break;
                         }
                     }
@@ -224,7 +222,7 @@
     };
 
 
-    function Subrequest(headers, callback) {
+    function Subrequest(headers) {
         this._headers = headers;
 
         Readable.call(this, {
