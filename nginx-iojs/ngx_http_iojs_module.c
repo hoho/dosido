@@ -204,16 +204,15 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
 ngx_inline static ngx_int_t
 ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
-                         short last)
+                         unsigned last)
 {
     ngx_buf_t           *b;
     ngx_chain_t          out;
-    //ngx_http_request_t  *ar; /* active request */
     ngx_int_t            rc;
 
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + len);
     if (b == NULL) {
-        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        ngx_http_finalize_request(r, NGX_ERROR);
         return NGX_ERROR;
     }
 
@@ -254,7 +253,6 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
     ngx_chain_t          *cl;
     ngx_int_t             rc;
     iojsString            s;
-    unsigned              last = 0;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
     if (ctx == NULL) {
@@ -266,7 +264,6 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
 
     if (r->request_body->bufs == NULL) {
         rc = iojsChunk(ctx->js_ctx, NULL, 0, 1, 0);
-        last = 1;
         if (rc)
             goto error;
     } else {
@@ -274,12 +271,10 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
             s.data = (char *)cl->buf->pos;
             s.len = cl->buf->last - cl->buf->pos;
 
-            last = cl->buf->last_buf;
-
             rc = iojsChunk(ctx->js_ctx,
                            (char *)cl->buf->pos,
                            cl->buf->last - cl->buf->pos,
-                           last,
+                           cl->buf->last_buf,
                            0);
             if (rc)
                 goto error;
@@ -289,13 +284,9 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
         }
     }
 
-    if (last)
-        r->count--;
-
     return;
 
 error:
-    r->count--;
     ngx_http_finalize_request(r, NGX_ERROR);
 }
 
@@ -352,15 +343,14 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
 static ngx_int_t
 ngx_http_iojs_post_sr(ngx_http_request_t *sr, void *data, ngx_int_t rc)
 {
+    if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+        return rc;
+    }
     //ngx_http_iojs_ctx_t  *sr_ctx = data;
 
     dd("post subrequest %ld (%p)", rc, sr);
 
-    //if (sr != sr->connection->data) {
-    //    sr->connection->data = sr;
-    //}
-
-    return NGX_OK;
+    return NGX_DONE;
 }
 
 
@@ -470,8 +460,6 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         sr->request_body = rb;
     }
 
-    //r->main->count++;
-
     ngx_http_run_posted_requests(sr->connection);
 
     return NGX_OK;
@@ -542,7 +530,17 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     // Got end of response mark, finalize request.
                     js_ctx->done = 1;
                     ngx_http_iojs_send_chunk(r, NULL, 0, 1);
-                    ngx_http_finalize_request(r, NGX_DONE);
+
+                    r->main->count--;
+
+                    // Finalize subrequest.
+                    if (r != r->main)
+                        ngx_http_finalize_request(r, NGX_DONE);
+
+                    // If all subrequests are finalized, finalize the main
+                    // request.
+                    if (r->main->count == 1)
+                        ngx_http_finalize_request(r->main, NGX_DONE);
                 }
 
                 break;
@@ -715,7 +713,6 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     // It's a subrequest response body. Eating it up and passing to iojs.
     for (cl = in; cl; cl = cl->next) {
         if (!ctx->refused) {
-            fprintf(stderr, "Body filter: %s\n", (char *)cl->buf->pos);
             rc = iojsChunk(ctx->js_ctx,
                            (char *)cl->buf->pos,
                            cl->buf->last - cl->buf->pos,
@@ -737,9 +734,6 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 static ngx_int_t
 ngx_http_iojs_postconf(ngx_conf_t *cf)
 {
-    //ngx_http_core_main_conf_t       *cmcf;
-    //ngx_http_handler_pt             *h;
-
     dd("postconfiguration");
 
     ngx_http_next_header_filter = ngx_http_top_header_filter;
@@ -747,15 +741,6 @@ ngx_http_iojs_postconf(ngx_conf_t *cf)
 
     ngx_http_next_body_filter = ngx_http_top_body_filter;
     ngx_http_top_body_filter = ngx_http_iojs_body_filter;
-
-    //cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
-
-    //h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
-    //if (h == NULL) {
-    //    return NGX_ERROR;
-    //}
-
-    //*h = ngx_http_iojs_access_handler;
 
     return NGX_OK;
 }
