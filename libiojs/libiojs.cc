@@ -467,6 +467,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         case BY_JS_READ_REQUEST_BODY:
         case BY_JS_RESPONSE_HEADERS:
         case BY_JS_SUBREQUEST:
+        case BY_JS_SUBREQUEST_DONE:
             sz = sizeof(iojsFromJS);
             break;
 
@@ -650,6 +651,10 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     }
                 }
             }
+            break;
+
+        case BY_JS_SUBREQUEST_DONE:
+            cmd->type = IOJS_SUBREQUEST_DONE;
             break;
 
         default:

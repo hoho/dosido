@@ -29,15 +29,16 @@ typedef enum {
     BY_JS_READ_REQUEST_BODY = 2,
     BY_JS_RESPONSE_HEADERS  = 3,
     BY_JS_RESPONSE_BODY     = 4,
-    BY_JS_SUBREQUEST        = 5
+    BY_JS_SUBREQUEST        = 5,
+    BY_JS_SUBREQUEST_DONE   = 6
 } iojsByJSCommandType;
 
 
 typedef enum {
-    TO_JS_CALLBACK_CHUNK              = 6,
-    TO_JS_CALLBACK_SUBREQUEST_HEADERS = 7,
-    TO_JS_CALLBACK_REQUEST_ERROR      = 8,
-    TO_JS_CALLBACK_RESPONSE_ERROR     = 9
+    TO_JS_CALLBACK_CHUNK              = 7,
+    TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
+    TO_JS_CALLBACK_REQUEST_ERROR      = 9,
+    TO_JS_CALLBACK_RESPONSE_ERROR     = 10
 } iojsToJSCallbackCommandType;
 
 

@@ -235,6 +235,9 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
     dd("Sending response chunk (len: %zd, last: %d)", len, last);
 
+    if (r != r->connection->data)
+        r->connection->data = r;
+
     rc = ngx_http_output_filter(r, &out);
 
     if (rc == NGX_ERROR) {
@@ -343,14 +346,17 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
 static ngx_int_t
 ngx_http_iojs_post_sr(ngx_http_request_t *sr, void *data, ngx_int_t rc)
 {
-    if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
-        return rc;
+    dd("post subrequest %ld (%p, %.*s)", rc, sr, (int)sr->uri.len, sr->uri.data);
+
+    if (sr != sr->connection->data)
+        sr->connection->data = sr;
+
+    if (rc == NGX_OK) {
+        if (iojsChunk(((ngx_http_iojs_ctx_t *)data)->js_ctx, NULL, 0, 1, 1))
+            return NGX_ERROR;
     }
-    //ngx_http_iojs_ctx_t  *sr_ctx = data;
 
-    dd("post subrequest %ld (%p)", rc, sr);
-
-    return NGX_DONE;
+    return rc;
 }
 
 
@@ -399,7 +405,7 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         return NGX_ERROR;
     }
 
-    dd("Performing subrequest");
+    dd("subrequest (%p, %.*s)", sr, (int)sr->uri.len, sr->uri.data);
 
     // Don't inherit parent request variables. Content-Length is
     // cacheable in proxy module and we don't need Content-Length from
@@ -426,7 +432,7 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
 
     ngx_http_set_ctx(sr, sr_ctx, ngx_http_iojs_module);
 
-    psr->data = NULL; //sr_ctx;
+    psr->data = sr_ctx;
 
     sr_ctx->js_ctx->jsSubrequestCallback = cmd->jsCallback;
     cmd->jsCallback = NULL;
@@ -527,20 +533,21 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     iojsString  *s = (iojsString *)cmd->data;
                     ngx_http_iojs_send_chunk(r, s->data, s->len, 0);
                 } else {
-                    // Got end of response mark, finalize request.
-                    js_ctx->done = 1;
-                    ngx_http_iojs_send_chunk(r, NULL, 0, 1);
-
+                    // Got end of the response mark.
+                    // This one is for r->main->count++ in ngx_http_iojs_handler.
                     r->main->count--;
 
-                    // Finalize subrequest.
-                    if (r != r->main)
-                        ngx_http_finalize_request(r, NGX_DONE);
+                    if (r != r->main) {
+                        // Finalize the request.
+                        ngx_http_finalize_request(r, NGX_OK);
+                    }
 
-                    // If all subrequests are finalized, finalize the main
-                    // request.
-                    if (r->main->count == 1)
+                    if (r->main->count == 1) {
+                        // No subrequests left, finalize the main request.
+                        js_ctx->done = 1;
+                        ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
                         ngx_http_finalize_request(r->main, NGX_DONE);
+                    }
                 }
 
                 break;
@@ -552,6 +559,19 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 if (ngx_http_iojs_subrequest(r, cmd) == NGX_ERROR) {
                     ngx_http_finalize_request(r, NGX_ERROR);
                     return;
+                }
+
+                break;
+
+            case IOJS_SUBREQUEST_DONE:
+                if (js_ctx == NULL || js_ctx->done)
+                    break;
+
+                if (r->main->count == 1) {
+                    // No subrequests left, finalize the main request.
+                    js_ctx->done = 1;
+                    ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
+                    ngx_http_finalize_request(r->main, NGX_DONE);
                 }
 
                 break;
@@ -713,13 +733,14 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     // It's a subrequest response body. Eating it up and passing to iojs.
     for (cl = in; cl; cl = cl->next) {
         if (!ctx->refused) {
-            rc = iojsChunk(ctx->js_ctx,
-                           (char *)cl->buf->pos,
-                           cl->buf->last - cl->buf->pos,
-                           cl->buf->last_buf,
-                           1);
-            if (rc) {
-                return NGX_ERROR;
+            if (cl->buf->pos != NULL) {
+                rc = iojsChunk(ctx->js_ctx,
+                               (char *)cl->buf->pos,
+                               cl->buf->last - cl->buf->pos,
+                               0,
+                               1);
+                if (rc)
+                    return NGX_ERROR;
             }
         }
 
@@ -826,7 +847,7 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
 
     r->main->count++;
 
-    return NGX_OK;
+    return NGX_DONE;
 }
 
 

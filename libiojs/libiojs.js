@@ -90,17 +90,18 @@
     util.inherits(Response, Writable);
     util.inherits(Subrequest, Readable);
 
-    //  Codes to come from this script.
-    var INIT_DESTRUCTOR = 1,
-        READ_REQUEST_BODY = 2,
-        RESPONSE_HEADERS = 3,
-        RESPONSE_BODY = 4,
-        SUBREQUEST = 5,
-    //  Codes to come from nginx.
-        CHUNK = 6,
-        SUBREQUEST_HEADERS = 7,
-        REQUEST_ERROR = 8,
-        RESPONSE_ERROR = 9;
+    //  Codes to come from this script (should match iojsByJSCommandType).
+    var BY_JS_INIT_DESTRUCTOR = 1,
+        BY_JS_READ_REQUEST_BODY = 2,
+        BY_JS_RESPONSE_HEADERS = 3,
+        BY_JS_RESPONSE_BODY = 4,
+        BY_JS_SUBREQUEST = 5,
+        BY_JS_SUBREQUEST_DONE = 6,
+    //  Codes to come from nginx (should match iojsToJSCallbackCommandType).
+        TO_JS_CALLBACK_CHUNK = 7,
+        TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
+        TO_JS_CALLBACK_REQUEST_ERROR = 9,
+        TO_JS_CALLBACK_RESPONSE_ERROR = 10;
 
     return scripts.map(function(filename) {
         filename = Module._resolveFilename(path.resolve(filename), null);
@@ -120,24 +121,24 @@
 
             // To free iojsContext when this thing is garbage collected and
             // to pass a from-nginx-to-js callback.
-            var destroy = callback(INIT_DESTRUCTOR, payload, function(what, arg) {
+            var destroy = callback(BY_JS_INIT_DESTRUCTOR, payload, function(what, arg) {
                 switch (what) {
-                    case CHUNK:
+                    case TO_JS_CALLBACK_CHUNK:
                         i.push(arg);
                         break;
 
-                    case REQUEST_ERROR:
+                    case TO_JS_CALLBACK_REQUEST_ERROR:
                         i.emit('error', arg);
                         break;
 
-                    case RESPONSE_ERROR:
+                    case TO_JS_CALLBACK_RESPONSE_ERROR:
                         o.emit('error', arg);
                         break;
                 }
             });
 
             o.on('finish', function finish() {
-                callback(RESPONSE_BODY, payload, null);
+                callback(BY_JS_RESPONSE_BODY, payload, null);
             });
 
             module(i, o, function subrequest(settings, cb) {
@@ -149,7 +150,7 @@
                 var body = settings.body || null;
 
                 callback(
-                    SUBREQUEST,
+                    BY_JS_SUBREQUEST,
                     payload,
                     url,                   // SR_URL
                     method,                // SR_METHOD
@@ -157,19 +158,25 @@
                     body,                  // SR_BODY
                     function(what, arg) {  // SR_CALLBACK
                         if (!sr) {
-                            sr = new Subrequest((what === SUBREQUEST_HEADERS) && arg);
+                            sr = new Subrequest((what === TO_JS_CALLBACK_SUBREQUEST_HEADERS) && arg);
                             if (cb) {
                                 cb(sr);
                             }
                         }
 
                         switch (what) {
-                            case REQUEST_ERROR:
+                            case TO_JS_CALLBACK_REQUEST_ERROR:
                                 sr.emit('error', arg);
                                 break;
 
-                            case CHUNK:
+                            case TO_JS_CALLBACK_CHUNK:
                                 sr.push(arg);
+
+                                if (arg === null) {
+                                    // Notify nginx that subrequest is done.
+                                    callback(BY_JS_SUBREQUEST_DONE, payload, null);
+                                }
+
                                 break;
                         }
                     }
@@ -188,11 +195,13 @@
         Readable.call(this, {
             read: function read() {
                 if (!requestBodyRequested) {
-                    callback(READ_REQUEST_BODY, payload);
+                    callback(BY_JS_READ_REQUEST_BODY, payload);
                     requestBodyRequested = true;
                 }
             }
         });
+
+        this.resume();
     }
 
 
@@ -206,11 +215,11 @@
         Writable.call(this, {
             write: function write(chunk, encoding, cb) {
                 if (!headersSent) {
-                    callback(RESPONSE_HEADERS, payload, this._headers);
+                    callback(BY_JS_RESPONSE_HEADERS, payload, this._headers);
                     headersSent = true;
                 }
 
-                callback(RESPONSE_BODY, payload, chunk.toString());
+                callback(BY_JS_RESPONSE_BODY, payload, chunk.toString());
 
                 cb();
             }
@@ -228,6 +237,8 @@
         Readable.call(this, {
             read: function read() {}
         });
+
+        this.resume();
     }
 
     Subrequest.prototype.getHeader = function getHeader(name) {

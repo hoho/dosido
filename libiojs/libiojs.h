@@ -15,6 +15,7 @@ typedef enum {
     IOJS_RESPONSE_HEADERS,
     IOJS_RESPONSE_BODY,
     IOJS_SUBREQUEST,
+    IOJS_SUBREQUEST_DONE,
     IOJS_LOG,
     IOJS_EXIT_MAIN
 } iojsFromJSCommandType;
