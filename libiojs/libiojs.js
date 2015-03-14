@@ -98,7 +98,7 @@
         BY_JS_SUBREQUEST = 5,
         BY_JS_SUBREQUEST_DONE = 6,
     //  Codes to come from nginx (should match iojsToJSCallbackCommandType).
-        TO_JS_CALLBACK_CHUNK = 7,
+        TO_JS_CALLBACK_PUSH_CHUNK = 7,
         TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
         TO_JS_CALLBACK_REQUEST_ERROR = 9,
         TO_JS_CALLBACK_RESPONSE_ERROR = 10;
@@ -123,7 +123,7 @@
             // to pass a from-nginx-to-js callback.
             var destroy = callback(BY_JS_INIT_DESTRUCTOR, payload, function(what, arg) {
                 switch (what) {
-                    case TO_JS_CALLBACK_CHUNK:
+                    case TO_JS_CALLBACK_PUSH_CHUNK:
                         i.push(arg);
                         break;
 
@@ -169,7 +169,7 @@
                                 sr.emit('error', arg);
                                 break;
 
-                            case TO_JS_CALLBACK_CHUNK:
+                            case TO_JS_CALLBACK_PUSH_CHUNK:
                                 sr.push(arg);
 
                                 if (arg === null) {

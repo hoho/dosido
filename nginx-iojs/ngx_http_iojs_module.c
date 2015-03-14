@@ -488,7 +488,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 (ngx_http_request_t *)js_ctx->r;
 
         switch (cmd->type) {
-            case IOJS_JS_CALLBACK:
+            case FROM_JS_INIT_CALLBACK:
                 if (js_ctx == NULL || js_ctx->done || js_ctx->jsCallback)
                     break;
 
@@ -497,7 +497,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_READ_REQUEST_BODY:
+            case FROM_JS_READ_REQUEST_BODY:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
 
@@ -512,7 +512,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_RESPONSE_HEADERS:
+            case FROM_JS_RESPONSE_HEADERS:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
 
@@ -525,7 +525,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_RESPONSE_BODY:
+            case FROM_JS_RESPONSE_BODY:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
 
@@ -552,7 +552,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_SUBREQUEST:
+            case FROM_JS_BEGIN_SUBREQUEST:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
 
@@ -563,7 +563,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_SUBREQUEST_DONE:
+            case FROM_JS_SUBREQUEST_DONE:
                 if (js_ctx == NULL || js_ctx->done)
                     break;
 
@@ -576,10 +576,10 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 break;
 
-            case IOJS_LOG:
+            case FROM_JS_LOG:
                 break;
 
-            case IOJS_EXIT_MAIN:
+            case FROM_JS_EXIT_MAIN:
                 break;
         }
 
