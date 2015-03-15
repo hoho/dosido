@@ -828,6 +828,10 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
             if (ngx_http_complex_value(r, &params[i].value, param) != NGX_OK)
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
+            // ngx_http_complex_value gives zero char in the end sometimes.
+            if (param->len > 0 && param->data[param->len - 1] == 0)
+                param->len--;
+
             iojs_params[j++] = &params[i].name;
             iojs_params[j++] = param;
 

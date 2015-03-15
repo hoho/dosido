@@ -66,7 +66,8 @@ typedef struct _iojsToJS {
 typedef struct _iojsCallCmd : _iojsToJS {
     iojsContext  *jsCtx;
     int           index;
-    void         *headers;
+    iojsString  **headers;
+    iojsString  **params;
 } iojsCallCmd;
 
 

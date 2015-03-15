@@ -668,20 +668,40 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
 
 static inline void
-iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx)
+iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx,
+                     iojsString **headers, iojsString **params)
 {
     HandleScope handle_scope(env->isolate());
 
     Local<Array> scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
 
-    Local<Object> headers = Object::New(env->isolate());
+    Local<Object> h = Object::New(env->isolate());
+    Local<Object> p = Object::New(env->isolate());
+
     Local<Function> callback = \
             env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
     Local<v8::External> payload = v8::External::New(env->isolate(), jsCtx);
 
-    Local<Value> args[3] = {headers, callback, payload};
+    Local<Value> args[4] = {h, p, callback, payload};
 
-    MakeCallback(env, scripts, index, 3, args);
+    int i;
+
+    if (params != NULL) {
+        for (i = 0; params[i] != NULL; i += 2) {
+            p->Set(
+                    String::NewFromUtf8(env->isolate(),
+                                        params[i]->data,
+                                        String::kNormalString,
+                                        params[i]->len),
+                    String::NewFromUtf8(env->isolate(),
+                                        params[i + 1]->data,
+                                        String::kNormalString,
+                                        params[i + 1]->len)
+            );
+        }
+    }
+
+    MakeCallback(env, scripts, index, 4, args);
 }
 
 
@@ -701,7 +721,9 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 iojsCallLoadedScript(
                         env,
                         reinterpret_cast<iojsCallCmd *>(cmd)->index,
-                        reinterpret_cast<iojsCallCmd *>(cmd)->jsCtx
+                        reinterpret_cast<iojsCallCmd *>(cmd)->jsCtx,
+                        reinterpret_cast<iojsCallCmd *>(cmd)->headers,
+                        reinterpret_cast<iojsCallCmd *>(cmd)->params
                 );
                 break;
 
@@ -879,6 +901,8 @@ iojsCall(int index, iojsContext *jsCtx, iojsString **headers,
     cmd->type = TO_JS_CALL_LOADED_SCRIPT;
     cmd->jsCtx = jsCtx;
     cmd->index = index;
+    cmd->headers = headers;
+    cmd->params = params;
 
     iojsToJSSend(cmd);
 

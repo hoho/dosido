@@ -115,7 +115,7 @@
 
         module = module.exports;
 
-        return function(requestHeaders, callback, payload) {
+        return function(requestHeaders, configParams, callback, payload) {
             var i = new Request(requestHeaders, callback, payload);
             var o = new Response(callback, payload);
 
@@ -181,7 +181,7 @@
                         }
                     }
                 );
-            });
+            }, configParams);
         };
     });
 
