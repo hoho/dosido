@@ -852,7 +852,7 @@ iojsUnloadScripts(void)
 
 
 iojsContext*
-iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
+iojsContextCreate(void *r, iojsContext *rootCtx, iojsAtomicFetchAdd afa)
 {
     iojsContext  *ret;
 
@@ -865,6 +865,7 @@ iojsContextCreate(void *r, void *ctx, iojsAtomicFetchAdd afa)
     ret->refCount = 1;
     ret->r = r;
     ret->afa = afa;
+    ret->rootCtx = rootCtx == NULL ? ret : rootCtx;
 
     return ret;
 }

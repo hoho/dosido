@@ -45,17 +45,19 @@ typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
 typedef void (*iojsFreeFunc)(void *data);
 
 
-typedef struct {
+typedef struct _iojsContext iojsContext;
+struct _iojsContext {
     void                   *r;
     unsigned                refused:1;
-    unsigned                done:1;
+    size_t                  wait;
     int64_t                 refCount;
     iojsAtomicFetchAdd      afa;
     void                   *_p; // To hold a persistent handle of destroy
                                 // indicator.
     void                   *jsCallback;
     void                   *jsSubrequestCallback;
-} iojsContext;
+    iojsContext            *rootCtx;
+};
 
 
 typedef struct {
@@ -91,7 +93,8 @@ LIBIOJSPUBFUN void LIBIOJSCALL
         iojsFromJSFree           (iojsFromJS *cmd);
 
 LIBIOJSPUBFUN iojsContext * LIBIOJSCALL
-        iojsContextCreate        (void *r, void *ctx, iojsAtomicFetchAdd afa);
+        iojsContextCreate        (void *r, iojsContext *rootCtx,
+                                  iojsAtomicFetchAdd afa);
 LIBIOJSPUBFUN void LIBIOJSCALL
         iojsContextAttemptFree   (iojsContext *jsCtx);
 

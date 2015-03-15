@@ -163,10 +163,11 @@ ngx_inline static ngx_http_iojs_ctx_t *
 ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 {
     ngx_http_iojs_ctx_t       *ctx;
+    ngx_http_iojs_ctx_t       *main_ctx;
     iojsContext               *js_ctx;
-    //ngx_uint_t                 i, j;
-    //ngx_http_iojs_param_t     *params;
-    //char                     **iojsParams;
+    ngx_pool_cleanup_t        *cln;
+
+    main_ctx = ngx_http_get_module_ctx(r->main, ngx_http_iojs_module);
 
     // ngx_pcalloc() does ngx_memzero() too.
     ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_iojs_ctx_t));
@@ -175,8 +176,6 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
         return NULL;
     }
 
-    ngx_pool_cleanup_t  *cln;
-
     cln = ngx_pool_cleanup_add(r->pool, 0);
     if (cln == NULL) {
         return NULL;
@@ -184,7 +183,9 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
     dd("context creation");
 
-    js_ctx = iojsContextCreate(r, ctx, ngx_atomic_fetch_add_wrap);
+    js_ctx = iojsContextCreate(r,
+                               main_ctx == NULL ? NULL : main_ctx->js_ctx,
+                               ngx_atomic_fetch_add_wrap);
     if (js_ctx == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "Failed to create iojs context");
@@ -197,6 +198,11 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
     cln->handler = ngx_http_iojs_cleanup_context;
     cln->data = js_ctx;
+
+    if (main_ctx == NULL) {
+        // This would be the new root js context, store it in the main request.
+        ngx_http_set_ctx(r->main, ctx, ngx_http_iojs_module);
+    }
 
     return ctx;
 }
@@ -491,7 +497,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
         switch (cmd->type) {
             case FROM_JS_INIT_CALLBACK:
-                if (js_ctx == NULL || js_ctx->done || js_ctx->jsCallback)
+                if (js_ctx == NULL || js_ctx->wait == 0 || js_ctx->jsCallback)
                     break;
 
                 js_ctx->jsCallback = cmd->jsCallback;
@@ -500,7 +506,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
 
             case FROM_JS_READ_REQUEST_BODY:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
                 rc = ngx_http_read_client_request_body(
@@ -515,7 +521,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
 
             case FROM_JS_RESPONSE_HEADERS:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
                 dd("Sending response headers");
@@ -528,7 +534,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
 
             case FROM_JS_RESPONSE_BODY:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
                 if (cmd->data) {
@@ -539,14 +545,17 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     // This one is for r->main->count++ in ngx_http_iojs_handler.
                     r->main->count--;
 
-                    if (r != r->main) {
+                    js_ctx->wait--;
+                    js_ctx->rootCtx->wait--;
+
+                    if (r != r->main && js_ctx->wait == 0) {
                         // Finalize the request.
+                        ngx_http_iojs_send_chunk(r, NULL, 0, 1);
                         ngx_http_finalize_request(r, NGX_OK);
                     }
 
-                    if (r->main->count == 1) {
+                    if (r->main->count == 1 && js_ctx->rootCtx->wait == 0) {
                         // No subrequests left, finalize the main request.
-                        js_ctx->done = 1;
                         ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
                         ngx_http_finalize_request(r->main, NGX_DONE);
                     }
@@ -555,7 +564,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
 
             case FROM_JS_BEGIN_SUBREQUEST:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
                 if (ngx_http_iojs_subrequest(r, cmd) == NGX_ERROR) {
@@ -563,15 +572,26 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     return;
                 }
 
+                js_ctx->wait++;
+                js_ctx->rootCtx->wait++;
+
                 break;
 
             case FROM_JS_SUBREQUEST_DONE:
-                if (js_ctx == NULL || js_ctx->done)
+                if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
-                if (r->main->count == 1) {
+                js_ctx->wait--;
+                js_ctx->rootCtx->wait--;
+
+                if (r != r->main && js_ctx->wait == 0) {
+                    // Finalize the request.
+                    ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                    ngx_http_finalize_request(r, NGX_OK);
+                }
+
+                if (r->main->count == 1 && js_ctx->rootCtx->wait == 0) {
                     // No subrequests left, finalize the main request.
-                    js_ctx->done = 1;
                     ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
                     ngx_http_finalize_request(r->main, NGX_DONE);
                 }
@@ -917,14 +937,16 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    r->main->count++;
+    ctx->js_ctx->wait++;
+    ctx->js_ctx->rootCtx->wait++;
+
     rc = iojsCall(conf->js_index, ctx->js_ctx,
                   (iojsString **)iojs_headers,
                   (iojsString **)iojs_params);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-
-    r->main->count++;
 
     return NGX_DONE;
 }
