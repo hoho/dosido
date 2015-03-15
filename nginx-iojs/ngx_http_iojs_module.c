@@ -294,7 +294,7 @@ error:
 }
 
 
-static ngx_int_t
+ngx_inline static ngx_int_t
 ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
 {
     ngx_table_elt_t  *h;
@@ -344,7 +344,7 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
 
 
 static ngx_int_t
-ngx_http_iojs_post_sr(ngx_http_request_t *sr, void *data, ngx_int_t rc)
+ngx_http_iojs_subrequest_done(ngx_http_request_t *sr, void *data, ngx_int_t rc)
 {
     dd("post subrequest %ld (%p, %.*s)", rc, sr, (int)sr->uri.len, sr->uri.data);
 
@@ -369,11 +369,11 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
     ngx_http_post_subrequest_t  *psr;
     ngx_http_request_body_t     *rb;
     ngx_buf_t                   *b;
-    //ngx_table_elt_t             *h;
     ngx_http_core_main_conf_t   *cmcf;
-    ngx_str_t                   sr_url;
-    //ngx_str_t                    sr_querystring;
-    ngx_str_t                   sr_body;
+    ngx_str_t                    sr_uri;
+    ngx_str_t                    args;
+    ngx_uint_t                   flags = 0;
+    ngx_str_t                    sr_body;
 
     data = (iojsSubrequest *)cmd->data;
     if (data == NULL) {
@@ -385,23 +385,25 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         return NGX_ERROR;
     }
 
-    psr->handler = ngx_http_iojs_post_sr;
+    psr->handler = ngx_http_iojs_subrequest_done;
 
-    sr_url.len = data->url.len;
-    sr_url.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->url);
-    //sr_url.data = (u_char *)data->url.data;
+    sr_uri.len = data->url.len;
+    sr_uri.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->url);
+
+    memset(&args, 0, sizeof(ngx_str_t));
+
+    if (ngx_http_parse_unsafe_uri(r, &sr_uri, &args, &flags) != NGX_OK) {
+        return NGX_ERROR;
+    }
 
     if (data->body.len) {
         sr_body.len = data->body.len;
         sr_body.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->body);
-        //sr_body.data = (u_char *)data->body.data;
     } else {
         memset(&sr_body, 0, sizeof(ngx_str_t));
     }
 
-    if (ngx_http_subrequest(r->main, &sr_url, /*&sr_querystring*/NULL, &sr,
-                            psr, 0) != NGX_OK)
-    {
+    if (ngx_http_subrequest(r->main, &sr_uri, &args, &sr, psr, 0) != NGX_OK) {
         return NGX_ERROR;
     }
 
