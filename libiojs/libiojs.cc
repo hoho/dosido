@@ -686,6 +686,21 @@ iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx,
 
     int i;
 
+    if (headers != NULL) {
+        for (i = 0; headers[i] != NULL; i += 2) {
+            h->Set(
+                    String::NewFromUtf8(env->isolate(),
+                                        headers[i]->data,
+                                        String::kNormalString,
+                                        headers[i]->len),
+                    String::NewFromUtf8(env->isolate(),
+                                        headers[i + 1]->data,
+                                        String::kNormalString,
+                                        headers[i + 1]->len)
+            );
+        }
+    }
+
     if (params != NULL) {
         for (i = 0; params[i] != NULL; i += 2) {
             p->Set(

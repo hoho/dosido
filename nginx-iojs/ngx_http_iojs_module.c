@@ -773,6 +773,60 @@ ngx_http_iojs_cleanup_request(void *data)
 }
 
 
+ngx_inline static ngx_int_t
+ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, ngx_str_t ***ret)
+{
+    ngx_uint_t                 len;
+    ngx_str_t                **headers;
+    ngx_uint_t                 i;
+    ngx_uint_t                 j;
+    ngx_list_part_t           *part;
+    ngx_table_elt_t           *header;
+
+    len = r->headers_in.headers.nalloc;
+
+    if (len > 0) {
+        // Allocate memory for a NULL-terminated list of pointers to names
+        // and values and for the values.
+        headers = ngx_palloc(r->pool,
+                             sizeof(ngx_str_t *) * (len * 2 + 1));
+
+        if (headers == NULL)
+            return NGX_ERROR;
+
+        j = 0;
+
+        part = &r->headers_in.headers.part;
+        header = part->elts;
+
+        for (i = 0; /* void */; i++) {
+
+            if (i >= part->nelts) {
+                if (part->next == NULL) {
+                    break;
+                }
+
+                part = part->next;
+                header = part->elts;
+                i = 0;
+            }
+
+            headers[j++] = &header[i].key;
+            headers[j++] = &header[i].value;
+        }
+
+        // NULL-terminate.
+        headers[j] = NULL;
+    } else {
+        headers = NULL;
+    }
+
+    *ret = headers;
+
+    return NGX_OK;
+}
+
+
 static ngx_int_t
 ngx_http_iojs_handler(ngx_http_request_t *r) {
     ngx_http_iojs_ctx_t       *ctx;
@@ -780,11 +834,12 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     ngx_pool_cleanup_t        *cln;
     ngx_int_t                  rc;
     ngx_http_iojs_param_t     *params;
-    ngx_uint_t                 params_len;
+    ngx_uint_t                 len;
     ngx_uint_t                 i;
     ngx_uint_t                 j;
     ngx_str_t                 *param;
     ngx_str_t                **iojs_params;
+    ngx_str_t                **iojs_headers;
 
     dd("begin (r: %p, main: %p)", r, r->main);
 
@@ -808,23 +863,23 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         ctx->skip_filter = 0;
     }
 
-    params_len = conf->params != NULL ? conf->params->nelts : 0;
+    len = conf->params != NULL ? conf->params->nelts : 0;
 
-    if (params_len > 0) {
+    if (len > 0) {
         // Allocate memory for a NULL-terminated list of pointers to names
         // and values and for the values.
         iojs_params = ngx_palloc(r->pool,
-                                 sizeof(ngx_str_t *) * (params_len * 2 + 1) +
-                                 sizeof(ngx_str_t) * params_len);
+                                 sizeof(ngx_str_t *) * (len * 2 + 1) +
+                                 sizeof(ngx_str_t) * len);
 
         if (iojs_params == NULL)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
         params = conf->params->elts;
-        param = (ngx_str_t *)&iojs_params[params_len * 2 + 1];
+        param = (ngx_str_t *)&iojs_params[len * 2 + 1];
         j = 0;
 
-        for (i = 0; i < params_len; i++) {
+        for (i = 0; i < len; i++) {
             if (ngx_http_complex_value(r, &params[i].value, param) != NGX_OK)
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
@@ -844,6 +899,9 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         iojs_params = NULL;
     }
 
+    if (ngx_http_iojs_aggregate_headers(r, &iojs_headers) != NGX_OK)
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+
     r->headers_out.status = NGX_HTTP_OK;
 
     cln = ngx_pool_cleanup_add(r->pool, 0);
@@ -860,7 +918,7 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     }
 
     rc = iojsCall(conf->js_index, ctx->js_ctx,
-                  NULL,
+                  (iojsString **)iojs_headers,
                   (iojsString **)iojs_params);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
