@@ -96,7 +96,8 @@ LIBIOJSPUBFUN void LIBIOJSCALL
         iojsContextAttemptFree   (iojsContext *jsCtx);
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsCall                 (int index, iojsContext *jsCtx);
+        iojsCall                 (int index, iojsContext *jsCtx,
+                                  iojsString **headers, iojsString **params);
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsChunk                (iojsContext *jsCtx, char *data, size_t len,
                                   unsigned last, unsigned sr);

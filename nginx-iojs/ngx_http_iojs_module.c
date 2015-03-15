@@ -707,7 +707,6 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
 
     if (ctx == NULL || ctx->skip_filter) {
-        // Main request headers are already processed.
         return ngx_http_next_header_filter(r);
     }
 
@@ -734,16 +733,14 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     // It's a subrequest response body. Eating it up and passing to iojs.
     for (cl = in; cl; cl = cl->next) {
-        if (!ctx->refused) {
-            if (cl->buf->pos != NULL) {
-                rc = iojsChunk(ctx->js_ctx,
-                               (char *)cl->buf->pos,
-                               cl->buf->last - cl->buf->pos,
-                               0,
-                               1);
-                if (rc)
-                    return NGX_ERROR;
-            }
+        if (!ctx->refused && cl->buf->pos != NULL) {
+            rc = iojsChunk(ctx->js_ctx,
+                           (char *)cl->buf->pos,
+                           cl->buf->last - cl->buf->pos,
+                           0,
+                           1);
+            if (rc)
+                return NGX_ERROR;
         }
 
         cl->buf->pos = cl->buf->last;
@@ -782,6 +779,12 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     ngx_http_iojs_loc_conf_t  *conf;
     ngx_pool_cleanup_t        *cln;
     ngx_int_t                  rc;
+    ngx_http_iojs_param_t     *params;
+    ngx_uint_t                 params_len;
+    ngx_uint_t                 i;
+    ngx_uint_t                 j;
+    ngx_str_t                 *param;
+    ngx_str_t                **iojs_params;
 
     dd("begin (r: %p, main: %p)", r, r->main);
 
@@ -805,27 +808,37 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         ctx->skip_filter = 0;
     }
 
-    if (conf->params != NULL && conf->params->nelts > 0) {
-        //params = conf->params->elts;
+    params_len = conf->params != NULL ? conf->params->nelts : 0;
 
-        /*iojsParams = ngx_palloc(
-            r->pool, sizeof(char *) * (conf->params->nelts * 2 + 1)
-        );
+    if (params_len > 0) {
+        // Allocate memory for a NULL-terminated list of pointers to names
+        // and values and for the values.
+        iojs_params = ngx_palloc(r->pool,
+                                 sizeof(ngx_str_t *) * (params_len * 2 + 1) +
+                                 sizeof(ngx_str_t) * params_len);
 
+        if (iojs_params == NULL)
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+
+        params = conf->params->elts;
+        param = (ngx_str_t *)&iojs_params[params_len * 2 + 1];
         j = 0;
 
-        for (i = 0; i < conf->params->nelts; i++) {
-            iojsParams[j++] = strndup(params[i].name.data,
-                                      params[i].name.len);
-            iojsParams[j++] = strndup(params[i].value.value.data,
-                                      params[i].value.value.len);
+        for (i = 0; i < params_len; i++) {
+            if (ngx_http_complex_value(r, &params[i].value, param) != NGX_OK)
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+
+            iojs_params[j++] = &params[i].name;
+            iojs_params[j++] = param;
+
+            param = (ngx_str_t *)(((char *)param) + sizeof(ngx_str_t));
         }
 
-        iojsParams[j] = NULL;*/
+        // NULL-terminate.
+        iojs_params[j] = NULL;
     } else {
-        //iojsParams = NULL;
+        iojs_params = NULL;
     }
-
 
     r->headers_out.status = NGX_HTTP_OK;
 
@@ -842,7 +855,9 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    rc = iojsCall(conf->js_index, ctx->js_ctx);
+    rc = iojsCall(conf->js_index, ctx->js_ctx,
+                  NULL,
+                  (iojsString **)iojs_params);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }

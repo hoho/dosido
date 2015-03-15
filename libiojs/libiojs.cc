@@ -866,7 +866,8 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
 
 int
-iojsCall(int index, iojsContext *jsCtx)
+iojsCall(int index, iojsContext *jsCtx, iojsString **headers,
+         iojsString **params)
 {
     jsCtx->afa(&jsCtx->refCount, 1);
 
