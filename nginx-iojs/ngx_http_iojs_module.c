@@ -784,22 +784,30 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
 {
     ngx_http_iojs_ctx_t         *ctx;
     ngx_str_t                  **headers;
+    ngx_int_t                    rc;
+    ngx_http_request_t          *main;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
 
-    if (ctx == NULL || ctx->skip_filter) {
-        return ngx_http_next_header_filter(r);
+    // Temporary dirty hack to force ngx_http_headers_filter() to run for a
+    // subrequest.
+    // TODO: Copy-paste ngx_http_headers_filter() behaviour here instead.
+    main = r->main;
+    r->main = r;
+    rc = ngx_http_next_header_filter(r);
+    r->main = main;
+
+    if (ctx != NULL && !ctx->skip_filter) {
+        dd("header filter (%p, %.*s)", r, (int)r->uri.len, r->uri.data);
+
+        if (ngx_http_iojs_aggregate_headers(r, 1, &headers) != NGX_OK)
+            return NGX_ERROR;
+
+        if (iojsSubrequestHeaders(ctx->js_ctx, (iojsString **)headers))
+            return NGX_ERROR;
     }
 
-    dd("header filter (%p, %.*s)", r, (int)r->uri.len, r->uri.data);
-
-    if (ngx_http_iojs_aggregate_headers(r, 1, &headers) != NGX_OK)
-        return NGX_ERROR;
-
-    if (iojsSubrequestHeaders(ctx->js_ctx, (iojsString **)headers))
-        return NGX_ERROR;
-
-    return NGX_OK;
+    return rc;
 }
 
 
