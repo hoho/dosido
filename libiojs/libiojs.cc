@@ -369,7 +369,7 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
             break;
 
         case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
-            isSubrequest = 0;
+            isSubrequest = 1;
             break;
 
         case TO_JS_CALLBACK_REQUEST_ERROR:
@@ -417,6 +417,31 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
             break;
 
         case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
+            {
+                Local<Object>   h = Object::New(env->isolate());
+                int             i;
+                iojsString    **headers = \
+                    reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd)->headers;
+
+                if (headers != NULL) {
+                    for (i = 0; headers[i] != NULL; i += 2) {
+                        h->Set(
+                                String::NewFromUtf8(env->isolate(),
+                                                    headers[i]->data,
+                                                    String::kNormalString,
+                                                    headers[i]->len),
+                                String::NewFromUtf8(env->isolate(),
+                                                    headers[i + 1]->data,
+                                                    String::kNormalString,
+                                                    headers[i + 1]->len)
+                        );
+                    }
+                }
+
+                args[1] = h;
+
+                MakeCallback(env, f, f, 2, args);
+            }
             break;
 
         case TO_JS_CALLBACK_REQUEST_ERROR:
@@ -668,9 +693,11 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
 
 static inline void
-iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx,
-                     iojsString **headers, iojsString **params)
+iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
 {
+    iojsString **headers = cmd->headers;
+    iojsString **params = cmd->params;
+
     HandleScope handle_scope(env->isolate());
 
     Local<Array> scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
@@ -680,7 +707,7 @@ iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx,
 
     Local<Function> callback = \
             env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
-    Local<v8::External> payload = v8::External::New(env->isolate(), jsCtx);
+    Local<v8::External> payload = v8::External::New(env->isolate(), cmd->jsCtx);
 
     Local<Value> args[4] = {h, p, callback, payload};
 
@@ -716,7 +743,7 @@ iojsCallLoadedScript(Environment *env, int index, iojsContext *jsCtx,
         }
     }
 
-    MakeCallback(env, scripts, index, 4, args);
+    MakeCallback(env, scripts, cmd->index, 4, args);
 }
 
 
@@ -733,20 +760,14 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
 
         switch (cmd->type) {
             case TO_JS_CALL_LOADED_SCRIPT:
-                iojsCallLoadedScript(
-                        env,
-                        reinterpret_cast<iojsCallCmd *>(cmd)->index,
-                        reinterpret_cast<iojsCallCmd *>(cmd)->jsCtx,
-                        reinterpret_cast<iojsCallCmd *>(cmd)->headers,
-                        reinterpret_cast<iojsCallCmd *>(cmd)->params
-                );
+                iojsCallLoadedScript(env, reinterpret_cast<iojsCallCmd *>(cmd));
                 break;
 
             case TO_JS_PUSH_CHUNK:
                 iojsCallJSCallback(
                         env,
                         TO_JS_CALLBACK_PUSH_CHUNK,
-                        reinterpret_cast<iojsChunkCmd *>(cmd)->jsCtx,
+                        cmd->jsCtx,
                         cmd
                 );
                 break;
@@ -755,6 +776,15 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 break;
 
             case TO_JS_RESPONSE_ERROR:
+                break;
+
+            case TO_JS_SUBREQUEST_HEADERS:
+                iojsCallJSCallback(
+                        env,
+                        TO_JS_CALLBACK_SUBREQUEST_HEADERS,
+                        cmd->jsCtx,
+                        cmd
+                );
                 break;
 
             case TO_JS_FREE_CALLBACK:
@@ -942,6 +972,26 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
     cmd->last = last;
     cmd->sr = sr;
     memcpy(cmd->chunk.data, data, len);
+
+    iojsToJSSend(cmd);
+
+    return 0;
+}
+
+
+int
+iojsSubrequestHeaders(iojsContext *jsCtx, iojsString **headers)
+{
+    iojsSubrequestHeadersCmd *cmd;
+
+    cmd = reinterpret_cast<iojsSubrequestHeadersCmd *>(
+            malloc(sizeof(iojsSubrequestHeadersCmd))
+    );
+    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+
+    cmd->type = TO_JS_SUBREQUEST_HEADERS;
+    cmd->jsCtx = jsCtx;
+    cmd->headers = headers;
 
     iojsToJSSend(cmd);
 

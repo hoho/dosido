@@ -19,6 +19,7 @@ typedef enum {
     TO_JS_PUSH_CHUNK,
     TO_JS_REQUEST_ERROR,
     TO_JS_RESPONSE_ERROR,
+    TO_JS_SUBREQUEST_HEADERS,
     TO_JS_FREE_CALLBACK,
     TO_JS_EXIT
 } iojsToJSCommandType;
@@ -60,11 +61,11 @@ typedef enum {
 
 typedef struct _iojsToJS {
     iojsToJSCommandType   type;
+    iojsContext  *jsCtx;
 } iojsToJS;
 
 
 typedef struct _iojsCallCmd : _iojsToJS {
-    iojsContext  *jsCtx;
     int           index;
     iojsString  **headers;
     iojsString  **params;
@@ -72,11 +73,15 @@ typedef struct _iojsCallCmd : _iojsToJS {
 
 
 typedef struct iojsChunkCmd : _iojsToJS {
-    iojsContext  *jsCtx;
     iojsString    chunk;
     unsigned      last:1;
     unsigned      sr:1;
 } iojsChunkCmd;
+
+
+typedef struct iojsSubrequestHeadersCmd : _iojsToJS {
+    iojsString  **headers;
+} iojsSubrequestHeadersCmd;
 
 
 typedef struct _iojsFreeCallbackCmd : _iojsToJS {

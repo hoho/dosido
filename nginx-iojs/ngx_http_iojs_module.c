@@ -719,10 +719,71 @@ ngx_http_iojs_process_headers(ngx_http_request_t *r, ngx_http_iojs_ctx_t *ctx)
 }
 
 
+ngx_inline static ngx_int_t
+ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned sr,
+                                ngx_str_t ***ret)
+{
+    ngx_uint_t                 len;
+    ngx_str_t                **headers;
+    ngx_uint_t                 i;
+    ngx_uint_t                 j;
+    ngx_list_part_t           *part;
+    ngx_table_elt_t           *header;
+
+    if (sr) {
+        len = r->headers_out.headers.nalloc;
+        part = &r->headers_out.headers.part;
+    } else {
+        len = r->headers_in.headers.nalloc;
+        part = &r->headers_in.headers.part;
+    }
+
+    if (len > 0) {
+        // Allocate memory for a NULL-terminated list of pointers to names
+        // and values and for the values.
+        headers = ngx_palloc(r->pool,
+                sizeof(ngx_str_t *) * (len * 2 + 1));
+
+        if (headers == NULL)
+            return NGX_ERROR;
+
+        j = 0;
+
+        header = part->elts;
+
+        for (i = 0; /* void */; i++) {
+
+            if (i >= part->nelts) {
+                if (part->next == NULL) {
+                    break;
+                }
+
+                part = part->next;
+                header = part->elts;
+                i = 0;
+            }
+
+            headers[j++] = &header[i].key;
+            headers[j++] = &header[i].value;
+        }
+
+        // NULL-terminate.
+        headers[j] = NULL;
+    } else {
+        headers = NULL;
+    }
+
+    *ret = headers;
+
+    return NGX_OK;
+}
+
+
 static ngx_int_t
 ngx_http_iojs_header_filter(ngx_http_request_t *r)
 {
     ngx_http_iojs_ctx_t         *ctx;
+    ngx_str_t                  **headers;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
 
@@ -730,11 +791,15 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-    if (ctx->refused || ngx_http_iojs_process_headers(r, ctx) != NGX_ERROR) {
-        return NGX_OK;
-    } else {
+    dd("header filter (%p, %.*s)", r, (int)r->uri.len, r->uri.data);
+
+    if (ngx_http_iojs_aggregate_headers(r, 1, &headers) != NGX_OK)
         return NGX_ERROR;
-    }
+
+    if (iojsSubrequestHeaders(ctx->js_ctx, (iojsString **)headers))
+        return NGX_ERROR;
+
+    return NGX_OK;
 }
 
 
@@ -790,60 +855,6 @@ static void
 ngx_http_iojs_cleanup_request(void *data)
 {
     dd("request cleanup");
-}
-
-
-ngx_inline static ngx_int_t
-ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, ngx_str_t ***ret)
-{
-    ngx_uint_t                 len;
-    ngx_str_t                **headers;
-    ngx_uint_t                 i;
-    ngx_uint_t                 j;
-    ngx_list_part_t           *part;
-    ngx_table_elt_t           *header;
-
-    len = r->headers_in.headers.nalloc;
-
-    if (len > 0) {
-        // Allocate memory for a NULL-terminated list of pointers to names
-        // and values and for the values.
-        headers = ngx_palloc(r->pool,
-                             sizeof(ngx_str_t *) * (len * 2 + 1));
-
-        if (headers == NULL)
-            return NGX_ERROR;
-
-        j = 0;
-
-        part = &r->headers_in.headers.part;
-        header = part->elts;
-
-        for (i = 0; /* void */; i++) {
-
-            if (i >= part->nelts) {
-                if (part->next == NULL) {
-                    break;
-                }
-
-                part = part->next;
-                header = part->elts;
-                i = 0;
-            }
-
-            headers[j++] = &header[i].key;
-            headers[j++] = &header[i].value;
-        }
-
-        // NULL-terminate.
-        headers[j] = NULL;
-    } else {
-        headers = NULL;
-    }
-
-    *ret = headers;
-
-    return NGX_OK;
 }
 
 
@@ -919,7 +930,7 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         iojs_params = NULL;
     }
 
-    if (ngx_http_iojs_aggregate_headers(r, &iojs_headers) != NGX_OK)
+    if (ngx_http_iojs_aggregate_headers(r, 0, &iojs_headers) != NGX_OK)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
     r->headers_out.status = NGX_HTTP_OK;

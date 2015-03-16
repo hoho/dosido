@@ -159,6 +159,7 @@
                     function(what, arg) {  // SR_CALLBACK
                         if (!sr) {
                             sr = new Subrequest((what === TO_JS_CALLBACK_SUBREQUEST_HEADERS) && arg);
+
                             if (cb) {
                                 cb(sr);
                             }
