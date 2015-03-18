@@ -24,7 +24,7 @@ To build a service with io.js (node.js) we need to solve some common problems:
 + Need of something to start an restart io.js (node.js) processes.
 + Need of something to accept connections on port 80 (443) and to pass these
   connections to io.js (node.js) processes.
-+ Need of something to serve the static files.
++ Need of something to serve static files.
 + Need of something for routing.
 
 Starting and restarting might be done with something like upstart scripts,
@@ -42,9 +42,9 @@ dosido gives the ability to make all the steps in one place:
 
 + nginx master process is working greatly to start and restart child processes
   and to accept and distribute the connections for years.
-+ nginx is the one that usually faces the world to serve the static files.
++ nginx is the one that usually faces the world to serve static files.
 + nginx config is designed to describe routing, which SSL certificate to use,
-  and many more.
+  and much more.
 + from the JavaScript handler you can issue nginx subrequests. This means you
   can describe service's input and output (like backends addresses and
   balancing between them) in one config file you already know.
