@@ -1,5 +1,5 @@
 .PHONY: all
-all: iojs libiojs nginx-configure nginx
+all: iojs build
 
 
 .PHONY: iojs
@@ -14,8 +14,13 @@ libiojs:
 	$(MAKE) -C iojs
 
 
-.PHONY: nginx-configure
-nginx-configure:
+.PHONY: check-deps
+check-deps:
+	@python check-deps.py
+
+
+.PHONY: configure
+configure: check-deps
 	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./configure \
 		--prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
@@ -39,6 +44,10 @@ nginx-configure:
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
 		--with-cc-opt=-I../libiojs
+
+
+.PHONY: build
+build: libiojs nginx
 
 
 .PHONY: nginx
