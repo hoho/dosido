@@ -556,10 +556,10 @@ function onread(nread, buffer) {
 
 
 Socket.prototype._getpeername = function() {
-  if (!this._handle || !this._handle.getpeername) {
-    return {};
-  }
   if (!this._peername) {
+    if (!this._handle || !this._handle.getpeername) {
+      return {};
+    }
     var out = {};
     var err = this._handle.getpeername(out);
     if (err) return {};  // FIXME(bnoordhuis) Throw?
@@ -834,6 +834,15 @@ function connect(self, address, port, addressType, localAddress, localPort) {
 }
 
 
+// Check that the port number is not NaN when coerced to a number,
+// is an integer and that it falls within the legal range of port numbers.
+function isLegalPort(port) {
+  if (typeof port === 'string' && port.trim() === '')
+    return false;
+  return +port === (port >>> 0) && port >= 0 && port <= 0xFFFF;
+}
+
+
 Socket.prototype.connect = function(options, cb) {
   if (this.write !== Socket.prototype.write)
     this.write = Socket.prototype.write;
@@ -856,6 +865,7 @@ Socket.prototype.connect = function(options, cb) {
     this._writableState.errorEmitted = false;
     this.destroyed = false;
     this._handle = null;
+    this._peername = null;
   }
 
   var self = this;
@@ -896,16 +906,14 @@ Socket.prototype.connect = function(options, cb) {
     if (localPort && typeof localPort !== 'number')
       throw new TypeError('localPort should be a number: ' + localPort);
 
-    if (typeof options.port === 'number')
-      port = options.port;
-    else if (typeof options.port === 'string')
-      port = options.port.trim() === '' ? -1 : +options.port;
-    else if (options.port !== undefined)
-      throw new TypeError('port should be a number or string: ' + options.port);
-
-    if (port < 0 || port > 65535 || isNaN(port))
-      throw new RangeError('port should be >= 0 and < 65536: ' +
-                           options.port);
+    port = options.port;
+    if (typeof port !== 'undefined') {
+      if (typeof port !== 'number' && typeof port !== 'string')
+        throw new TypeError('port should be a number or string: ' + port);
+      if (!isLegalPort(port))
+        throw new RangeError('port should be >= 0 and < 65536: ' + port);
+    }
+    port |= 0;
 
     if (dnsopts.family !== 4 && dnsopts.family !== 6)
       dnsopts.hints = dns.ADDRCONFIG | dns.V4MAPPED;
@@ -1266,11 +1274,16 @@ Server.prototype.listen = function() {
       if (h.backlog)
         backlog = h.backlog;
 
-      if (typeof h.port === 'number') {
+      if (typeof h.port === 'number' || typeof h.port === 'string' ||
+          (typeof h.port === 'undefined' && 'port' in h)) {
+        // Undefined is interpreted as zero (random port) for consistency
+        // with net.connect().
+        if (typeof h.port !== 'undefined' && !isLegalPort(h.port))
+          throw new RangeError('port should be >= 0 and < 65536: ' + h.port);
         if (h.host)
-          listenAfterLookup(h.port, h.host, backlog, h.exclusive);
+          listenAfterLookup(h.port | 0, h.host, backlog, h.exclusive);
         else
-          listen(self, null, h.port, 4, backlog, undefined, h.exclusive);
+          listen(self, null, h.port | 0, 4, backlog, undefined, h.exclusive);
       } else if (h.path && isPipeName(h.path)) {
         var pipeName = self._pipeName = h.path;
         listen(self, pipeName, -1, -1, backlog, undefined, h.exclusive);

@@ -141,7 +141,10 @@ function fromJsonObject(that, object) {
 
 function allocate(that, length) {
   var fromPool = length !== 0 && length <= Buffer.poolSize >>> 1;
-  that.parent = fromPool ? palloc(that, length) : alloc(that, length);
+  if (fromPool)
+    that.parent = palloc(that, length);
+  else
+    alloc(that, length);
   that.length = length;
 }
 
@@ -153,6 +156,12 @@ function palloc(that, length) {
   var end = start + length;
   var buf = sliceOnto(allocPool, that, start, end);
   poolOffset = end;
+
+  // Ensure aligned slices
+  if (poolOffset & 0x7) {
+    poolOffset |= 0x7;
+    poolOffset++;
+  }
 
   return buf;
 }

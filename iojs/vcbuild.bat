@@ -57,7 +57,7 @@ if /i "%1"=="test-message"  set test_args=%test_args% message&goto arg-ok
 if /i "%1"=="test-gc"       set test_args=%test_args% gc&set buildnodeweak=1&goto arg-ok
 if /i "%1"=="test-internet" set test_args=%test_args% internet&goto arg-ok
 if /i "%1"=="test-pummel"   set test_args=%test_args% pummel&goto arg-ok
-if /i "%1"=="test-all"      set test_args=%test_args% sequential parallel message gc internet pummel&buildnodeweak1=1&set jslint=1&goto arg-ok
+if /i "%1"=="test-all"      set test_args=%test_args% sequential parallel message gc internet pummel&set buildnodeweak=1&set jslint=1&goto arg-ok
 if /i "%1"=="jslint"        set jslint=1&goto arg-ok
 if /i "%1"=="msi"           set msi=1&set licensertf=1&goto arg-ok
 if /i "%1"=="small-icu"     set i18n_arg=%1&goto arg-ok
@@ -172,7 +172,7 @@ if "%test_args%"=="" goto jslint
 if "%config%"=="Debug" set test_args=--mode=debug %test_args%
 if "%config%"=="Release" set test_args=--mode=release %test_args%
 echo running 'python tools/test.py %test_args%'
-python tools/test.py --timeout=50 %test_args%
+python tools/test.py %test_args%
 goto jslint
 
 :jslint

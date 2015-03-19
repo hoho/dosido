@@ -115,6 +115,8 @@ static bool trace_deprecation = false;
 static bool throw_deprecation = false;
 static bool abort_on_uncaught_exception = false;
 static const char* eval_string = nullptr;
+static unsigned int preload_module_count = 0;
+static const char** preload_modules = nullptr;
 static bool use_debug_agent = false;
 static bool debug_wait_connect = false;
 static int debug_port = 5858;
@@ -725,28 +727,29 @@ Local<Value> ErrnoException(Isolate* isolate,
   }
   Local<String> message = OneByteString(env->isolate(), msg);
 
-  Local<String> cons1 =
+  Local<String> cons =
       String::Concat(estring, FIXED_ONE_BYTE_STRING(env->isolate(), ", "));
-  Local<String> cons2 = String::Concat(cons1, message);
+  cons = String::Concat(cons, message);
 
-  if (path) {
-    Local<String> cons3 =
-        String::Concat(cons2, FIXED_ONE_BYTE_STRING(env->isolate(), " '"));
-    Local<String> cons4 =
-        String::Concat(cons3, String::NewFromUtf8(env->isolate(), path));
-    Local<String> cons5 =
-        String::Concat(cons4, FIXED_ONE_BYTE_STRING(env->isolate(), "'"));
-    e = Exception::Error(cons5);
-  } else {
-    e = Exception::Error(cons2);
+  Local<String> path_string;
+  if (path != nullptr) {
+    // FIXME(bnoordhuis) It's questionable to interpret the file path as UTF-8.
+    path_string = String::NewFromUtf8(env->isolate(), path);
   }
+
+  if (path_string.IsEmpty() == false) {
+    cons = String::Concat(cons, FIXED_ONE_BYTE_STRING(env->isolate(), " '"));
+    cons = String::Concat(cons, path_string);
+    cons = String::Concat(cons, FIXED_ONE_BYTE_STRING(env->isolate(), "'"));
+  }
+  e = Exception::Error(cons);
 
   Local<Object> obj = e->ToObject(env->isolate());
   obj->Set(env->errno_string(), Integer::New(env->isolate(), errorno));
   obj->Set(env->code_string(), estring);
 
-  if (path != nullptr) {
-    obj->Set(env->path_string(), String::NewFromUtf8(env->isolate(), path));
+  if (path_string.IsEmpty() == false) {
+    obj->Set(env->path_string(), path_string);
   }
 
   if (syscall != nullptr) {
@@ -1932,10 +1935,10 @@ void MemoryUsage(const FunctionCallbackInfo<Value>& args) {
   HeapStatistics v8_heap_stats;
   env->isolate()->GetHeapStatistics(&v8_heap_stats);
 
-  Local<Integer> heap_total =
-      Integer::NewFromUnsigned(env->isolate(), v8_heap_stats.total_heap_size());
-  Local<Integer> heap_used =
-      Integer::NewFromUnsigned(env->isolate(), v8_heap_stats.used_heap_size());
+  Local<Number> heap_total =
+      Number::New(env->isolate(), v8_heap_stats.total_heap_size());
+  Local<Number> heap_used =
+      Number::New(env->isolate(), v8_heap_stats.used_heap_size());
 
   Local<Object> info = Object::New(env->isolate());
   info->Set(env->rss_string(), Number::New(env->isolate(), rss));
@@ -2766,6 +2769,19 @@ void SetupProcessObject(Environment* env,
     READONLY_PROPERTY(process, "_forceRepl", True(env->isolate()));
   }
 
+  if (preload_module_count) {
+    CHECK(preload_modules);
+    Local<Array> array = Array::New(env->isolate());
+    for (unsigned int i = 0; i < preload_module_count; ++i) {
+      Local<String> module = String::NewFromUtf8(env->isolate(),
+                                                 preload_modules[i]);
+      array->Set(i, module);
+    }
+    READONLY_PROPERTY(process,
+                      "_preload_modules",
+                      array);
+  }
+
   // --no-deprecation
   if (no_deprecation) {
     READONLY_PROPERTY(process, "noDeprecation", True(env->isolate()));
@@ -2990,6 +3006,7 @@ static void PrintHelp() {
          "  -p, --print          evaluate script and print result\n"
          "  -i, --interactive    always enter the REPL even if stdin\n"
          "                       does not appear to be a terminal\n"
+         "  -r, --require        module to preload (option can be repeated)\n"
          "  --no-deprecation     silence deprecation warnings\n"
          "  --throw-deprecation  throw an exception anytime a deprecated "
          "function is used\n"
@@ -3012,8 +3029,6 @@ static void PrintHelp() {
          "NODE_PATH              ':'-separated list of directories\n"
 #endif
          "                       prefixed to the module search path.\n"
-         "NODE_MODULE_CONTEXTS   Set to 1 to load modules in their own\n"
-         "                       global contexts.\n"
          "NODE_DISABLE_COLORS    Set to 1 to disable colors in the REPL\n"
 #if defined(NODE_HAVE_I18N_SUPPORT)
          "NODE_ICU_DATA          Data path for ICU (Intl object) data\n"
@@ -3047,11 +3062,13 @@ static void ParseArgs(int* argc,
   const char** new_exec_argv = new const char*[nargs];
   const char** new_v8_argv = new const char*[nargs];
   const char** new_argv = new const char*[nargs];
+  const char** local_preload_modules = new const char*[nargs];
 
   for (unsigned int i = 0; i < nargs; ++i) {
     new_exec_argv[i] = nullptr;
     new_v8_argv[i] = nullptr;
     new_argv[i] = nullptr;
+    local_preload_modules[i] = nullptr;
   }
 
   // exec_argv starts with the first option, the other two start with argv[0].
@@ -3100,6 +3117,15 @@ static void ParseArgs(int* argc,
           eval_string += 1;
         }
       }
+    } else if (strcmp(arg, "--require") == 0 ||
+               strcmp(arg, "-r") == 0) {
+      const char* module = argv[index + 1];
+      if (module == nullptr) {
+        fprintf(stderr, "%s: %s requires an argument\n", argv[0], arg);
+        exit(9);
+      }
+      args_consumed += 1;
+      local_preload_modules[preload_module_count++] = module;
     } else if (strcmp(arg, "--interactive") == 0 || strcmp(arg, "-i") == 0) {
       force_repl = true;
     } else if (strcmp(arg, "--no-deprecation") == 0) {
@@ -3146,6 +3172,16 @@ static void ParseArgs(int* argc,
   memcpy(argv, new_argv, new_argc * sizeof(*argv));
   delete[] new_argv;
   *argc = static_cast<int>(new_argc);
+
+  // Copy the preload_modules from the local array to an appropriately sized
+  // global array.
+  if (preload_module_count > 0) {
+    CHECK(!preload_modules);
+    preload_modules = new const char*[preload_module_count];
+    memcpy(preload_modules, local_preload_modules,
+           preload_module_count * sizeof(*preload_modules));
+  }
+  delete[] local_preload_modules;
 }
 
 
@@ -3196,6 +3232,7 @@ static void DispatchDebugMessagesAsyncCallback(uv_async_t* handle) {
   if (debugger_running == false) {
     fprintf(stderr, "Starting debugger agent.\n");
 
+    HandleScope scope(node_isolate);
     Environment* env = Environment::GetCurrent(node_isolate);
     Context::Scope context_scope(env->context());
 
@@ -3604,8 +3641,8 @@ void AtExit(void (*cb)(void* arg), void* arg) {
 
 
 void EmitBeforeExit(Environment* env) {
-  Context::Scope context_scope(env->context());
   HandleScope handle_scope(env->isolate());
+  Context::Scope context_scope(env->context());
   Local<Object> process_object = env->process_object();
   Local<String> exit_code = FIXED_ONE_BYTE_STRING(env->isolate(), "exitCode");
   Local<Value> args[] = {

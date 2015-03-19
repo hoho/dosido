@@ -306,11 +306,13 @@ void TLSWrap::EncOut() {
   uv_buf_t buf[ARRAY_SIZE(data)];
   for (size_t i = 0; i < count; i++)
     buf[i] = uv_buf_init(data[i], size[i]);
-  int r = stream_->DoWrite(write_req, buf, count, nullptr);
+  int err = stream_->DoWrite(write_req, buf, count, nullptr);
   write_req->Dispatched();
 
   // Ignore errors, this should be already handled in js
-  if (!r)
+  if (err)
+    write_req->Dispose();
+  else
     NODE_COUNT_NET_BYTES_SENT(write_size_);
 }
 
@@ -809,8 +811,8 @@ int TLSWrap::SelectSNIContextCallback(SSL* s, int* ad, void* arg) {
 
 
 void TLSWrap::Initialize(Handle<Object> target,
-                              Handle<Value> unused,
-                              Handle<Context> context) {
+                         Handle<Value> unused,
+                         Handle<Context> context) {
   Environment* env = Environment::GetCurrent(context);
 
   env->SetMethod(target, "wrap", TLSWrap::Wrap);
@@ -825,7 +827,7 @@ void TLSWrap::Initialize(Handle<Object> target,
   env->SetProtoMethod(t, "enableSessionCallbacks", EnableSessionCallbacks);
   env->SetProtoMethod(t, "enableHelloParser", EnableHelloParser);
 
-  StreamBase::AddMethods<TLSWrap>(env, t);
+  StreamBase::AddMethods<TLSWrap>(env, t, StreamBase::kFlagHasWritev);
   SSLWrap<TLSWrap>::AddMethods(env, t);
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
@@ -835,6 +837,9 @@ void TLSWrap::Initialize(Handle<Object> target,
 
   env->set_tls_wrap_constructor_template(t);
   env->set_tls_wrap_constructor_function(t->GetFunction());
+
+  target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "TLSWrap"),
+              t->GetFunction());
 }
 
 }  // namespace node
