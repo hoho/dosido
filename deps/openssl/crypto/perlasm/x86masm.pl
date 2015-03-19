@@ -39,8 +39,6 @@ sub get_mem
 { my($size,$addr,$reg1,$reg2,$idx)=@_;
   my($post,$ret);
 
-    if (!defined($idx) && 1*$reg2) { $idx=$reg2; $reg2=$reg1; undef $reg1; }
-
     $ret .= "$size PTR " if ($size ne "");
 
     $addr =~ s/^\s+//;
@@ -135,7 +133,7 @@ ___
     if (grep {/\b${nmdecor}OPENSSL_ia32cap_P\b/i} @out)
     {	my $comm=<<___;
 .bss	SEGMENT 'BSS'
-COMM	${nmdecor}OPENSSL_ia32cap_P:DWORD:4
+COMM	${nmdecor}OPENSSL_ia32cap_P:QWORD
 .bss	ENDS
 ___
 	# comment out OPENSSL_ia32cap_P declarations
