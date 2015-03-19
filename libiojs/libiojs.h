@@ -105,7 +105,8 @@ LIBIOJSPUBFUN int LIBIOJSCALL
         iojsChunk                (iojsContext *jsCtx, char *data, size_t len,
                                   unsigned last, unsigned sr);
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsSubrequestHeaders    (iojsContext *jsCtx, iojsString **headers);
+        iojsSubrequestHeaders    (iojsContext *jsCtx, int status,
+                                  iojsString **headers);
 
 #ifdef __cplusplus
 }

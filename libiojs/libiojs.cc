@@ -17,9 +17,9 @@ using v8::Array;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::HandleScope;
+using v8::Integer;
 using v8::Local;
 using v8::Null;
-using v8::Number;
 using v8::Object;
 using v8::Persistent;
 using v8::String;
@@ -358,7 +358,7 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 {
     HandleScope scope(env->isolate());
 
-    Local<Value> args[2];
+    Local<Value> args[3];
     Persistent<Function> *_f = NULL;
     Local<Function> f;
     unsigned isSubrequest;
@@ -393,7 +393,7 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
         return;
     }
 
-    args[0] = Number::New(env->isolate(), what);
+    args[0] = Integer::New(env->isolate(), what);
 
     switch (what) {
         case TO_JS_CALLBACK_PUSH_CHUNK:
@@ -438,9 +438,11 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
                     }
                 }
 
-                args[1] = h;
+                args[1] = Integer::New(env->isolate(),
+                    reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd)->status);
+                args[2] = h;
 
-                MakeCallback(env, f, f, 2, args);
+                MakeCallback(env, f, f, 3, args);
             }
             break;
 
@@ -980,7 +982,7 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
 
 
 int
-iojsSubrequestHeaders(iojsContext *jsCtx, iojsString **headers)
+iojsSubrequestHeaders(iojsContext *jsCtx, int status, iojsString **headers)
 {
     iojsSubrequestHeadersCmd *cmd;
 
@@ -991,6 +993,7 @@ iojsSubrequestHeaders(iojsContext *jsCtx, iojsString **headers)
 
     cmd->type = TO_JS_SUBREQUEST_HEADERS;
     cmd->jsCtx = jsCtx;
+    cmd->status = status;
     cmd->headers = headers;
 
     iojsToJSSend(cmd);

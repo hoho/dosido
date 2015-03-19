@@ -80,6 +80,7 @@ typedef struct iojsChunkCmd : _iojsToJS {
 
 
 typedef struct iojsSubrequestHeadersCmd : _iojsToJS {
+    int           status;
     iojsString  **headers;
 } iojsSubrequestHeadersCmd;
 

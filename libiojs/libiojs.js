@@ -152,13 +152,17 @@
                 callback(
                     BY_JS_SUBREQUEST,
                     payload,
-                    url,                   // SR_URL
-                    method,                // SR_METHOD
-                    headers,               // SR_HEADERS
-                    body,                  // SR_BODY
-                    function(what, arg) {  // SR_CALLBACK
+                    url,                         // SR_URL
+                    method,                      // SR_METHOD
+                    headers,                     // SR_HEADERS
+                    body,                        // SR_BODY
+                    function(what, arg, arg2) {  // SR_CALLBACK
                         if (!sr) {
-                            sr = new Subrequest((what === TO_JS_CALLBACK_SUBREQUEST_HEADERS) && arg);
+                            if (what === TO_JS_CALLBACK_SUBREQUEST_HEADERS) {
+                                sr = new Subrequest(arg, arg2);
+                            } else {
+                                sr = new Subrequest();
+                            }
 
                             if (cb) {
                                 cb(sr);
@@ -232,7 +236,8 @@
     };
 
 
-    function Subrequest(headers) {
+    function Subrequest(status, headers) {
+        this.status = status;
         this._headers = headers;
 
         Readable.call(this, {

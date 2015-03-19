@@ -720,7 +720,7 @@ ngx_http_iojs_process_headers(ngx_http_request_t *r, ngx_http_iojs_ctx_t *ctx)
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned sr,
+ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned out,
                                 ngx_str_t ***ret)
 {
     ngx_uint_t                 len;
@@ -730,7 +730,7 @@ ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned sr,
     ngx_list_part_t           *part;
     ngx_table_elt_t           *header;
 
-    if (sr) {
+    if (out) {
         len = r->headers_out.headers.nalloc;
         part = &r->headers_out.headers.part;
     } else {
@@ -803,7 +803,8 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
         if (ngx_http_iojs_aggregate_headers(r, 1, &headers) != NGX_OK)
             return NGX_ERROR;
 
-        if (iojsSubrequestHeaders(ctx->js_ctx, (iojsString **)headers))
+        if (iojsSubrequestHeaders(ctx->js_ctx, r->headers_out.status,
+                                  (iojsString **)headers))
             return NGX_ERROR;
     }
 
