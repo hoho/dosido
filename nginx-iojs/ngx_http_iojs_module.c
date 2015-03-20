@@ -212,9 +212,12 @@ ngx_inline static ngx_int_t
 ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
                          unsigned last)
 {
-    ngx_buf_t           *b;
-    ngx_chain_t          out;
-    ngx_int_t            rc;
+    ngx_buf_t                      *b;
+    ngx_chain_t                     out;
+    ngx_int_t                       rc;
+    ngx_http_iojs_ctx_t            *ctx;
+    ngx_http_postponed_request_t   *pr;
+    ngx_http_request_t             *cr;
 
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + len);
     if (b == NULL) {
@@ -241,10 +244,24 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
     dd("Sending response chunk (len: %zd, last: %d)", len, last);
 
-    if (r != r->connection->data)
+    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+
+    if (ctx == NULL || ctx->skip_filter) {
+        rc = ngx_http_output_filter(r, &out);
+    } else {
+        // We will completely eat this chunk in our body filter, avoid
+        // postpone filter for it.
+        pr = r->postponed;
+        cr = r->connection->data;
+
+        r->postponed = NULL;
         r->connection->data = r;
 
-    rc = ngx_http_output_filter(r, &out);
+        rc = ngx_http_output_filter(r, &out);
+
+        r->postponed = pr;
+        r->connection->data = cr;
+    }
 
     if (rc == NGX_ERROR) {
         ngx_http_finalize_request(r, NGX_ERROR);
@@ -369,17 +386,18 @@ ngx_http_iojs_subrequest_done(ngx_http_request_t *sr, void *data, ngx_int_t rc)
 static ngx_int_t
 ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
 {
-    iojsSubrequest              *data;
-    ngx_http_iojs_ctx_t         *sr_ctx;
-    ngx_http_request_t          *sr;
-    ngx_http_post_subrequest_t  *psr;
-    ngx_http_request_body_t     *rb;
-    ngx_buf_t                   *b;
-    ngx_http_core_main_conf_t   *cmcf;
-    ngx_str_t                    sr_uri;
-    ngx_str_t                    args;
-    ngx_uint_t                   flags = 0;
-    ngx_str_t                    sr_body;
+    iojsSubrequest                 *data;
+    ngx_http_iojs_ctx_t            *sr_ctx;
+    ngx_http_request_t             *sr;
+    ngx_http_post_subrequest_t     *psr;
+    ngx_http_request_body_t        *rb;
+    ngx_buf_t                      *b;
+    ngx_http_core_main_conf_t      *cmcf;
+    ngx_str_t                       sr_uri;
+    ngx_str_t                       args;
+    ngx_uint_t                      flags = 0;
+    ngx_str_t                       sr_body;
+    ngx_http_postponed_request_t   *pr;
 
     data = (iojsSubrequest *)cmd->data;
     if (data == NULL) {
@@ -414,6 +432,26 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
     }
 
     dd("subrequest (%p, %.*s)", sr, (int)sr->uri.len, sr->uri.data);
+
+    if (sr->connection->data == sr) {
+        sr->connection->data = r;
+    }
+
+    // Remove subrequest from postponed requests.
+    // Subrequest is the last item of the chain or the only item of the chain.
+    pr = r->main->postponed;
+
+    while (pr != NULL && pr->next != NULL) {
+        // Run through the chain.
+        pr = pr->next;
+    }
+
+    if (pr != NULL) {
+        if (pr->next != NULL)
+            pr->next = NULL; // Last item of the chain.
+        else
+            r->main->postponed = NULL; // The only item of the chain.
+    }
 
     // Don't inherit parent request variables. Content-Length is
     // cacheable in proxy module and we don't need Content-Length from
@@ -551,6 +589,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     if (r != r->main && js_ctx->wait == 0) {
                         // Finalize the request.
                         ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                        r->connection->data = r;
                         ngx_http_finalize_request(r, NGX_OK);
                     }
 
@@ -587,6 +626,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 if (r != r->main && js_ctx->wait == 0) {
                     // Finalize the request.
                     ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                    r->connection->data = r;
                     ngx_http_finalize_request(r, NGX_OK);
                 }
 
