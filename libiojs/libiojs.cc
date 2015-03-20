@@ -3,9 +3,47 @@
 #include "node_natives.h"
 
 #include "libiojsInternals.h"
+#include <fcntl.h>
 
+#ifdef _WIN32
+#include <io.h>
+inline int iojsPipe(int pipefd[2])
+{
+    return _pipe(pipefd, 65535, _O_BINARY);
+}
+inline ssize_t iojsWrite(int fd, const void *buf, size_t count)
+{
+    return _write(fd, buf, count);
+}
+inline ssize_t iojsRead(int fd, void *buf, size_t count)
+{
+    return _read(fd, buf, count);
+}
+inline int iojsClose(int fd)
+{
+    return _close(fd);
+}
+#else
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
+inline int iojsPipe(int pipefd[2])
+{
+    return pipe(pipefd);
+}
+inline ssize_t iojsWrite(int fd, const void *buf, size_t count)
+{
+    return write(fd, buf, count);
+}
+inline ssize_t iojsRead(int fd, void *buf, size_t count)
+{
+    return read(fd, buf, count);
+}
+inline int iojsClose(int fd)
+{
+    return close(fd);
+}
+#endif
 
 
 using node::Environment;
@@ -46,9 +84,9 @@ iojsToJSSend(iojsToJS *cmd)
     ssize_t sent = 0;
     ssize_t sz;
     while (sent < (ssize_t)sizeof(cmd)) {
-        sz = write(iojsIncomingPipeFd[1],
-                   reinterpret_cast<char *>(&cmd) + sent,
-                   sizeof(cmd) - sent);
+        sz = iojsWrite(iojsIncomingPipeFd[1],
+                       reinterpret_cast<char *>(&cmd) + sent,
+                       sizeof(cmd) - sent);
 
         if (sz < 0) {
             fprintf(stderr, "iojsToJSSend fatal error: %d\n", errno);
@@ -66,7 +104,7 @@ static iojsToJS  *iojsCurToJSRecvCmd;
 static inline iojsToJS*
 iojsToJSRecv(void)
 {
-    ssize_t sz = read(
+    ssize_t sz = iojsRead(
             iojsIncomingPipeFd[0],
             reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
             sizeof(iojsToJS *) - iojsCurToJSRecvLen
@@ -96,9 +134,9 @@ iojsFromJSSend(iojsFromJS *cmd)
     ssize_t sent = 0;
     ssize_t sz;
     while (sent < (ssize_t)sizeof(cmd)) {
-        sz = write(iojsOutgoingPipeFd[1],
-                   reinterpret_cast<char *>(&cmd) + sent,
-                   sizeof(cmd) - sent);
+        sz = iojsWrite(iojsOutgoingPipeFd[1],
+                       reinterpret_cast<char *>(&cmd) + sent,
+                       sizeof(cmd) - sent);
 
         if (sz < 0) {
             fprintf(stderr, "iojsFromJSSend fatal error: %d\n", errno);
@@ -116,7 +154,7 @@ static iojsFromJS  *iojsCurFromJSRecvCmd;
 iojsFromJS*
 iojsFromJSRecv(void)
 {
-    ssize_t sz = read(
+    ssize_t sz = iojsRead(
             iojsOutgoingPipeFd[0],
             reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
             sizeof(iojsFromJS *) - iojsCurFromJSRecvLen
@@ -207,16 +245,16 @@ static inline void
 iojsClosePipes(void)
 {
     if (iojsIncomingPipeFd[0] != -1)
-        close(iojsIncomingPipeFd[0]);
+        iojsClose(iojsIncomingPipeFd[0]);
 
     if (iojsIncomingPipeFd[1] != -1)
-        close(iojsIncomingPipeFd[1]);
+        iojsClose(iojsIncomingPipeFd[1]);
 
     if (iojsOutgoingPipeFd[0] != -1)
-        close(iojsOutgoingPipeFd[0]);
+        iojsClose(iojsOutgoingPipeFd[0]);
 
     if (iojsOutgoingPipeFd[1] != -1)
-        close(iojsOutgoingPipeFd[1]);
+        iojsClose(iojsOutgoingPipeFd[1]);
 }
 
 
@@ -224,20 +262,23 @@ static inline int
 iojsOpenPipes(void)
 {
     int err;
+#ifndef _WIN32
     int r;
     int set = 1;
+#endif
 
-    err = pipe(iojsIncomingPipeFd);
+    err = iojsPipe(iojsIncomingPipeFd);
     if (err) {
         err = -errno;
         goto error;
     }
-    err = pipe(iojsOutgoingPipeFd);
+    err = iojsPipe(iojsOutgoingPipeFd);
     if (err) {
         err = -errno;
         goto error;
     }
 
+#ifndef _WIN32
     do r = ioctl(iojsIncomingPipeFd[0], FIONBIO, &set);
     while (r == -1 && errno == EINTR);
     if (r) {
@@ -265,6 +306,7 @@ iojsOpenPipes(void)
         err = -errno;
         goto error;
     }
+#endif
 
     return 0;
 
