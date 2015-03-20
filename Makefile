@@ -21,7 +21,7 @@ check-deps:
 
 .PHONY: configure
 configure: check-deps
-	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./configure \
+	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./auto/configure \
 		--prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
 		--sbin-path=/usr/local/bin/dosido \
@@ -40,6 +40,7 @@ configure: check-deps
 		--with-http_secure_link_module \
 		--with-http_stub_status_module \
 		--with-http_ssl_module \
+		--with-ipv6 \
 		--with-openssl=../deps/openssl \
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
