@@ -1,20 +1,6 @@
 /*
  * Copyright (C) Marat Abdullin
  */
-
-#ifdef DDEBUG
-#undef DDEBUG
-#endif
-
-#define DDEBUG 1
-
-
-#ifndef DDEBUG
-#define DDEBUG 0
-#endif
-
-#include "ddebug.h"
-
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -24,6 +10,9 @@
 
 #include <libiojs.h>
 #include <string.h>
+
+#define DDEBUG 1
+#include "ddebug.h"
 
 
 typedef struct {
@@ -150,7 +139,7 @@ struct ngx_http_iojs_ctx_s {
 
 static int64_t ngx_atomic_fetch_add_wrap(int64_t *value, int64_t add)
 {
-    return ngx_atomic_fetch_add((ngx_atomic_t)value, (ngx_atomic_t)add);
+    return ngx_atomic_fetch_add((ngx_atomic_int_t)value, (ngx_atomic_int_t)add);
 }
 
 
