@@ -18,7 +18,6 @@
 #include <ngx_string.h>
 #include <ngx_array.h>
 
-#include <unistd.h>
 #include <libiojs.h>
 #include <string.h>
 
@@ -246,7 +245,9 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
 
-    if (ctx == NULL || ctx->skip_filter) {
+    if (ctx == NULL || ctx->skip_filter ||
+        (r->postponed == NULL && r->connection->data == r))
+    {
         rc = ngx_http_output_filter(r, &out);
     } else {
         // We will completely eat this chunk in our body filter, avoid
