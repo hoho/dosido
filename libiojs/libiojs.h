@@ -106,7 +106,7 @@ LIBIOJSPUBFUN int LIBIOJSCALL
                                   unsigned last, unsigned sr);
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsSubrequestHeaders    (iojsContext *jsCtx, int status,
-                                  iojsString **headers);
+                                  iojsString *statusMsg, iojsString **headers);
 
 #ifdef __cplusplus
 }

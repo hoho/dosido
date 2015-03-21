@@ -838,6 +838,7 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
             return NGX_ERROR;
 
         if (iojsSubrequestHeaders(ctx->js_ctx, r->headers_out.status,
+                                  (iojsString *)&r->headers_out.status_line,
                                   (iojsString **)headers))
             return NGX_ERROR;
     }

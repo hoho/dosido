@@ -460,10 +460,12 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 
         case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
             {
-                Local<Object>   h = Object::New(env->isolate());
-                int             i;
-                iojsString    **headers = \
-                    reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd)->headers;
+                Local<Object>              h = Object::New(env->isolate());
+                Local<Object>              meta = Object::New(env->isolate());
+                int                        i;
+                iojsSubrequestHeadersCmd  *shcmd = \
+                        reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd);
+                iojsString               **headers = shcmd->headers;
 
                 if (headers != NULL) {
                     for (i = 0; headers[i] != NULL; i += 2) {
@@ -480,8 +482,12 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
                     }
                 }
 
-                args[1] = Integer::New(env->isolate(),
-                    reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd)->status);
+                meta->Set(0, Integer::New(env->isolate(), shcmd->status));
+                meta->Set(1, String::NewFromUtf8(env->isolate(),
+                                                 shcmd->statusMessage->data,
+                                                 String::kNormalString,
+                                                 shcmd->statusMessage->len));
+                args[1] = meta;
                 args[2] = h;
 
                 MakeCallback(env, f, f, 3, args);
@@ -1024,18 +1030,24 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
 
 
 int
-iojsSubrequestHeaders(iojsContext *jsCtx, int status, iojsString **headers)
+iojsSubrequestHeaders(iojsContext *jsCtx, int status, iojsString *statusMsg,
+                      iojsString **headers)
 {
     iojsSubrequestHeadersCmd *cmd;
 
     cmd = reinterpret_cast<iojsSubrequestHeadersCmd *>(
-            malloc(sizeof(iojsSubrequestHeadersCmd))
+            malloc(sizeof(iojsSubrequestHeadersCmd) +
+                   sizeof(iojsString) + statusMsg->len)
     );
     IOJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_SUBREQUEST_HEADERS;
     cmd->jsCtx = jsCtx;
     cmd->status = status;
+    cmd->statusMessage = reinterpret_cast<iojsString *>(&cmd[1]);
+    cmd->statusMessage->data = reinterpret_cast<char *>(&cmd->statusMessage[1]);
+    cmd->statusMessage->len = statusMsg->len;
+    memcpy(cmd->statusMessage->data, statusMsg->data, statusMsg->len);
     cmd->headers = headers;
 
     iojsToJSSend(cmd);

@@ -236,8 +236,9 @@
     };
 
 
-    function Subrequest(status, headers) {
-        this.status = status;
+    function Subrequest(meta, headers) {
+        this.statusCode = meta[0];
+        this.statusMessage = meta[1];
         this._headers = headers;
 
         Readable.call(this, {
