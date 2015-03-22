@@ -504,6 +504,8 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         rb->buf = b;
 
         sr->request_body = rb;
+    } else {
+        sr->request_body = NULL;
     }
 
     ngx_http_run_posted_requests(sr->connection);
