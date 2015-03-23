@@ -80,29 +80,29 @@ server {
 ### test.js
 
 ```js
-module.exports = function(i, o, sr, params) {
-    // i: request object.
-    // o: response object.
+module.exports = function(request, response, sr, params) {
+    // request: request object.
+    // response: response object.
     // sr: a function to make a subrequest.
     // params: an object of js_param, in our case:
     //         {"backend": "/my-backend/", "addr": "127.0.0.1"}.
     var reqBody = [];
-    i.on('data', function(chunk) { reqBody.push(chunk); });
-    i.on('end', function() {
+    request.on('data', function(chunk) { reqBody.push(chunk); });
+    request.on('end', function() {
         // Do a subrequest.
-        srResponse = [];
-        sr({url: params.backend}, function(r) {
+        srData = [];
+        sr({url: params.backend}, function(srResponse) {
             // r: subrequest object.
-            r.on('data', function(chunk) { srResponse.push(chunk); });
-            r.on('end', function() {
+            srResponse.on('data', function(chunk) { srData.push(chunk); });
+            srResponse.on('end', function() {
                 var ret = {
                     req: reqBody.join(''),
                     params: params,
-                    status: r.statusCode,
-                    type: r.getHeader('Last-Modified'),
-                    backend: srResponse.join('')
+                    status: srResponse.statusCode,
+                    modified: srResponse.getHeader('Last-Modified'),
+                    backend: srData.join('')
                 }
-                o.end(JSON.stringify(ret, undefined, 4) +'\n');
+                response.end(JSON.stringify(ret, undefined, 4) + '\n');
             });
         });
     });
@@ -121,7 +121,7 @@ module.exports = function(i, o, sr, params) {
         "addr": "127.0.0.1"
     },
     "status": 200,
-    "type": "Mon, 23 Mar 2015 00:29:48 GMT",
+    "modified": "Mon, 23 Mar 2015 00:29:48 GMT",
     "backend": "www.some-amazing-backend.com response"
 }
 ```
