@@ -84,7 +84,7 @@ module.exports = function(i, o, sr, params) {
     // i: request object.
     // o: response object.
     // sr: a function to make a subrequest.
-    // params: an object of js_params, in our case:
+    // params: an object of js_param, in our case:
     //         {"backend": "/my-backend/", "addr": "127.0.0.1"}.
     var reqBody = [];
     i.on('data', function(chunk) { reqBody.push(chunk); });
