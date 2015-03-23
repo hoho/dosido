@@ -92,7 +92,7 @@ module.exports = function(request, response, sr, params) {
         // Do a subrequest.
         srData = [];
         sr({url: params.backend}, function(srResponse) {
-            // r: subrequest object.
+            // srResponse: subrequest object.
             srResponse.on('data', function(chunk) { srData.push(chunk); });
             srResponse.on('end', function() {
                 var ret = {
