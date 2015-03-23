@@ -86,9 +86,6 @@
     var Readable = stream.Readable;
     var Writable = stream.Writable;
     var util = NativeModule.require('util');
-    util.inherits(Request, Readable);
-    util.inherits(Response, Writable);
-    util.inherits(Subrequest, Readable);
 
     //  Codes to come from this script (should match iojsByJSCommandType).
     var BY_JS_INIT_DESTRUCTOR = 1,
@@ -102,6 +99,72 @@
         TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
         TO_JS_CALLBACK_REQUEST_ERROR = 9,
         TO_JS_CALLBACK_RESPONSE_ERROR = 10;
+
+
+    function Request(headers, callback, payload) {
+        var requestBodyRequested = false;
+        var self = this;
+
+        this._headers = headers;
+
+        Readable.call(this, {
+            read: function read() {
+                if (!requestBodyRequested) {
+                    callback(BY_JS_READ_REQUEST_BODY, payload);
+                    requestBodyRequested = true;
+                }
+            }
+        });
+
+        this.resume();
+    }
+    util.inherits(Request, Readable);
+
+
+    function Response(callback, payload) {
+        var headersSent = false;
+
+        this._headers = {};
+        this.statusCode = 200;
+        this.statusMessage = 'OK';
+
+        Writable.call(this, {
+            write: function write(chunk, encoding, cb) {
+                if (!headersSent) {
+                    callback(BY_JS_RESPONSE_HEADERS, payload, this._headers);
+                    headersSent = true;
+                }
+
+                callback(BY_JS_RESPONSE_BODY, payload, chunk.toString());
+
+                cb();
+            }
+        });
+    }
+    util.inherits(Response, Writable);
+    Response.prototype.setHeader = function setHeader(name, value) {
+        this._headers[name] = value;
+    };
+
+
+    function Subrequest(meta, headers) {
+        if (meta) {
+            this.statusCode = meta[0];
+            this.statusMessage = meta[1];
+        }
+        this._headers = headers;
+
+        Readable.call(this, {
+            read: function read() {}
+        });
+
+        this.resume();
+    }
+    util.inherits(Subrequest, Readable);
+    Subrequest.prototype.getHeader = function getHeader(name) {
+        return this._headers[name];
+    };
+
 
     return scripts.map(function(filename) {
         filename = Module._resolveFilename(path.resolve(filename), null);
@@ -191,64 +254,4 @@
     });
 
 
-    function Request(headers, callback, payload) {
-        var requestBodyRequested = false;
-        var self = this;
-
-        this._headers = headers;
-
-        Readable.call(this, {
-            read: function read() {
-                if (!requestBodyRequested) {
-                    callback(BY_JS_READ_REQUEST_BODY, payload);
-                    requestBodyRequested = true;
-                }
-            }
-        });
-
-        this.resume();
-    }
-
-
-    function Response(callback, payload) {
-        var headersSent = false;
-
-        this._headers = {};
-        this.statusCode = 200;
-        this.statusMessage = 'OK';
-
-        Writable.call(this, {
-            write: function write(chunk, encoding, cb) {
-                if (!headersSent) {
-                    callback(BY_JS_RESPONSE_HEADERS, payload, this._headers);
-                    headersSent = true;
-                }
-
-                callback(BY_JS_RESPONSE_BODY, payload, chunk.toString());
-
-                cb();
-            }
-        });
-    }
-
-    Response.prototype.setHeader = function setHeader(name, value) {
-        this._headers[name] = value;
-    };
-
-
-    function Subrequest(meta, headers) {
-        this.statusCode = meta[0];
-        this.statusMessage = meta[1];
-        this._headers = headers;
-
-        Readable.call(this, {
-            read: function read() {}
-        });
-
-        this.resume();
-    }
-
-    Subrequest.prototype.getHeader = function getHeader(name) {
-        return this._headers[name];
-    };
 });
