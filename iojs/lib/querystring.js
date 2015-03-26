@@ -90,6 +90,9 @@ var hexTable = new Array(256);
 for (var i = 0; i < 256; ++i)
   hexTable[i] = '%' + ((i < 16 ? '0' : '') + i.toString(16)).toUpperCase();
 QueryString.escape = function(str) {
+  // replaces encodeURIComponent
+  // http://www.ecma-international.org/ecma-262/5.1/#sec-15.1.3.4
+  str = '' + str;
   var len = str.length;
   var out = '';
   var i, c;
@@ -144,8 +147,10 @@ QueryString.escape = function(str) {
 };
 
 var stringifyPrimitive = function(v) {
-  if (typeof v === 'string' || (typeof v === 'number' && isFinite(v)))
+  if (typeof v === 'string')
     return v;
+  if (typeof v === 'number' && isFinite(v))
+    return '' + v;
   if (typeof v === 'boolean')
     return v ? 'true' : 'false';
   return '';

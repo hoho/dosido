@@ -1,5 +1,68 @@
 # io.js ChangeLog
 
+## 2015-03-23, Version 1.6.2, @rvagg
+
+### Notable changes
+
+* **Windows**: The ongoing work in improving the state of Windows support has resulted in full test suite passes once again. As noted in the release notes for v1.4.2, CI system and configuration problems prevented it from properly reporting problems with the Windows tests, the problems with the CI and the codebase appear to have been fully resolved.
+* **FreeBSD**: A [kernel bug](https://lists.freebsd.org/pipermail/freebsd-current/2015-March/055043.html) impacting io.js/Node.js was [discovered](https://github.com/joyent/node/issues/9326) and a patch has been introduced to prevent it causing problems for io.js (Fedor Indutny) [#1218](https://github.com/iojs/io.js/pull/1218).
+* **module**: you can now `require('.')` instead of having to `require('./')`, this is considered a bugfix (Michaël Zasso) [#1185](https://github.com/iojs/io.js/pull/1185).
+* **v8**: updated to 4.1.0.25 including patches for `--max_old_space_size` values above `4096` and Solaris support, both of which are already included in io.js.
+
+### Known issues
+
+* Possible small memory leak(s) may still exist but have yet to be properly identified, details at [#1075](https://github.com/iojs/io.js/issues/1075).
+* Surrogate pair in REPL can freeze terminal [#690](https://github.com/iojs/io.js/issues/690)
+* Not possible to build io.js as a static library [#686](https://github.com/iojs/io.js/issues/686)
+* `process.send()` is not synchronous as the docs suggest, a regression introduced in 1.0.2, see [#760](https://github.com/iojs/io.js/issues/760) and fix in [#774](https://github.com/iojs/io.js/issues/774)
+* Calling `dns.setServers()` while a DNS query is in progress can cause the process to crash on a failed assertion [#894](https://github.com/iojs/io.js/issues/894)
+
+### Commits
+
+* [[`fe4434b77a`](https://github.com/iojs/io.js/commit/fe4434b77a)] - **deps**: upgrade v8 to 4.1.0.25 (Johan Bergström) [#1224](https://github.com/iojs/io.js/pull/1224)
+* [[`d8f383ba3f`](https://github.com/iojs/io.js/commit/d8f383ba3f)] - **doc**: update AUTHORS list (Rod Vagg) [#1234](https://github.com/iojs/io.js/pull/1234)
+* [[`bc9c1a5a7b`](https://github.com/iojs/io.js/commit/bc9c1a5a7b)] - **doc**: fix typo in CHANGELOG (Mathieu Darse) [#1230](https://github.com/iojs/io.js/pull/1230)
+* [[`99c79f8d41`](https://github.com/iojs/io.js/commit/99c79f8d41)] - **doc**: call js function in null context (Ben Noordhuis) [#1125](https://github.com/iojs/io.js/pull/1125)
+* [[`55abf34be5`](https://github.com/iojs/io.js/commit/55abf34be5)] - **doc**: don't use `using namespace v8` (Ben Noordhuis) [#1125](https://github.com/iojs/io.js/pull/1125)
+* [[`c4e1b82120`](https://github.com/iojs/io.js/commit/c4e1b82120)] - **doc**: replace v8::Handle<T> with v8::Local<T> (Ben Noordhuis) [#1125](https://github.com/iojs/io.js/pull/1125)
+* [[`2f1b78347c`](https://github.com/iojs/io.js/commit/2f1b78347c)] - **doc**: remove unnecessary v8::HandleScopes (Ben Noordhuis) [#1125](https://github.com/iojs/io.js/pull/1125)
+* [[`409d413363`](https://github.com/iojs/io.js/commit/409d413363)] - **doc**: remove uses of v8::Isolate::GetCurrent() (Ben Noordhuis) [#1125](https://github.com/iojs/io.js/pull/1125)
+* [[`33fea6ed5f`](https://github.com/iojs/io.js/commit/33fea6ed5f)] - **lib**: don't penalize setInterval() common case (Ben Noordhuis) [#1221](https://github.com/iojs/io.js/pull/1221)
+* [[`31da9758a0`](https://github.com/iojs/io.js/commit/31da9758a0)] - **lib**: don't penalize setTimeout() common case (Ben Noordhuis) [#1221](https://github.com/iojs/io.js/pull/1221)
+* [[`6fc5e95354`](https://github.com/iojs/io.js/commit/6fc5e95354)] - **module**: allow require('.') (Michaël Zasso) [#1185](https://github.com/iojs/io.js/pull/1185)
+* [[`9ae1a61214`](https://github.com/iojs/io.js/commit/9ae1a61214)] - **node**: ensure that streams2 won't `.end()` stdin (Fedor Indutny) [#1233](https://github.com/iojs/io.js/pull/1233)
+* [[`b64983d77c`](https://github.com/iojs/io.js/commit/b64983d77c)] - **src**: reset signal handler to SIG_DFL on FreeBSD (Fedor Indutny) [#1218](https://github.com/iojs/io.js/pull/1218)
+* [[`9705a34e96`](https://github.com/iojs/io.js/commit/9705a34e96)] - **test**: move sequential/test-signal-unregister (Ben Noordhuis) [#1227](https://github.com/iojs/io.js/pull/1227)
+* [[`10a9c00563`](https://github.com/iojs/io.js/commit/10a9c00563)] - **test**: fix timing issue in signal test (Ben Noordhuis) [#1227](https://github.com/iojs/io.js/pull/1227)
+* [[`999fbe9d96`](https://github.com/iojs/io.js/commit/999fbe9d96)] - **test**: fix crypto-binary-default bad crypto check (Brendan Ashworth) [#1141](https://github.com/iojs/io.js/pull/1141)
+* [[`2b3b2d392f`](https://github.com/iojs/io.js/commit/2b3b2d392f)] - **test**: add setTimeout/setInterval multi-arg tests (Ben Noordhuis) [#1221](https://github.com/iojs/io.js/pull/1221)
+* [[`849319a260`](https://github.com/iojs/io.js/commit/849319a260)] - **util**: Check input to util.inherits (Connor Peet) [#1240](https://github.com/iojs/io.js/pull/1240)
+* [[`cf081a4712`](https://github.com/iojs/io.js/commit/cf081a4712)] - **vm**: fix crash on fatal error in debug context (Ben Noordhuis) [#1229](https://github.com/iojs/io.js/pull/1229)
+
+## 2015-03-20, Version 1.6.1, @rvagg
+
+### Notable changes
+
+* **path**: New type-checking on `path.resolve()` [#1153](https://github.com/iojs/io.js/pull/1153) uncovered some edge-cases being relied upon in the wild, most notably `path.dirname(undefined)`. Type-checking has been loosened for `path.dirname()`, `path.basename()`, and `path.extname()` (Colin Ihrig) [#1216](https://github.com/iojs/io.js/pull/1216).
+* **querystring**: Internal optimizations in `querystring.parse()` and `querystring.stringify()` [#847](https://github.com/iojs/io.js/pull/847) prevented `Number` literals from being properly converted via `querystring.escape()` [#1208](https://github.com/iojs/io.js/issues/1208), exposing a blind-spot in the test suite. The bug and the tests have now been fixed (Jeremiah Senkpiel) [#1213](https://github.com/iojs/io.js/pull/1213).
+
+### Known issues
+
+* Possible remaining TLS-related memory leak(s), details at [#1075](https://github.com/iojs/io.js/issues/1075).
+* Surrogate pair in REPL can freeze terminal [#690](https://github.com/iojs/io.js/issues/690)
+* Not possible to build io.js as a static library [#686](https://github.com/iojs/io.js/issues/686)
+* `process.send()` is not synchronous as the docs suggest, a regression introduced in 1.0.2, see [#760](https://github.com/iojs/io.js/issues/760) and fix in [#774](https://github.com/iojs/io.js/issues/774)
+* Calling `dns.setServers()` while a DNS query is in progress can cause the process to crash on a failed assertion [#894](https://github.com/iojs/io.js/issues/894)
+
+### Commits
+
+* [[`3b9eab9779`](https://github.com/iojs/io.js/commit/3b9eab9779)] - **build**: make check aliases test (Johan Bergström) [#1211](https://github.com/iojs/io.js/pull/1211)
+* [[`4c731042d4`](https://github.com/iojs/io.js/commit/4c731042d4)] - **configure**: use cc and c++ as defaults on os x (Ben Noordhuis) [#1210](https://github.com/iojs/io.js/pull/1210)
+* [[`8de78e470d`](https://github.com/iojs/io.js/commit/8de78e470d)] - **path**: reduce type checking on some methods (cjihrig) [#1216](https://github.com/iojs/io.js/pull/1216)
+* [[`c9aec2b716`](https://github.com/iojs/io.js/commit/c9aec2b716)] - **querystring**: fix broken stringifyPrimitive (Jeremiah Senkpiel) [#1213](https://github.com/iojs/io.js/pull/1213)
+* [[`a89f5c2156`](https://github.com/iojs/io.js/commit/a89f5c2156)] - **querystring**: parse numbers correctly (Jeremiah Senkpiel) [#1213](https://github.com/iojs/io.js/pull/1213)
+* [[`2034137385`](https://github.com/iojs/io.js/commit/2034137385)] - **smalloc**: don't mix malloc() and new char\[\] (Ben Noordhuis) [#1205](https://github.com/iojs/io.js/pull/1205)
+
 ## 2015-03-19, Version 1.6.0, @chrisdickinson
 
 ### Notable changes
@@ -16,7 +79,6 @@
   * [`abdd040`](https://github.com/npm/npm/commit/abdd040da9) read-package-json@1.3.2: Provide more helpful error messages when JSON parse errors are encountered by using a more forgiving JSON parser than JSON.parse. ([@smikes](https://github.com/smikes))
   * [`c56cfcd`](https://github.com/npm/npm/commit/c56cfcd79c) [#7525](https://github.com/npm/npm/issues/7525) `npm dedupe` handles scoped packages. ([@KidkArolis](https://github.com/KidkArolis))
   * [`4ef1412`](https://github.com/npm/npm/commit/4ef1412d00) [#7075](https://github.com/npm/npm/issues/7075) If you try to tag a release as a valid semver range, `npm publish` and `npm tag` will error early instead of proceeding. ([@smikes](https://github.com/smikes))
-
 
 ### Known issues
 
@@ -1055,9 +1117,9 @@ In general it is recommended that you use [NAN](https://github.com/rvagg/nan) as
 
 - Exposed method signature has changed from `Handle<Value> Method(const Arguments& args)` to `void Method(const v8::FunctionCallbackInfo<Value>& args)` with the newly introduced `FunctionCallbackInfo` also taking the return value via `args.GetReturnValue().Set(value)` instead of `scope.Close(value)`, `Arguments` has been removed.
 - Exposed setter signature has changed from `void Setter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Setter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<void>& args)`.
-- Exposed getter signature has changed from `void Getter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Setter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<Value>& args)`.
+- Exposed getter signature has changed from `void Getter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Getter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<Value>& args)`.
 - Exposed property setter signature has changed from `Handle<Value> Setter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Setter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<Value>& args)`.
-- Exposed property getter signature has changed from `Handle<Value> Getter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Setter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<Value>& args)`.
+- Exposed property getter signature has changed from `Handle<Value> Getter(Local<String> property, Local<Value> value, const v8::AccessorInfo& args)` `void Getter(Local<String> property, Local<Value> value, const v8::PropertyCallbackInfo<Value>& args)`.
 - Similar changes have been made to property enumerators, property deleters, property query, index getter, index setter, index enumerator, index deleter, index query.
 - V8 objects instantiated in C++ now require an `Isolate*` argument as the first argument. In most cases it is OK to simply pass `v8::Isolate::GetCurrent()`, e.g. `Date::New(Isolate::GetCurrent(), time)`, or `String::NewFromUtf8(Isolate::GetCurrent(), "foobar")`.
 - `HandleScope scope` now requires an `Isolate*` argument, i.e. `HandleScope scope(isolate)`, in most cases `v8::Isolate::GetCurrent()` is OK.

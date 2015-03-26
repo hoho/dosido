@@ -41,23 +41,32 @@ First we create a file `hello.cc`:
     // hello.cc
     #include <node.h>
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void Method(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
       args.GetReturnValue().Set(String::NewFromUtf8(isolate, "world"));
     }
 
-    void init(Handle<Object> exports) {
+    void init(Local<Object> exports) {
       NODE_SET_METHOD(exports, "hello", Method);
     }
 
     NODE_MODULE(addon, init)
 
+    }  // namespace demo
+
 Note that all io.js addons must export an initialization function:
 
-    void Initialize (Handle<Object> exports);
+    void Initialize(Local<Object> exports);
     NODE_MODULE(module_name, Initialize)
 
 There is no semi-colon after `NODE_MODULE` as it's not a function (see
@@ -142,11 +151,20 @@ function calls and return a result. This is the main and only needed source
     // addon.cc
     #include <node.h>
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Exception;
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Number;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void Add(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       if (args.Length() < 2) {
         isolate->ThrowException(Exception::TypeError(
@@ -166,11 +184,13 @@ function calls and return a result. This is the main and only needed source
       args.GetReturnValue().Set(num);
     }
 
-    void Init(Handle<Object> exports) {
+    void Init(Local<Object> exports) {
       NODE_SET_METHOD(exports, "add", Add);
     }
 
     NODE_MODULE(addon, Init)
+
+    }  // namespace demo
 
 You can test it with the following JavaScript snippet:
 
@@ -188,23 +208,33 @@ there. Here's `addon.cc`:
     // addon.cc
     #include <node.h>
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Function;
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Null;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void RunCallback(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
-
+      Isolate* isolate = args.GetIsolate();
       Local<Function> cb = Local<Function>::Cast(args[0]);
       const unsigned argc = 1;
       Local<Value> argv[argc] = { String::NewFromUtf8(isolate, "hello world") };
-      cb->Call(isolate->GetCurrentContext()->Global(), argc, argv);
+      cb->Call(Null(isolate), argc, argv);
     }
 
-    void Init(Handle<Object> exports, Handle<Object> module) {
+    void Init(Local<Object> exports, Local<Object> module) {
       NODE_SET_METHOD(module, "exports", RunCallback);
     }
 
     NODE_MODULE(addon, Init)
+
+    }  // namespace demo
 
 Note that this example uses a two-argument form of `Init()` that receives
 the full `module` object as the second argument. This allows the addon
@@ -230,11 +260,18 @@ the string passed to `createObject()`:
     // addon.cc
     #include <node.h>
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void CreateObject(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       Local<Object> obj = Object::New(isolate);
       obj->Set(String::NewFromUtf8(isolate, "msg"), args[0]->ToString());
@@ -242,11 +279,13 @@ the string passed to `createObject()`:
       args.GetReturnValue().Set(obj);
     }
 
-    void Init(Handle<Object> exports, Handle<Object> module) {
+    void Init(Local<Object> exports, Local<Object> module) {
       NODE_SET_METHOD(module, "exports", CreateObject);
     }
 
     NODE_MODULE(addon, Init)
+
+    }  // namespace demo
 
 To test it in JavaScript:
 
@@ -266,17 +305,25 @@ wraps a C++ function:
     // addon.cc
     #include <node.h>
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Function;
+    using v8::FunctionCallbackInfo;
+    using v8::FunctionTemplate;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void MyFunction(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
       args.GetReturnValue().Set(String::NewFromUtf8(isolate, "hello world"));
     }
 
     void CreateFunction(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, MyFunction);
       Local<Function> fn = tpl->GetFunction();
@@ -287,11 +334,13 @@ wraps a C++ function:
       args.GetReturnValue().Set(fn);
     }
 
-    void Init(Handle<Object> exports, Handle<Object> module) {
+    void Init(Local<Object> exports, Local<Object> module) {
       NODE_SET_METHOD(module, "exports", CreateFunction);
     }
 
     NODE_MODULE(addon, Init)
+
+    }  // namespace demo
 
 To test:
 
@@ -312,13 +361,18 @@ module `addon.cc`:
     #include <node.h>
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
 
-    void InitAll(Handle<Object> exports) {
+    using v8::Local;
+    using v8::Object;
+
+    void InitAll(Local<Object> exports) {
       MyObject::Init(exports);
     }
 
     NODE_MODULE(addon, InitAll)
+
+    }  // namespace demo
 
 Then in `myobject.h` make your wrapper inherit from `node::ObjectWrap`:
 
@@ -329,9 +383,11 @@ Then in `myobject.h` make your wrapper inherit from `node::ObjectWrap`:
     #include <node.h>
     #include <node_object_wrap.h>
 
+    namespace demo {
+
     class MyObject : public node::ObjectWrap {
      public:
-      static void Init(v8::Handle<v8::Object> exports);
+      static void Init(v8::Local<v8::Object> exports);
 
      private:
       explicit MyObject(double value = 0);
@@ -343,6 +399,8 @@ Then in `myobject.h` make your wrapper inherit from `node::ObjectWrap`:
       double value_;
     };
 
+    }  // namespace demo
+
     #endif
 
 And in `myobject.cc` implement the various methods that you want to expose.
@@ -352,7 +410,19 @@ prototype:
     // myobject.cc
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Function;
+    using v8::FunctionCallbackInfo;
+    using v8::FunctionTemplate;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Number;
+    using v8::Object;
+    using v8::Persistent;
+    using v8::String;
+    using v8::Value;
 
     Persistent<Function> MyObject::constructor;
 
@@ -362,8 +432,8 @@ prototype:
     MyObject::~MyObject() {
     }
 
-    void MyObject::Init(Handle<Object> exports) {
-      Isolate* isolate = Isolate::GetCurrent();
+    void MyObject::Init(Local<Object> exports) {
+      Isolate* isolate = exports->GetIsolate();
 
       // Prepare constructor template
       Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, New);
@@ -379,8 +449,7 @@ prototype:
     }
 
     void MyObject::New(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       if (args.IsConstructCall()) {
         // Invoked as constructor: `new MyObject(...)`
@@ -398,14 +467,15 @@ prototype:
     }
 
     void MyObject::PlusOne(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       MyObject* obj = ObjectWrap::Unwrap<MyObject>(args.Holder());
       obj->value_ += 1;
 
       args.GetReturnValue().Set(Number::New(isolate, obj->value_));
     }
+
+    }  // namespace demo
 
 Test it with:
 
@@ -432,21 +502,29 @@ Let's register our `createObject` method in `addon.cc`:
     #include <node.h>
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void CreateObject(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
       MyObject::NewInstance(args);
     }
 
-    void InitAll(Handle<Object> exports, Handle<Object> module) {
-      MyObject::Init();
+    void InitAll(Local<Object> exports, Local<Object> module) {
+      MyObject::Init(exports->GetIsolate());
 
       NODE_SET_METHOD(module, "exports", CreateObject);
     }
 
     NODE_MODULE(addon, InitAll)
+
+    }  // namespace demo
 
 In `myobject.h` we now introduce the static method `NewInstance` that takes
 care of instantiating the object (i.e. it does the job of `new` in JavaScript):
@@ -458,9 +536,11 @@ care of instantiating the object (i.e. it does the job of `new` in JavaScript):
     #include <node.h>
     #include <node_object_wrap.h>
 
+    namespace demo {
+
     class MyObject : public node::ObjectWrap {
      public:
-      static void Init();
+      static void Init(v8::Isolate* isolate);
       static void NewInstance(const v8::FunctionCallbackInfo<v8::Value>& args);
 
      private:
@@ -473,6 +553,8 @@ care of instantiating the object (i.e. it does the job of `new` in JavaScript):
       double value_;
     };
 
+    }  // namespace demo
+
     #endif
 
 The implementation is similar to the above in `myobject.cc`:
@@ -481,7 +563,19 @@ The implementation is similar to the above in `myobject.cc`:
     #include <node.h>
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Function;
+    using v8::FunctionCallbackInfo;
+    using v8::FunctionTemplate;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Number;
+    using v8::Object;
+    using v8::Persistent;
+    using v8::String;
+    using v8::Value;
 
     Persistent<Function> MyObject::constructor;
 
@@ -491,8 +585,7 @@ The implementation is similar to the above in `myobject.cc`:
     MyObject::~MyObject() {
     }
 
-    void MyObject::Init() {
-      Isolate* isolate = Isolate::GetCurrent();
+    void MyObject::Init(Isolate* isolate) {
       // Prepare constructor template
       Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, New);
       tpl->SetClassName(String::NewFromUtf8(isolate, "MyObject"));
@@ -505,8 +598,7 @@ The implementation is similar to the above in `myobject.cc`:
     }
 
     void MyObject::New(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       if (args.IsConstructCall()) {
         // Invoked as constructor: `new MyObject(...)`
@@ -524,11 +616,10 @@ The implementation is similar to the above in `myobject.cc`:
     }
 
     void MyObject::NewInstance(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       const unsigned argc = 1;
-      Handle<Value> argv[argc] = { args[0] };
+      Local<Value> argv[argc] = { args[0] };
       Local<Function> cons = Local<Function>::New(isolate, constructor);
       Local<Object> instance = cons->NewInstance(argc, argv);
 
@@ -536,14 +627,15 @@ The implementation is similar to the above in `myobject.cc`:
     }
 
     void MyObject::PlusOne(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       MyObject* obj = ObjectWrap::Unwrap<MyObject>(args.Holder());
       obj->value_ += 1;
 
       args.GetReturnValue().Set(Number::New(isolate, obj->value_));
     }
+
+    }  // namespace demo
 
 Test it with:
 
@@ -573,17 +665,23 @@ In the following `addon.cc` we introduce a function `add()` that can take on two
     #include <node_object_wrap.h>
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::FunctionCallbackInfo;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Number;
+    using v8::Object;
+    using v8::String;
+    using v8::Value;
 
     void CreateObject(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
       MyObject::NewInstance(args);
     }
 
     void Add(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       MyObject* obj1 = node::ObjectWrap::Unwrap<MyObject>(
           args[0]->ToObject());
@@ -594,14 +692,16 @@ In the following `addon.cc` we introduce a function `add()` that can take on two
       args.GetReturnValue().Set(Number::New(isolate, sum));
     }
 
-    void InitAll(Handle<Object> exports) {
-      MyObject::Init();
+    void InitAll(Local<Object> exports) {
+      MyObject::Init(exports->GetIsolate());
 
       NODE_SET_METHOD(exports, "createObject", CreateObject);
       NODE_SET_METHOD(exports, "add", Add);
     }
 
     NODE_MODULE(addon, InitAll)
+
+    }  // namespace demo
 
 To make things interesting we introduce a public method in `myobject.h` so we
 can probe private values after unwrapping the object:
@@ -613,9 +713,11 @@ can probe private values after unwrapping the object:
     #include <node.h>
     #include <node_object_wrap.h>
 
+    namespace demo {
+
     class MyObject : public node::ObjectWrap {
      public:
-      static void Init();
+      static void Init(v8::Isolate* isolate);
       static void NewInstance(const v8::FunctionCallbackInfo<v8::Value>& args);
       inline double value() const { return value_; }
 
@@ -628,6 +730,8 @@ can probe private values after unwrapping the object:
       double value_;
     };
 
+    }  // namespace demo
+
     #endif
 
 The implementation of `myobject.cc` is similar as before:
@@ -636,7 +740,18 @@ The implementation of `myobject.cc` is similar as before:
     #include <node.h>
     #include "myobject.h"
 
-    using namespace v8;
+    namespace demo {
+
+    using v8::Function;
+    using v8::FunctionCallbackInfo;
+    using v8::FunctionTemplate;
+    using v8::HandleScope;
+    using v8::Isolate;
+    using v8::Local;
+    using v8::Object;
+    using v8::Persistent;
+    using v8::String;
+    using v8::Value;
 
     Persistent<Function> MyObject::constructor;
 
@@ -646,9 +761,7 @@ The implementation of `myobject.cc` is similar as before:
     MyObject::~MyObject() {
     }
 
-    void MyObject::Init() {
-      Isolate* isolate = Isolate::GetCurrent();
-
+    void MyObject::Init(Isolate* isolate) {
       // Prepare constructor template
       Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, New);
       tpl->SetClassName(String::NewFromUtf8(isolate, "MyObject"));
@@ -658,8 +771,7 @@ The implementation of `myobject.cc` is similar as before:
     }
 
     void MyObject::New(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       if (args.IsConstructCall()) {
         // Invoked as constructor: `new MyObject(...)`
@@ -677,16 +789,17 @@ The implementation of `myobject.cc` is similar as before:
     }
 
     void MyObject::NewInstance(const FunctionCallbackInfo<Value>& args) {
-      Isolate* isolate = Isolate::GetCurrent();
-      HandleScope scope(isolate);
+      Isolate* isolate = args.GetIsolate();
 
       const unsigned argc = 1;
-      Handle<Value> argv[argc] = { args[0] };
+      Local<Value> argv[argc] = { args[0] };
       Local<Function> cons = Local<Function>::New(isolate, constructor);
       Local<Object> instance = cons->NewInstance(argc, argv);
 
       args.GetReturnValue().Set(instance);
     }
+
+    }  // namespace demo
 
 Test it with:
 

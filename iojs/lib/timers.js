@@ -173,51 +173,41 @@ exports.active = function(item) {
  */
 
 
-exports.setTimeout = function(callback, after, arg1, arg2, arg3) {
-  var timer, i, args;
-  var len = arguments.length;
-
+exports.setTimeout = function(callback, after) {
   after *= 1; // coalesce to number or NaN
 
   if (!(after >= 1 && after <= TIMEOUT_MAX)) {
     after = 1; // schedule on next tick, follows browser behaviour
   }
 
-  timer = new Timeout(after);
-
-  switch (len) {
+  var timer = new Timeout(after);
+  var length = arguments.length;
+  var ontimeout = callback;
+  switch (length) {
     // fast cases
     case 0:
     case 1:
     case 2:
-      timer._onTimeout = callback;
       break;
     case 3:
-      timer._onTimeout = function() {
-        callback.call(timer, arg1);
-      };
+      ontimeout = callback.bind(timer, arguments[2]);
       break;
     case 4:
-      timer._onTimeout = function() {
-        callback.call(timer, arg1, arg2);
-      };
+      ontimeout = callback.bind(timer, arguments[2], arguments[3]);
       break;
     case 5:
-      timer._onTimeout = function() {
-        callback.call(timer, arg1, arg2, arg3);
-      };
+      ontimeout =
+          callback.bind(timer, arguments[2], arguments[3], arguments[4]);
       break;
     // slow case
     default:
-      args = new Array(len - 2);
-      for (i = 2; i < len; i++)
+      var args = new Array(length - 2);
+      for (var i = 2; i < length; i++)
         args[i - 2] = arguments[i];
-
-      timer._onTimeout = function() {
-        callback.apply(timer, args);
-      };
+      ontimeout = callback.apply.bind(callback, timer, args);
       break;
   }
+  timer._onTimeout = ontimeout;
 
   if (process.domain) timer.domain = process.domain;
 
@@ -239,24 +229,40 @@ exports.clearTimeout = function(timer) {
 };
 
 
-exports.setInterval = function(callback, repeat, arg1, arg2, arg3) {
+exports.setInterval = function(callback, repeat) {
   repeat *= 1; // coalesce to number or NaN
 
   if (!(repeat >= 1 && repeat <= TIMEOUT_MAX)) {
     repeat = 1; // schedule on next tick, follows browser behaviour
   }
 
-  var args, i;
   var timer = new Timeout(repeat);
-  var len = arguments.length - 2;
-  timer._onTimeout = wrapper;
-  timer._repeat = true;
-  // Initialize args once for repeated invocation of slow case below
-  if (len > 3) {
-    args = new Array(len);
-    for (i = 0; i < len; i++)
-      args[i] = arguments[i + 2];
+  var length = arguments.length;
+  var ontimeout = callback;
+  switch (length) {
+    case 0:
+    case 1:
+    case 2:
+      break;
+    case 3:
+      ontimeout = callback.bind(timer, arguments[2]);
+      break;
+    case 4:
+      ontimeout = callback.bind(timer, arguments[2], arguments[3]);
+      break;
+    case 5:
+      ontimeout =
+          callback.bind(timer, arguments[2], arguments[3], arguments[4]);
+      break;
+    default:
+      var args = new Array(length - 2);
+      for (var i = 2; i < length; i += 1)
+        args[i - 2] = arguments[i];
+      ontimeout = callback.apply.bind(callback, timer, args);
+      break;
   }
+  timer._onTimeout = wrapper;
+  timer._repeat = ontimeout;
 
   if (process.domain) timer.domain = process.domain;
   exports.active(timer);
@@ -264,27 +270,9 @@ exports.setInterval = function(callback, repeat, arg1, arg2, arg3) {
   return timer;
 
   function wrapper() {
-    switch (len) {
-      // fast cases
-      case 0:
-        callback.call(this);
-        break;
-      case 1:
-        callback.call(this, arg1);
-        break;
-      case 2:
-        callback.call(this, arg1, arg2);
-        break;
-      case 3:
-        callback.call(this, arg1, arg2, arg3);
-        break;
-      // slow case
-      default:
-        callback.apply(this, args);
-        break;
-    }
+    timer._repeat.call(this);
     // If callback called clearInterval().
-    if (timer._repeat === false) return;
+    if (timer._repeat === null) return;
     // If timer is unref'd (or was - it's permanently removed from the list.)
     if (this._handle) {
       this._handle.start(repeat, 0);
