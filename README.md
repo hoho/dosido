@@ -96,11 +96,11 @@ module.exports = function(request, response, sr, params) {
             srResponse.on('data', function(chunk) { srData.push(chunk); });
             srResponse.on('end', function() {
                 var ret = {
-                    req: reqBody.join(''),
-                    params: params,
-                    status: srResponse.statusCode,
+                    req:      reqBody.join(''),
+                    params:   params,
+                    status:   srResponse.statusCode,
                     modified: srResponse.getHeader('Last-Modified'),
-                    backend: srData.join('')
+                    backend:  srData.join('')
                 }
                 response.end(JSON.stringify(ret, undefined, 4) + '\n');
             });
