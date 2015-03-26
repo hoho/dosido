@@ -1,5 +1,5 @@
-.PHONY: all
-all: iojs build
+.PHONY: build
+build: libiojs configure nginx
 
 
 .PHONY: iojs
@@ -45,10 +45,6 @@ configure: check-deps
 		--with-pcre=../deps/pcre \
 		--with-zlib=../deps/zlib \
 		--with-cc-opt=-I../libiojs
-
-
-.PHONY: build
-build: libiojs nginx
 
 
 .PHONY: nginx
