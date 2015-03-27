@@ -58,3 +58,5 @@ nginx/objs
 /deps/openssl/libssl.a
 /deps/openssl/libssl.pc
 /deps/openssl/openssl.pc
+
+/t/servroot
