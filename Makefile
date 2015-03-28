@@ -67,3 +67,9 @@ nginx-dirs:
 install: nginx-dirs
 	$(MAKE) -C iojs install
 	$(MAKE) -C nginx install
+
+
+.PHONY: test
+test:
+	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
+	cd ../test-nginx && sudo PATH=../dosido/nginx/objs:$$PATH TEST_NGINX_SERVROOT=`pwd`/../dosido/t/servroot prove -r ../dosido/t
