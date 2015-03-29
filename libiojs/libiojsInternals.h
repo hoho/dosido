@@ -20,8 +20,7 @@ typedef enum {
     TO_JS_REQUEST_ERROR,
     TO_JS_RESPONSE_ERROR,
     TO_JS_SUBREQUEST_HEADERS,
-    TO_JS_FREE_CALLBACK,
-    TO_JS_EXIT
+    TO_JS_FREE_CALLBACK
 } iojsToJSCommandType;
 
 

@@ -636,9 +636,6 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
             case FROM_JS_LOG:
                 break;
-
-            case FROM_JS_EXIT_MAIN:
-                break;
         }
 
         iojsFromJSFree(cmd);

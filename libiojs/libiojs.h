@@ -16,8 +16,7 @@ typedef enum {
     FROM_JS_RESPONSE_BODY,
     FROM_JS_BEGIN_SUBREQUEST,
     FROM_JS_SUBREQUEST_DONE,
-    FROM_JS_LOG,
-    FROM_JS_EXIT_MAIN
+    FROM_JS_LOG
 } iojsFromJSCommandType;
 
 
@@ -84,8 +83,6 @@ extern "C" {
 
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsStart                (iojsJSArray *scripts, int *fd);
-LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsStop                 (void);
 
 LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
         iojsFromJSRecv           (void);

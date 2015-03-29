@@ -358,17 +358,6 @@ error:
 }
 
 
-// To call from nginx thread.
-void
-iojsStop(void)
-{
-    iojsToJS *cmd = reinterpret_cast<iojsToJS *>(malloc(sizeof(iojsToJS)));
-    cmd->type = TO_JS_EXIT;
-    iojsToJSSend(cmd);
-    uv_thread_join(&iojsThreadId);
-}
-
-
 static void
 iojsDestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
 {
@@ -842,10 +831,6 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                         reinterpret_cast<iojsFreeCallbackCmd *>(cmd)->cb
                 );
                 break;
-
-            case TO_JS_EXIT:
-                iojsStopPolling();
-                break;
         }
 
         iojsToJSFree(cmd);
@@ -925,10 +910,11 @@ done:
 void
 iojsUnloadScripts(void)
 {
+    iojsStopPolling();
+
     if (!iojsLoadedScripts.IsEmpty())
         iojsLoadedScripts.Reset();
 }
-
 
 
 iojsContext*
