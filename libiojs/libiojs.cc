@@ -741,6 +741,7 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
 
     Local<Array> scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
 
+    Local<Object> m = Object::New(env->isolate());
     Local<Object> h = Object::New(env->isolate());
     Local<Object> p = Object::New(env->isolate());
 
@@ -748,7 +749,7 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
             env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
     Local<v8::External> payload = v8::External::New(env->isolate(), cmd->jsCtx);
 
-    Local<Value> args[4] = {h, p, callback, payload};
+    Local<Value> args[5] = {m, h, p, callback, payload};
 
     int i;
 
@@ -782,7 +783,7 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
         }
     }
 
-    MakeCallback(env, scripts, cmd->index, 4, args);
+    MakeCallback(env, scripts, cmd->index, 5, args);
 }
 
 

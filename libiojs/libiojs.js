@@ -101,7 +101,7 @@
         TO_JS_CALLBACK_RESPONSE_ERROR = 10;
 
 
-    function Request(headers, callback, payload) {
+    function Request(meta, headers, callback, payload) {
         var requestBodyRequested = false;
         var self = this;
 
@@ -119,6 +119,9 @@
         this.resume();
     }
     util.inherits(Request, Readable);
+    Request.prototype.getHeader = function getHeader(name) {
+        return this._headers[name];
+    };
 
 
     function Response(callback, payload) {
@@ -178,8 +181,8 @@
 
         module = module.exports;
 
-        return function(requestHeaders, configParams, callback, payload) {
-            var i = new Request(requestHeaders, callback, payload);
+        return function(meta, requestHeaders, configParams, callback, payload) {
+            var i = new Request(meta, requestHeaders, callback, payload);
             var o = new Response(callback, payload);
 
             // To free iojsContext when this thing is garbage collected and
