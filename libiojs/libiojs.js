@@ -105,6 +105,12 @@
         var requestBodyRequested = false;
         var self = this;
 
+        if (meta) {
+            self.method = meta[0];
+            self.uri = meta[1];
+            self.httpProtocol = meta[2];
+        }
+
         this._headers = headers;
 
         Readable.call(this, {

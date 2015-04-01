@@ -97,6 +97,8 @@ LIBIOJSPUBFUN void LIBIOJSCALL
 
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsCall                 (int index, iojsContext *jsCtx,
+                                  iojsString *method, iojsString *uri,
+                                  iojsString *httpProtocol,
                                   iojsString **headers, iojsString **params);
 LIBIOJSPUBFUN int LIBIOJSCALL
         iojsChunk                (iojsContext *jsCtx, char *data, size_t len,

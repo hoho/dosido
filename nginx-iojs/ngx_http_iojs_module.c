@@ -996,6 +996,9 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     ctx->js_ctx->rootCtx->wait++;
 
     rc = iojsCall(conf->js_index, ctx->js_ctx,
+                  (iojsString *)&r->method_name,
+                  (iojsString *)&r->unparsed_uri,
+                  (iojsString *)&r->http_protocol,
                   (iojsString **)iojs_headers,
                   (iojsString **)iojs_params);
     if (rc) {

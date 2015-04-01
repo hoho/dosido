@@ -741,7 +741,7 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
 
     Local<Array> scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
 
-    Local<Object> m = Object::New(env->isolate());
+    Local<Object> meta = Object::New(env->isolate());
     Local<Object> h = Object::New(env->isolate());
     Local<Object> p = Object::New(env->isolate());
 
@@ -749,7 +749,20 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
             env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
     Local<v8::External> payload = v8::External::New(env->isolate(), cmd->jsCtx);
 
-    Local<Value> args[5] = {m, h, p, callback, payload};
+    Local<Value> args[5] = {meta, h, p, callback, payload};
+
+    meta->Set(0, String::NewFromUtf8(env->isolate(),
+              cmd->method.data,
+              String::kNormalString,
+              cmd->method.len));
+    meta->Set(1, String::NewFromUtf8(env->isolate(),
+              cmd->uri.data,
+              String::kNormalString,
+              cmd->uri.len));
+    meta->Set(2, String::NewFromUtf8(env->isolate(),
+              cmd->httpProtocol.data,
+              String::kNormalString,
+              cmd->httpProtocol.len));
 
     int i;
 
@@ -971,19 +984,34 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
 
 int
-iojsCall(int index, iojsContext *jsCtx, iojsString **headers,
-         iojsString **params)
+iojsCall(int index, iojsContext *jsCtx, iojsString *method, iojsString *uri,
+         iojsString *httpProtocol, iojsString **headers, iojsString **params)
 {
     jsCtx->afa(&jsCtx->refCount, 1);
 
     iojsCallCmd  *cmd;
 
-    cmd = reinterpret_cast<iojsCallCmd *>(malloc(sizeof(iojsCallCmd)));
+    cmd = reinterpret_cast<iojsCallCmd *>(malloc(
+            sizeof(iojsCallCmd) + method->len + uri->len + httpProtocol->len
+    ));
     IOJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_CALL_LOADED_SCRIPT;
-    cmd->jsCtx = jsCtx;
     cmd->index = index;
+    cmd->jsCtx = jsCtx;
+
+    cmd->method.len = method->len;
+    cmd->method.data = reinterpret_cast<char *>(&cmd[1]);
+    memcpy(cmd->method.data, method->data, method->len);
+
+    cmd->uri.len = uri->len;
+    cmd->uri.data = cmd->method.data + method->len;
+    memcpy(cmd->uri.data, uri->data, uri->len);
+
+    cmd->httpProtocol.len = httpProtocol->len;
+    cmd->httpProtocol.data = cmd->uri.data + uri->len;
+    memcpy(cmd->httpProtocol.data, httpProtocol->data, httpProtocol->len);
+
     cmd->headers = headers;
     cmd->params = params;
 
