@@ -61,6 +61,11 @@ clean:
 .PHONY: nginx-dirs
 nginx-dirs:
 	test -d '/var/cache/dosido/client_temp' || mkdir -p '/var/cache/dosido/client_temp'
+	test -d '/var/cache/dosido/proxy_temp' || mkdir -p '/var/cache/dosido/proxy_temp'
+	test -d '/var/cache/dosido/fastcgi_temp' || mkdir -p '/var/cache/dosido/fastcgi_temp'
+	test -d '/var/cache/dosido/uwsgi_temp' || mkdir -p '/var/cache/dosido/uwsgi_temp'
+	test -d '/var/cache/dosido/scgi_temp' || mkdir -p '/var/cache/dosido/scgi_temp'
+	test -d '/var/log/dosido' || mkdir -p '/var/log/dosido'
 
 
 .PHONY: install
@@ -72,4 +77,5 @@ install: nginx-dirs
 .PHONY: test
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
+	# Needs `sudo cpan Test::Nginx`
 	cd ../test-nginx && PATH=../dosido/nginx/objs:$$PATH TEST_NGINX_SERVROOT=`pwd`/../dosido/t/servroot prove -r ../dosido/t
