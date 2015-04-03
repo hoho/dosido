@@ -715,7 +715,7 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     jsPipe.fd = fd;
     jsPipe.pool = cycle->pool;
     jsPipe.log = cycle->log;
-    jsPipe.write = &jsPipeEv;
+    jsPipe.write = jsPipe.read = &jsPipeEv;
 
     jsPipeEv.data = &jsPipe;
     jsPipeEv.handler = ngx_http_iojs_receive;
