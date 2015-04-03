@@ -49,6 +49,7 @@ configure: check-deps
 
 .PHONY: nginx
 nginx:
+	touch deps/openssl/Makefile
 	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && $(MAKE) -C nginx
 
 
