@@ -139,7 +139,7 @@ struct ngx_http_iojs_ctx_s {
 
 static int64_t ngx_atomic_fetch_add_wrap(int64_t *value, int64_t add)
 {
-    return ngx_atomic_fetch_add((ngx_atomic_int_t)value, (ngx_atomic_int_t)add);
+    return ngx_atomic_fetch_add((ngx_atomic_int_t *)value, (ngx_atomic_int_t)add);
 }
 
 
