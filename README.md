@@ -59,7 +59,7 @@ dosido gives the ability to make all the steps in one place:
 server {
     listen       80;
     server_name  localhost;
-    js_root   /usr/local/www/;
+    js_root      /usr/local/www/;
 
     location /test {
         js_param  backend "/my-backend/";
@@ -81,11 +81,11 @@ server {
 
 ```js
 module.exports = function(request, response, sr, params) {
-    // request: request object.
+    // request:  request object.
     // response: response object.
-    // sr: a function to make a subrequest.
-    // params: an object of js_param, in our case:
-    //         {"backend": "/my-backend/", "addr": "127.0.0.1"}.
+    // sr:       a function to make a subrequest.
+    // params:   an object of js_param, in our case:
+    //           {"backend": "/my-backend/", "addr": "127.0.0.1"}.
     var reqBody = [];
     request.on('data', function(chunk) { reqBody.push(chunk); });
     request.on('end', function() {
@@ -111,11 +111,11 @@ module.exports = function(request, response, sr, params) {
 
 ### Response
 
-`curl -d testreq http://localhost/test` will give something like:
+`curl -d testreqbody http://localhost/test` will give something like:
 
 ```json
 {
-    "req": "testreq",
+    "req": "testreqbody",
     "params": {
         "backend": "/my-backend/",
         "addr": "127.0.0.1"
