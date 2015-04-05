@@ -42,6 +42,7 @@ typedef struct {
 
 typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
 typedef void (*iojsFreeFunc)(void *data);
+typedef void (*iojsLogger)(unsigned level, const char *fmt, ...);
 
 
 typedef struct _iojsContext iojsContext;
@@ -76,13 +77,26 @@ typedef struct {
 } iojsSubrequest;
 
 
+// Should match with the level from ngx_log.h.
+#define IOJS_LOG_STDERR            0
+#define IOJS_LOG_EMERG             1
+#define IOJS_LOG_ALERT             2
+#define IOJS_LOG_CRIT              3
+#define IOJS_LOG_ERR               4
+#define IOJS_LOG_WARN              5
+#define IOJS_LOG_NOTICE            6
+#define IOJS_LOG_INFO              7
+#define IOJS_LOG_DEBUG             8
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 
 LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsStart                (iojsJSArray *scripts, int *fd);
+        iojsStart                (iojsLogger logger,
+                                  iojsJSArray *scripts, int *fd);
 
 LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
         iojsFromJSRecv           (void);

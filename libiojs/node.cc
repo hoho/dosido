@@ -77,6 +77,39 @@ typedef int mode_t;
 extern char **environ;
 #endif
 
+
+// XXX: Temporarily redefine fprintf to avoid replacing it all over.
+// TODO: Try to fix it in io.js by adding a customizable logger method.
+#define LOG_BUFFER_LEN 1024 * 16
+static iojsLogger iojsLoggerFunc = NULL;
+static int logfprintf(FILE *stream, const char *fmt, ...)
+{
+  va_list  args;
+  char     buffer[LOG_BUFFER_LEN];
+  int      sz;
+
+  va_start (args, fmt);
+  sz = vsnprintf(buffer, LOG_BUFFER_LEN, fmt, args);
+
+  if (iojsLoggerFunc != NULL) {
+    if (sz > 0 && sz < LOG_BUFFER_LEN && buffer[sz - 1] == '\n') {
+      // nginx logger will add its own line break.
+      buffer[sz - 1] = 0;
+    }
+    iojsLoggerFunc(IOJS_LOG_ERR, buffer);
+  } else {
+    fputs(buffer, stream);
+  }
+
+  va_end (args);
+  return sz;
+}
+#define fprintf logfprintf
+void iojsInitLogger(iojsLogger logger) {
+  iojsLoggerFunc = logger;
+}
+
+
 namespace node {
 
 using v8::Array;

@@ -76,6 +76,7 @@ static int                            iojsError;
 
 static v8::Persistent<v8::Array>      iojsLoadedScripts;
 
+static iojsLogger                     iojsLoggerFunc = NULL;
 
 // To call from nginx thread.
 static inline void
@@ -89,7 +90,8 @@ iojsToJSSend(iojsToJS *cmd)
                        sizeof(cmd) - sent);
 
         if (sz < 0) {
-            fprintf(stderr, "iojsToJSSend fatal error: %d\n", errno);
+            iojsLoggerFunc(IOJS_LOG_ALERT,
+                           "iojsToJSSend fatal error: %d\n", errno);
             abort();
         }
 
@@ -111,7 +113,7 @@ iojsToJSRecv(void)
     );
 
     if (sz < 0) {
-        fprintf(stderr, "iojsToJSRecv fatal error: %d\n", errno);
+        iojsLoggerFunc(IOJS_LOG_ALERT, "iojsToJSRecv fatal error: %d\n", errno);
         abort();
     }
 
@@ -139,7 +141,8 @@ iojsFromJSSend(iojsFromJS *cmd)
                        sizeof(cmd) - sent);
 
         if (sz < 0) {
-            fprintf(stderr, "iojsFromJSSend fatal error: %d\n", errno);
+            iojsLoggerFunc(IOJS_LOG_ALERT,
+                           "iojsFromJSSend fatal error: %d\n", errno);
             abort();
         }
 
@@ -161,7 +164,8 @@ iojsFromJSRecv(void)
     );
 
     if (sz < 0) {
-        fprintf(stderr, "iojsFromJSRecv fatal error: %d\n", errno);
+        iojsLoggerFunc(IOJS_LOG_ALERT,
+                       "iojsFromJSRecv fatal error: %d\n", errno);
         abort();
     }
 
@@ -244,6 +248,8 @@ iojsStopPolling(void)
 static inline void
 iojsClosePipes(void)
 {
+    iojsLoggerFunc(IOJS_LOG_INFO, "Closing io.js pipes");
+
     if (iojsIncomingPipeFd[0] != -1)
         iojsClose(iojsIncomingPipeFd[0]);
 
@@ -267,6 +273,8 @@ iojsOpenPipes(void)
     int set = 1;
 #endif
 
+    iojsLoggerFunc(IOJS_LOG_INFO, "Opening io.js pipes");
+
     err = iojsPipe(iojsIncomingPipeFd);
     if (err) {
         err = -errno;
@@ -277,6 +285,8 @@ iojsOpenPipes(void)
         err = -errno;
         goto error;
     }
+
+    iojsLoggerFunc(IOJS_LOG_INFO, "Opened io.js pipes");
 
 #ifndef _WIN32
     do r = ioctl(iojsIncomingPipeFd[0], FIONBIO, &set);
@@ -311,6 +321,7 @@ iojsOpenPipes(void)
     return 0;
 
 error:
+    iojsLoggerFunc(IOJS_LOG_CRIT, "Failed to open io.js pipes (%d)", err);
     iojsClosePipes();
     return err;
 }
@@ -321,16 +332,20 @@ iojsRunnerThread(void *arg)
 {
     int argc = 1;
     char *argv[1] = {(char *)"dosido"};
+    iojsLoggerFunc(IOJS_LOG_INFO, "Starting io.js");
+    iojsInitLogger(iojsLoggerFunc);
     node::Start(argc, argv);
+    iojsLoggerFunc(IOJS_LOG_INFO, "Done io.js");
     iojsClosePipes();
 }
 
 
 int
-iojsStart(iojsJSArray *scripts, int *fd)
+iojsStart(iojsLogger logger, iojsJSArray *scripts, int *fd)
 {
     int err;
 
+    iojsLoggerFunc = logger;
     iojsError = -1;
 
     err = iojsOpenPipes();
@@ -340,6 +355,8 @@ iojsStart(iojsJSArray *scripts, int *fd)
     uv_barrier_init(&iojsStartBlocker, 2);
 
     memcpy(&iojsScripts, scripts, sizeof(iojsScripts));
+
+    iojsLoggerFunc(IOJS_LOG_INFO, "Starting io.js runner thread");
 
     uv_thread_create(&iojsThreadId, iojsRunnerThread, NULL);
 

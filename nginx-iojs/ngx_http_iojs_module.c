@@ -29,6 +29,7 @@ typedef struct {
 } ngx_http_iojs_loc_conf_t;
 
 
+static ngx_log_t                *jsLogger = NULL;
 static ngx_connection_t          jsPipe;
 static ngx_event_t               jsPipeEv;
 static ngx_str_t                 jsArgs = ngx_null_string;
@@ -55,8 +56,6 @@ static char       *ngx_http_iojs_args          (ngx_conf_t *cf,
 static void       *ngx_http_iojs_create_conf   (ngx_conf_t *cf);
 static char       *ngx_http_iojs_merge_conf    (ngx_conf_t *cf, void *parent,
                                                 void *child);
-
-
 
 
 ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
@@ -140,6 +139,19 @@ struct ngx_http_iojs_ctx_s {
 static int64_t ngx_atomic_fetch_add_wrap(int64_t *value, int64_t add)
 {
     return ngx_atomic_fetch_add((ngx_atomic_int_t *)value, (ngx_atomic_int_t)add);
+}
+
+
+static void
+ngx_http_iojs_log(unsigned level, const char *fmt, ...)
+{
+    va_list  args;
+
+    if (jsLogger != NULL && jsLogger->log_level >= level) {
+        va_start(args, fmt);
+        ngx_log_error_core(level, jsLogger, 0, fmt, args);
+        va_end(args);
+    }
 }
 
 
@@ -691,7 +703,8 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     iojsJSArray s;
     s.js = scripts;
     s.len = jsLocations.nelts;
-    rc = iojsStart(&s, &fd);
+    jsLogger = cycle->log;
+    rc = iojsStart(ngx_http_iojs_log, &s, &fd);
 
     ngx_array_destroy(&jsLocations);
     ngx_pfree(cycle->pool, scripts);
@@ -728,6 +741,7 @@ static void
 ngx_http_iojs_free(ngx_cycle_t *cycle)
 {
     dd("stop");
+    jsLogger = NULL;
     //iojsFree();
 }
 

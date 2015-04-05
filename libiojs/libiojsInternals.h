@@ -106,5 +106,8 @@ int
 void
         iojsUnloadScripts(void);
 
+void
+        iojsInitLogger(iojsLogger logger);
+
 
 #endif /* __LIBIOJSINTERNALS_H__ */
