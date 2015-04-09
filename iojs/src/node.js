@@ -71,6 +71,17 @@
     } else {
       // There is user code to be run
 
+      // If this is a worker in cluster mode, start up the communication
+      // channel. This needs to be done before any user code gets executed
+      // (including preload modules).
+      if (process.argv[1] && process.env.NODE_UNIQUE_ID) {
+        var cluster = NativeModule.require('cluster');
+        cluster._setupWorker();
+
+        // Make sure it's not accidentally inherited by child processes.
+        delete process.env.NODE_UNIQUE_ID;
+      }
+
       // Load any preload modules
       if (process._preload_modules) {
         var Module = NativeModule.require('module');
@@ -86,16 +97,6 @@
         // make process.argv[1] into a full path
         var path = NativeModule.require('path');
         process.argv[1] = path.resolve(process.argv[1]);
-
-        // If this is a worker in cluster mode, start up the communication
-        // channel.
-        if (process.env.NODE_UNIQUE_ID) {
-          var cluster = NativeModule.require('cluster');
-          cluster._setupWorker();
-
-          // Make sure it's not accidentally inherited by child processes.
-          delete process.env.NODE_UNIQUE_ID;
-        }
 
         var Module = NativeModule.require('module');
 
@@ -173,35 +174,13 @@
   };
 
   startup.globalTimeouts = function() {
-    global.setTimeout = function() {
-      var t = NativeModule.require('timers');
-      return t.setTimeout.apply(this, arguments);
-    };
-
-    global.setInterval = function() {
-      var t = NativeModule.require('timers');
-      return t.setInterval.apply(this, arguments);
-    };
-
-    global.clearTimeout = function() {
-      var t = NativeModule.require('timers');
-      return t.clearTimeout.apply(this, arguments);
-    };
-
-    global.clearInterval = function() {
-      var t = NativeModule.require('timers');
-      return t.clearInterval.apply(this, arguments);
-    };
-
-    global.setImmediate = function() {
-      var t = NativeModule.require('timers');
-      return t.setImmediate.apply(this, arguments);
-    };
-
-    global.clearImmediate = function() {
-      var t = NativeModule.require('timers');
-      return t.clearImmediate.apply(this, arguments);
-    };
+    const timers = NativeModule.require('timers');
+    global.clearImmediate = timers.clearImmediate;
+    global.clearInterval = timers.clearInterval;
+    global.clearTimeout = timers.clearTimeout;
+    global.setImmediate = timers.setImmediate;
+    global.setInterval = timers.setInterval;
+    global.setTimeout = timers.setTimeout;
   };
 
   startup.globalConsole = function() {
@@ -837,6 +816,27 @@
   NativeModule.exists = function(id) {
     return NativeModule._source.hasOwnProperty(id);
   };
+
+  const EXPOSE_INTERNALS = process.execArgv.some(function(arg) {
+    return arg.match(/^--expose[-_]internals$/);
+  });
+
+  if (EXPOSE_INTERNALS) {
+    NativeModule.nonInternalExists = NativeModule.exists;
+
+    NativeModule.isInternal = function(id) {
+      return false;
+    };
+  } else {
+    NativeModule.nonInternalExists = function(id) {
+      return NativeModule.exists(id) && !NativeModule.isInternal(id);
+    };
+
+    NativeModule.isInternal = function(id) {
+      return id.startsWith('internal/');
+    };
+  }
+
 
   NativeModule.getSource = function(id) {
     return NativeModule._source[id];

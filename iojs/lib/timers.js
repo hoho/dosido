@@ -85,6 +85,7 @@ function listOnTimeout() {
         if (domain)
           domain.enter();
         threw = true;
+        first._called = true;
         first._onTimeout();
         if (domain)
           domain.exit();
@@ -156,15 +157,8 @@ exports.enroll = function(item, msecs) {
 // it will reset its timeout.
 exports.active = function(item) {
   var msecs = item._idleTimeout;
-  if (msecs >= 0) {
-    var list = lists[msecs];
-    if (!list || L.isEmpty(list)) {
-      insert(item, msecs);
-    } else {
-      item._idleStart = Timer.now();
-      L.append(list, item);
-    }
-  }
+  if (msecs >= 0)
+    insert(item, msecs);
 };
 
 
@@ -271,8 +265,11 @@ exports.setInterval = function(callback, repeat) {
 
   function wrapper() {
     timer._repeat.call(this);
-    // If callback called clearInterval().
-    if (timer._repeat === null) return;
+
+    // Timer might be closed - no point in restarting it
+    if (!timer._repeat)
+      return;
+
     // If timer is unref'd (or was - it's permanently removed from the list.)
     if (this._handle) {
       this._handle.start(repeat, 0);
@@ -286,20 +283,29 @@ exports.setInterval = function(callback, repeat) {
 
 exports.clearInterval = function(timer) {
   if (timer && timer._repeat) {
-    timer._repeat = false;
+    timer._repeat = null;
     clearTimeout(timer);
   }
 };
 
 
 const Timeout = function(after) {
+  this._called = false;
   this._idleTimeout = after;
   this._idlePrev = this;
   this._idleNext = this;
   this._idleStart = null;
   this._onTimeout = null;
-  this._repeat = false;
+  this._repeat = null;
 };
+
+
+function unrefdHandle() {
+  this.owner._onTimeout();
+  if (!this.owner._repeat)
+    this.owner.close();
+}
+
 
 Timeout.prototype.unref = function() {
   if (this._handle) {
@@ -310,8 +316,13 @@ Timeout.prototype.unref = function() {
     var delay = this._idleStart + this._idleTimeout - now;
     if (delay < 0) delay = 0;
     exports.unenroll(this);
+
+    // Prevent running cb again when unref() is called during the same cb
+    if (this._called && !this._repeat) return;
+
     this._handle = new Timer();
-    this._handle[kOnTimeout] = this._onTimeout;
+    this._handle.owner = this;
+    this._handle[kOnTimeout] = unrefdHandle;
     this._handle.start(delay, 0);
     this._handle.domain = this.domain;
     this._handle.unref();
@@ -492,6 +503,7 @@ function unrefTimeout() {
       if (domain) domain.enter();
       threw = true;
       debug('unreftimer firing timeout');
+      first._called = true;
       first._onTimeout();
       threw = false;
       if (domain)
