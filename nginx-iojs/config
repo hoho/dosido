@@ -15,7 +15,8 @@ if [ $FLAVOUR = "win" ]; then
 		../iojs/Release/lib/http_parser.lib \
 		../iojs/build/Release/lib/v8_base.lib \
 		../iojs/build/Release/lib/v8_libbase.lib \
-		../iojs/build/Release/lib/v8_nosnapshot.lib"
+		../iojs/build/Release/lib/v8_nosnapshot.lib \
+		../iojs/build/Release/lib/v8_libplatform.lib"
 else
     if [ $FLAVOUR = "mac" ]; then
         FORCE_LOAD_BEGIN="-Wl,-force_load,"
@@ -37,6 +38,7 @@ else
 		$FORCE_LOAD_BEGIN../iojs/out/Release/libv8_base.a $FORCE_LOAD_END\
 		../iojs/out/Release/libv8_libbase.a \
 		../iojs/out/Release/libv8_nosnapshot.a \
+		../iojs/out/Release/libv8_libplatform.a \
 		-lstdc++$LIBSTD_VERSION -lm -ldl"
 fi
 

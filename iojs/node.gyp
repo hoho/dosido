@@ -77,7 +77,7 @@
     [ 'iojs_target_type!="executable"', {
       'variables': {
         'library_files': [
-          '../libiojs/_third_party_main.js',
+          'lib/_third_party_main.js',
           '../libiojs/libiojs.js',
         ]
       },

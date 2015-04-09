@@ -1,5 +1,31 @@
 'use strict';
 
+process.on('SIGQUIT', function() {
+    console.info('Got SIGQUIT, exiting.');
+    process.exit();
+});
+
+process.on('SIGABRT', function() {
+    console.info('Got SIGABRT, exiting.');
+    process.exit();
+});
+
+process.on('SIGTERM', function() {
+    console.info('Got SIGTERM, exiting.');
+    process.exit();
+});
+
+process.on('SIGHUP', function() {
+    console.info('Got SIGHUP, exiting.');
+    process.exit();
+});
+
+process.on('SIGINT', function() {
+    console.info('Got SIGINT, exiting.');
+    process.exit();
+});
+
+
 (function(scripts) {
     // The following is copied from node.js.
     var ContextifyScript = process.binding('contextify').ContextifyScript;
@@ -49,6 +75,27 @@
     NativeModule.exists = function(id) {
         return NativeModule._source.hasOwnProperty(id);
     };
+
+    const EXPOSE_INTERNALS = process.execArgv.some(function(arg) {
+        return arg.match(/^--expose[-_]internals$/);
+    });
+
+    if (EXPOSE_INTERNALS) {
+        NativeModule.nonInternalExists = NativeModule.exists;
+
+        NativeModule.isInternal = function(id) {
+            return false;
+        };
+    } else {
+        NativeModule.nonInternalExists = function(id) {
+            return NativeModule.exists(id) && !NativeModule.isInternal(id);
+        };
+
+        NativeModule.isInternal = function(id) {
+            return id.startsWith('internal/');
+        };
+    }
+
 
     NativeModule.getSource = function(id) {
         return NativeModule._source[id];
@@ -261,6 +308,4 @@
             }, configParams);
         };
     });
-
-
 });

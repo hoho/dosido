@@ -47,7 +47,7 @@ inline int iojsClose(int fd)
 
 
 using node::Environment;
-using node::libiojs_native;
+using node::libiojs$libiojs_native;
 using node::OneByteString;
 using node::Utf8Value;
 
@@ -885,7 +885,8 @@ iojsLoadScripts(Environment *env,
                                                       "libiojs.js");
     Local<Value> f_value = execute(
         env,
-        OneByteString(env->isolate(), libiojs_native, sizeof(libiojs_native) - 1),
+        OneByteString(env->isolate(), libiojs$libiojs_native,
+                                      sizeof(libiojs$libiojs_native) - 1),
         script_name
     );
 
