@@ -22,12 +22,13 @@ world
 
 === TEST 2: simple2
 --- config
+    js_root $TEST_NGINX_SERVROOT/..;
     js_param p1 "$remote_addr";
     js_param p2 "Hello";
     location /simple.js {
         js_param p2 "World";
         js_param p3 "$query_string";
-        js_pass ../js1.js;
+        js_pass js1.js;
     }
 --- request
 POST /simple.js?arg1=val1&arg2=val2

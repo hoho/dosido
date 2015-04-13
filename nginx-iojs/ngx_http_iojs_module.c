@@ -1175,11 +1175,10 @@ ngx_http_iojs_root(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    xlcf->root.data = ngx_pstrdup(cf->pool, &value[1]);
+    xlcf->root.data = ngx_palloc(cf->pool, (&value[1])->len + 1);
     xlcf->root.len = (&value[1])->len;
+    ngx_memcpy(xlcf->root.data, (&value[1])->data, xlcf->root.len);
 
-    // The string is supposed to be null-terminated, so we can use this null
-    // for `/` without reallocating.
     if (xlcf->root.len && (xlcf->root.data[xlcf->root.len - 1] != '/')) {
         xlcf->root.data[xlcf->root.len++] = '/';
     }
