@@ -10,7 +10,7 @@ iojs:
 
 .PHONY: libiojs
 libiojs:
-	cd iojs && GYP_DEFINES="iojs_target_type=static_library" ./configure
+	cd iojs && ./configure --enable-static
 	$(MAKE) -C iojs
 
 
