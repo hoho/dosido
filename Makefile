@@ -80,3 +80,11 @@ test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
 	cd ../test-nginx && PATH=../dosido/nginx/objs:$$PATH TEST_NGINX_SERVROOT=`pwd`/../dosido/t/servroot prove -r ../dosido/t
+
+
+# Remove linked nginx binary and make a new on
+.PHONY: delete-nginx-binary
+delete-nginx-binary:
+	rm -f nginx/objs/nginx
+.PHONY: relink
+relink: libiojs delete-nginx-binary nginx
