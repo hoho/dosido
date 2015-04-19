@@ -516,9 +516,9 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
     HandleScope scope(env->isolate());
 
-    int32_t _type = args[0]->ToInteger(env->isolate())->Int32Value();
-    Local<v8::External> payload = Local<v8::External>::Cast(args[1]);
-    iojsContext *jsCtx = reinterpret_cast<iojsContext *>(payload->Value());
+    int32_t _type = args[0]->IntegerValue();
+    iojsContext *jsCtx =
+            static_cast<iojsContext *>(args[1].As<v8::External>()->Value());
 
     if (_type == 0) {
         // Destroy indicator. When JavaScript is finished, this object will be
@@ -556,7 +556,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
             sz = sizeof(iojsFromJS);
             isstr = arg->IsString();
             if (isstr) {
-                strval = arg->ToString();
+                strval = arg.As<String>();
                 sz += sizeof(iojsString) + strval->Utf8Length();
             }
             break;
