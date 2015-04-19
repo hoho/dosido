@@ -82,7 +82,7 @@ test:
 	cd ../test-nginx && PATH=../dosido/nginx/objs:$$PATH TEST_NGINX_SERVROOT=`pwd`/../dosido/t/servroot prove -r ../dosido/t
 
 
-# Remove linked nginx binary and make a new on
+# Remove linked nginx binary and make a new one
 .PHONY: delete-nginx-binary
 delete-nginx-binary:
 	rm -f nginx/objs/nginx
