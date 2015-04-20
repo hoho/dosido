@@ -29,8 +29,8 @@ typedef enum {
     BY_JS_READ_REQUEST_BODY  = 2,
     BY_JS_RESPONSE_HEADERS   = 3,
     BY_JS_RESPONSE_BODY      = 4,
-    BY_JS_BEGIN_SUBREQUEST = 5,
-    BY_JS_SUBREQUEST_DONE   = 6
+    BY_JS_BEGIN_SUBREQUEST   = 5,
+    BY_JS_SUBREQUEST_DONE    = 6
 } iojsByJSCommandType;
 
 

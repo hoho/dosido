@@ -139,7 +139,7 @@ process.on('SIGINT', function() {
         BY_JS_READ_REQUEST_BODY = 2,
         BY_JS_RESPONSE_HEADERS = 3,
         BY_JS_RESPONSE_BODY = 4,
-        BY_JS_SUBREQUEST = 5,
+        BY_JS_BEGIN_SUBREQUEST = 5,
         BY_JS_SUBREQUEST_DONE = 6,
     //  Codes to come from nginx (should match iojsToJSCallbackCommandType).
         TO_JS_CALLBACK_PUSH_CHUNK = 7,
@@ -269,7 +269,7 @@ process.on('SIGINT', function() {
                 var body = settings.body || null;
 
                 callback(
-                    BY_JS_SUBREQUEST,
+                    BY_JS_BEGIN_SUBREQUEST,
                     payload,
                     url,                         // SR_URL
                     method,                      // SR_METHOD
