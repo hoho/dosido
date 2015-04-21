@@ -195,6 +195,7 @@
       ],
 
       'conditions': [
+        # No node_main.cc for anything except executable
         [ 'node_target_type!="executable"', {
           'include_dirs': [
             '../libiojs',
