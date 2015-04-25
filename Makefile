@@ -79,7 +79,7 @@ install: nginx-dirs
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
-	cd ../test-nginx && PATH=../dosido/nginx/objs:$$PATH TEST_NGINX_SERVROOT=`pwd`/../dosido/t/servroot prove -r ../dosido/t
+	./iojs/iojs t/testrunner.js
 
 
 # Remove linked nginx binary and make a new one
