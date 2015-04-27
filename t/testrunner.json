@@ -1,0 +1,20 @@
+{
+    "/test1": {
+        "responseHeaders": {
+            "X-Response-Test1": "Math.random()",
+            "X-Response-Test2": "'Constant text'"
+        },
+
+        "responseBody": "['aa', 'bb', 'cc', new Array(100).join('ololo')]"
+    },
+
+    "/ololo?pam=pom": {
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Hoho": "'Haha'",
+            "X-Hihi": "'Huhu'"
+        },
+
+        "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+    }
+}

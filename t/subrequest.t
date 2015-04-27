@@ -43,12 +43,8 @@ GET /srtest1
         rewrite /sr2(.*) $1 break;
         proxy_set_header Host dosido.io;
         proxy_set_header X-Piu pau;
-        proxy_pass http://127.0.0.1:12345;
+        proxy_pass http://127.0.0.1:12346;
     }
---- tcp_listen: 12345
---- tcp_no_close
---- tcp_reply eval
-["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX-Hoho: Haha\r\nX-Hihi: Huhu\r\n\r\n", "c350\r\n" . ("a" x 50000) . "\r\n", "c350\r\n" . ("b" x 50000) . "\r\n0\r\n\r\n"]
 --- request
 GET /srtest2
 --- response_body eval
