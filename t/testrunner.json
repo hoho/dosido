@@ -1,11 +1,12 @@
 {
-    "/test1": {
+    "/alala": {
         "responseHeaders": {
-            "X-Response-Test1": "Math.random()",
-            "X-Response-Test2": "'Constant text'"
+            "Transfer-Encoding": "'chunked'",
+            "X-Hoho": "'Haha'",
+            "X-Hihi": "'Huhu'"
         },
 
-        "responseBody": "['aa', 'bb', 'cc', new Array(100).join('ololo')]"
+        "responseBody": "['chunk1', 'chunk2']"
     },
 
     "/ololo?pam=pom": {
@@ -16,15 +17,5 @@
         },
 
         "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
-    },
-
-    "/alala": {
-        "responseHeaders": {
-            "Transfer-Encoding": "'chunked'",
-            "X-Hoho": "'Haha'",
-            "X-Hihi": "'Huhu'"
-        },
-
-        "responseBody": "['chunk1', 'chunk2']"
     }
 }
