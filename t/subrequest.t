@@ -1,6 +1,6 @@
 use Test::Nginx::Socket;
 
-plan tests => repeat_each() * 2 * blocks() + 2;
+plan tests => repeat_each() * 2 * blocks();
 
 run_tests();
 
@@ -17,12 +17,8 @@ __DATA__
         rewrite /sr1(.*) $1 break;
         proxy_set_header Host dosido.io;
         proxy_set_header X-Piu pau;
-        proxy_pass http://127.0.0.1:12345;
+        proxy_pass http://127.0.0.1:12346;
     }
---- tcp_listen: 12345
---- tcp_no_close
---- tcp_reply eval
-["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX-Hoho: Haha\r\nX-Hihi: Huhu\r\n\r\n", "6\r\nchunk1\r\n", "6\r\nchunk2\r\n0\r\n\r\n"]
 --- request
 GET /srtest1
 --- response_body

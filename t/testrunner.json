@@ -16,5 +16,15 @@
         },
 
         "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+    },
+
+    "/alala": {
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Hoho": "'Haha'",
+            "X-Hihi": "'Huhu'"
+        },
+
+        "responseBody": "['chunk1', 'chunk2']"
     }
 }

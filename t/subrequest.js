@@ -1,6 +1,6 @@
 module.exports = function(i, o, sr, params) {
     sr({
-        url: '/sr1/ololo?pam=pom',
+        url: '/sr1/alala',
         method: 'PUT',
         headers: {'X-Test': 'Hehe', 'X-Test2': 'Haha'},
         body: 'Hello body'
