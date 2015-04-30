@@ -25,6 +25,19 @@ var config = JSON.parse(fs.readFileSync(process.argv[2], {encoding: 'utf8'}));
 
 var REQUEST; // Will hold current request info, to be accessible from evals.
 
+
+var assertDeepEqual = require('assert').deepEqual;
+var assertions = [];
+
+process.on('SIGTERM', function() {
+    assertions.forEach(function(item) {
+        assertDeepEqual(item[0], item[1]);
+    });
+    console.log(assertions.length + ' test server assertion' + (assertions.length !== 1 ? 's' : '') + ' processed.');
+    process.exit();
+});
+
+
 var server = http.createServer(function(req, res) {
     var location = config[req.url];
     if (!location) {

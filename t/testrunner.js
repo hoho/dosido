@@ -19,5 +19,4 @@ var testRunner = spawn(
 
 testRunner.on('close', function(code) {
     testServer.kill();
-    process.exit(code);
 });
