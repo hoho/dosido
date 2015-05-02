@@ -51,6 +51,25 @@ var server = http.createServer(function(req, res) {
 
     REQUEST = req;
 
+    if ('expectedRequestHeaders' in location) {
+        var rh = {};
+        val = location.expectedRequestHeaders;
+        for (tmp in val) {
+            rh[tmp] = eval(val[tmp]);
+        }
+        assertions.push([val, req.rawHeaders]);
+    }
+
+    if ('expectedRequestBody' in location) {
+        (function() {
+            var assertion = [eval(location.expectedRequestBody)];
+            var reqBody = [];
+            req.on('data', function(chunk) { reqBody.push(chunk); });
+            req.on('end', function() { assertion.push(reqBody.join('')); });
+            assertions.push(assertion);
+        })();
+    }
+
     for (tmp in headers) {
         res.setHeader(tmp, eval(headers[tmp]));
     }
