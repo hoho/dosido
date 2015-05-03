@@ -53,11 +53,11 @@ var server = http.createServer(function(req, res) {
 
     if ('expectedRequestHeaders' in location) {
         var rh = {};
-        val = location.expectedRequestHeaders;
-        for (tmp in val) {
-            rh[tmp] = eval(val[tmp]);
-        }
-        assertions.push([val, req.rawHeaders]);
+        tmp = location.expectedRequestHeaders;
+        Object.keys(tmp).forEach(function(name) {
+            rh[name.toLowerCase()] = eval(tmp[name]);
+        });
+        assertions.push([rh, req.headers]);
     }
 
     if ('expectedRequestBody' in location) {
