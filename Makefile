@@ -21,6 +21,7 @@ check-deps:
 
 .PHONY: configure
 configure: check-deps
+	rm -rf ./deps/openssl/.openssl
 	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./auto/configure \
 		--prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
@@ -55,6 +56,8 @@ nginx:
 
 .PHONY: clean
 clean:
+	rm -rf ./deps/openssl/.openssl
+	git checkout deps
 	$(MAKE) -C iojs clean
 	$(MAKE) -C nginx clean
 
@@ -73,6 +76,10 @@ nginx-dirs:
 install: nginx-dirs
 	$(MAKE) -C iojs install
 	$(MAKE) -C nginx install
+
+
+.PHONY: prepare-test
+prepare-test: iojs
 
 
 .PHONY: test
