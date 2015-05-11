@@ -1,5 +1,12 @@
 {
     "/alala": {
+        "expectedRequestHeaders!": {
+            "X-Hoho": "'Haha'",
+            "X-Hihi": "'Huhu'"
+        },
+
+        "expectedRequestBody": "'Hello body'",
+
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Hoho": "'Haha'",
@@ -10,6 +17,8 @@
     },
 
     "/ololo?pam=pom": {
+        "expectedRequestBody": "new Array(50001).join('bo')",
+
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Hoho": "'Haha'",
@@ -17,5 +26,71 @@
         },
 
         "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+    },
+
+    "/1": {
+        "expectedRequestBody": "new Array(50001).join('sr1')",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response1": "'Response1'"
+        },
+
+        "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+    },
+
+    "/2": {
+        "expectedRequestBody": "new Array(50001).join('sr2')",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response2": "'Response2'"
+        },
+
+        "responseBody": "[new Array(50001).join('c'), new Array(50001).join('d')]"
+    },
+
+    "/3": {
+        "expectedRequestBody": "''",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response3": "'Response3'"
+        },
+
+        "responseBody": "[new Array(50001).join('e'), new Array(50001).join('f')]"
+    },
+
+    "/4": {
+        "expectedRequestBody": "new Array(50001).join('sr4')",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response4": "'Response4'"
+        },
+
+        "responseBody": "(new Array(11).join(new Array(501).join('gh') + '|')).split('|')"
+    },
+
+    "/5": {
+        "expectedRequestBody": "new Array(50001).join('sr5')",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response5": "'Response5'"
+        },
+
+        "responseBody": "[new Array(50001).join('i'), new Array(50001).join('j')]"
+    },
+
+    "/6": {
+        "expectedRequestBody": "new Array(50001).join('sr6')",
+
+        "responseHeaders": {
+            "Transfer-Encoding": "'chunked'",
+            "X-Response6": "'Response6'"
+        },
+
+        "responseBody": "[new Array(50001).join('k'), new Array(50001).join('l')]"
     }
 }

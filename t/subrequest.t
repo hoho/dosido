@@ -23,9 +23,6 @@ __DATA__
 GET /srtest1
 --- response_body
 {"X-Hoho":"Haha","X-Hihi":"Huhu"}|chunk1|chunk2
---- tcp_query_len: 109
---- tcp_query eval
-"GET /ololo?pam=pom HTTP/1.0\r\nHost: dosido.io\r\nX-Piu: pau\r\nConnection: close\r\nContent-Length: 10\r\n\r\nHello body"
 --- error_code: 200
 
 
@@ -45,7 +42,21 @@ GET /srtest1
 GET /srtest2
 --- response_body eval
 "{\"X-Hoho\":\"Haha\",\"X-Hihi\":\"Huhu\"}" . ("a" x 50000) . ("b" x 50000) . "\n"
---- tcp_query_len: 200
---- tcp_query eval
-"GET /ololo?pam=pom HTTP/1.0\r\nHost: dosido.io\r\nX-Piu: pau\r\nConnection: close\r\nContent-Length: 100000\r\n\r\n" . ("bo" x 50000)
+--- error_code: 200
+
+
+=== TEST 3: nested subrequests
+--- config
+    location /srtest3 {
+        js_pass ../subrequest3.js;
+    }
+    location /sr3 {
+        internal;
+        rewrite /sr3(.*) $1 break;
+        proxy_pass http://127.0.0.1:12346;
+    }
+--- request
+GET /srtest3
+--- response_body eval
+"{\"X-Response1\":\"Response1\"}{\"X-Response4\":\"Response4\"}" . ("a" x 50000) . ("b" x 50000) . ("gh" x 500 x 10) . "\n"
 --- error_code: 200
