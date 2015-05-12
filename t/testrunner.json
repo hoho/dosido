@@ -17,7 +17,7 @@
     },
 
     "/ololo?pam=pom": {
-        "expectedRequestBody": "new Array(50001).join('bo')",
+        "expectedRequestBody": "makeChunks('bo', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
@@ -25,29 +25,29 @@
             "X-Hihi": "'Huhu'"
         },
 
-        "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+        "responseBody": "makeChunks('a', 10000, 5).concat(makeChunks('b', 50000, 1))"
     },
 
     "/1": {
-        "expectedRequestBody": "new Array(50001).join('sr1')",
+        "expectedRequestBody": "makeChunks('sr1', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Response1": "'Response1'"
         },
 
-        "responseBody": "[new Array(50001).join('a'), new Array(50001).join('b')]"
+        "responseBody": "makeChunks('a', 10000, 5).concat(makeChunks('b', 50000, 1))"
     },
 
     "/2": {
-        "expectedRequestBody": "new Array(50001).join('sr2')",
+        "expectedRequestBody": "makeChunks('sr2', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Response2": "'Response2'"
         },
 
-        "responseBody": "[new Array(50001).join('c'), new Array(50001).join('d')]"
+        "responseBody": "makeChunks('c', 25000, 2).concat(makeChunks('d', 25000, 2))"
     },
 
     "/3": {
@@ -58,39 +58,39 @@
             "X-Response3": "'Response3'"
         },
 
-        "responseBody": "[new Array(50001).join('e'), new Array(50001).join('f')]"
+        "responseBody": "makeChunks('e', 50000, 1).concat(makeChunks('f', 25000, 2))"
     },
 
     "/4": {
-        "expectedRequestBody": "new Array(50001).join('sr4')",
+        "expectedRequestBody": "makeChunks('sr4', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Response4": "'Response4'"
         },
 
-        "responseBody": "(new Array(11).join(new Array(501).join('gh') + '|')).split('|')"
+        "responseBody": "makeChunks('gh', 500, 10)"
     },
 
     "/5": {
-        "expectedRequestBody": "new Array(50001).join('sr5')",
+        "expectedRequestBody": "makeChunks('sr5', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Response5": "'Response5'"
         },
 
-        "responseBody": "[new Array(50001).join('i'), new Array(50001).join('j')]"
+        "responseBody": "makeChunks('i', 10000, 5).concat(makeChunks('j', 10000, 5))"
     },
 
     "/6": {
-        "expectedRequestBody": "new Array(50001).join('sr6')",
+        "expectedRequestBody": "makeChunks('sr6', 50000)",
 
         "responseHeaders": {
             "Transfer-Encoding": "'chunked'",
             "X-Response6": "'Response6'"
         },
 
-        "responseBody": "[new Array(50001).join('k'), new Array(50001).join('l')]"
+        "responseBody": "makeChunks('k', 50000, 1).concat(makeChunks('l', 50000, 1))"
     }
 }

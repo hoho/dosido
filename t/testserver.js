@@ -29,6 +29,21 @@ var REQUEST; // Will hold current request info, to be accessible from evals.
 var assertDeepEqual = require('assert').deepEqual;
 var assertions = [];
 
+
+function makeChunks(str, repeat, chunks) {
+    var chunk = new Array(repeat + 1).join(str);
+    if (chunks === undefined) {
+        return chunk;
+    } else {
+        var ret = [];
+        for (var i = chunks; i--;) {
+            ret.push(chunk);
+        }
+        return ret;
+    }
+}
+
+
 process.on('SIGTERM', function() {
     assertions.forEach(function(item) {
         assertDeepEqual(item[0], item[1]);
@@ -86,7 +101,7 @@ var server = http.createServer(function(req, res) {
 
             if (body.length) {
                 res.write(tmp);
-                setTimeout(nextChunk, 100);
+                setTimeout(nextChunk, 30);
             } else {
                 res.end(tmp);
             }
