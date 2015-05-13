@@ -29,6 +29,11 @@
     },
 
     "/1": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'150000'"
+        },
         "expectedRequestBody": "makeChunks('sr1', 50000)",
 
         "responseHeaders": {
@@ -40,6 +45,11 @@
     },
 
     "/2": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'150000'"
+        },
         "expectedRequestBody": "makeChunks('sr2', 50000)",
 
         "responseHeaders": {
@@ -51,6 +61,11 @@
     },
 
     "/3": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'0'"
+        },
         "expectedRequestBody": "''",
 
         "responseHeaders": {
@@ -62,6 +77,11 @@
     },
 
     "/4": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'150000'"
+        },
         "expectedRequestBody": "makeChunks('sr4', 50000)",
 
         "responseHeaders": {
@@ -73,6 +93,11 @@
     },
 
     "/5": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'150000'"
+        },
         "expectedRequestBody": "makeChunks('sr5', 50000)",
 
         "responseHeaders": {
@@ -84,6 +109,11 @@
     },
 
     "/6": {
+        "expectedRequestHeaders": {
+            "host": "'127.0.0.1:12346'",
+            "connection": "'close'",
+            "content-length": "'150000'"
+        },
         "expectedRequestBody": "makeChunks('sr6', 50000)",
 
         "responseHeaders": {
