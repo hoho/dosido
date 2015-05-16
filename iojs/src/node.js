@@ -82,16 +82,9 @@
         delete process.env.NODE_UNIQUE_ID;
       }
 
-      // Load any preload modules
-      if (process._preload_modules) {
-        var Module = NativeModule.require('module');
-        process._preload_modules.forEach(function(module) {
-          Module._load(module);
-        });
-      }
-
       if (process._eval != null) {
         // User passed '-e' or '--eval' arguments to Node.
+        startup.preloadModules();
         evalScript('[eval]');
       } else if (process.argv[1]) {
         // make process.argv[1] into a full path
@@ -99,7 +92,7 @@
         process.argv[1] = path.resolve(process.argv[1]);
 
         var Module = NativeModule.require('module');
-
+        startup.preloadModules();
         if (global.v8debug &&
             process.execArgv.some(function(arg) {
               return arg.match(/^--debug-brk(=[0-9]*)?$/);
@@ -475,7 +468,7 @@
       if (process._exiting)
         return;
 
-      var args = undefined;
+      var args;
       if (arguments.length > 1) {
         args = [];
         for (var i = 1; i < arguments.length; i++)
@@ -496,8 +489,9 @@
           if (!process.emit('unhandledRejection', reason, promise)) {
             // Nobody is listening.
             // TODO(petkaantonov) Take some default action, see #830
-          } else
+          } else {
             hadListeners = true;
+          }
         }
       }
       return hadListeners;
@@ -854,6 +848,16 @@
     process._rawDebug = function() {
       rawDebug(format.apply(null, arguments));
     };
+  };
+
+  // Load preload modules
+  startup.preloadModules = function() {
+    if (process._preload_modules) {
+      var Module = NativeModule.require('module');
+      process._preload_modules.forEach(function(module) {
+        Module._load(module);
+      });
+    }
   };
 
   // Below you find a minimal module system, which is used to load the node
