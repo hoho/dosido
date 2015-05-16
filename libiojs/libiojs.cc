@@ -714,6 +714,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     iojsString *harr = reinterpret_cast<iojsString *>(ptr);
                     ptr += sizeof(iojsString) * h.size() * 2;
                     sr->headers = harr;
+                    sr->headersLen = h.size() * 2;
 
                     i = 0;
 

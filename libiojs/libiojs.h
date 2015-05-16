@@ -74,6 +74,7 @@ typedef struct {
     iojsString      method;
     iojsString      body;
     iojsString     *headers;
+    unsigned long   headersLen;
 } iojsSubrequest;
 
 
