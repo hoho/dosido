@@ -1,8 +1,12 @@
 {
     "/alala": {
-        "expectedRequestHeaders!": {
-            "X-Hoho": "'Haha'",
-            "X-Hihi": "'Huhu'"
+        "expectedRequestHeaders": {
+            "host": "'dosido.io'",
+            "x-piu": "'pau'",
+            "connection": "'close'",
+            "content-length": "'10'",
+            "x-test": "'Hehe'",
+            "x-test2": "'Haha'"
         },
 
         "expectedRequestBody": "'Hello body'",
@@ -32,7 +36,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'150000'"
+            "content-length": "'150000'",
+            "x-test1": "'Value1'"
         },
         "expectedRequestBody": "makeChunks('sr1', 50000)",
 
@@ -48,7 +53,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'150000'"
+            "content-length": "'150000'",
+            "x-test2": "'Value2'"
         },
         "expectedRequestBody": "makeChunks('sr2', 50000)",
 
@@ -64,7 +70,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'0'"
+            "content-length": "'0'",
+            "x-test3": "'Value3'"
         },
         "expectedRequestBody": "''",
 
@@ -80,7 +87,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'150000'"
+            "content-length": "'150000'",
+            "x-test4": "'Value4'"
         },
         "expectedRequestBody": "makeChunks('sr4', 50000)",
 
@@ -96,7 +104,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'150000'"
+            "content-length": "'150000'",
+            "x-test5": "'Value5'"
         },
         "expectedRequestBody": "makeChunks('sr5', 50000)",
 
@@ -112,7 +121,8 @@
         "expectedRequestHeaders": {
             "host": "'127.0.0.1:12346'",
             "connection": "'close'",
-            "content-length": "'150000'"
+            "content-length": "'150000'",
+            "x-test6": "'Value6'"
         },
         "expectedRequestBody": "makeChunks('sr6', 50000)",
 
