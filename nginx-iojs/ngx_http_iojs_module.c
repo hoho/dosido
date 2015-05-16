@@ -35,9 +35,6 @@ static ngx_event_t               jsPipeEv;
 static ngx_str_t                 jsArgs = ngx_null_string;
 static ngx_array_t               jsLocations;
 
-static ngx_str_t                 ngx_http_iojs_content_length_key = \
-                                     ngx_string("Content-Length");
-
 
 static ngx_int_t   ngx_http_iojs_init          (ngx_cycle_t *cycle);
 static void        ngx_http_iojs_free          (ngx_cycle_t *cycle);
@@ -320,10 +317,14 @@ error:
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
+ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
+                                      iojsString *headers,
+                                      unsigned long headersLen,
+                                      off_t len)
 {
     ngx_table_elt_t  *h;
     u_char           *p;
+    unsigned long     i;
 
     memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
 
@@ -340,13 +341,8 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
         return NGX_ERROR;
     }
 
-    h->key = ngx_http_iojs_content_length_key;
-    h->lowcase_key = ngx_pnalloc(sr->pool, h->key.len);
-    if (h->lowcase_key == NULL) {
-        return NGX_ERROR;
-    }
-
-    ngx_strlow(h->lowcase_key, h->key.data, h->key.len);
+    h->hash = 1;
+    ngx_str_set(&h->key, "Content-Length");
 
     sr->headers_in.content_length = h;
 
@@ -356,13 +352,22 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr, off_t len)
     }
 
     h->value.data = p;
-
     h->value.len = ngx_sprintf(h->value.data, "%O", len) - h->value.data;
 
-    h->hash = ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(
-        ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash(
-        ngx_hash('c', 'o'), 'n'), 't'), 'e'), 'n'), 't'), '-'), 'l'), 'e'),
-        'n'), 'g'), 't'), 'h');
+    for (i = 0; i < headersLen; i += 2) {
+        h = ngx_list_push(&sr->headers_in.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+
+        h->hash = 1;
+
+        h->key.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&headers[i]);
+        h->key.len = headers[i].len;
+
+        h->value.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&headers[i + 1]);
+        h->value.len = headers[i + 1].len;
+    }
 
     return NGX_OK;
 }
@@ -468,7 +473,11 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
 
     sr->method = NGX_HTTP_GET;
 
-    if (ngx_http_iojs_init_subrequest_headers(sr, sr_body.len) == NGX_ERROR) {
+    if (ngx_http_iojs_init_subrequest_headers(sr,
+                                              data->headers,
+                                              data->headersLen,
+                                              sr_body.len) == NGX_ERROR)
+    {
         return NGX_ERROR;
     }
 
