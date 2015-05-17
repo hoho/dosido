@@ -70,11 +70,16 @@ typedef struct {
 
 
 typedef struct {
+    iojsString     *strings;
+    unsigned long   len;
+} iojsHeaders;
+
+
+typedef struct {
     iojsString      url;
     iojsString      method;
     iojsString      body;
-    iojsString     *headers;
-    unsigned long   headersLen;
+    iojsHeaders     headers;
 } iojsSubrequest;
 
 

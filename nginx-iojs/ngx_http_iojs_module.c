@@ -318,13 +318,14 @@ error:
 
 ngx_inline static ngx_int_t
 ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
-                                      iojsString *headers,
-                                      unsigned long headersLen,
+                                      iojsHeaders *headers,
                                       off_t len)
 {
     ngx_table_elt_t  *h;
     u_char           *p;
     unsigned long     i;
+    unsigned long     _headersLen = headers->len;
+    iojsString       *_headers = headers->strings;
 
     memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
 
@@ -354,7 +355,7 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
     h->value.data = p;
     h->value.len = ngx_sprintf(h->value.data, "%O", len) - h->value.data;
 
-    for (i = 0; i < headersLen; i += 2) {
+    for (i = 0; i < _headersLen; i += 2) {
         h = ngx_list_push(&sr->headers_in.headers);
         if (h == NULL) {
             return NGX_ERROR;
@@ -362,11 +363,11 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
 
         h->hash = 1;
 
-        h->key.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&headers[i]);
-        h->key.len = headers[i].len;
+        h->key.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&_headers[i]);
+        h->key.len = _headers[i].len;
 
-        h->value.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&headers[i + 1]);
-        h->value.len = headers[i + 1].len;
+        h->value.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&_headers[i + 1]);
+        h->value.len = _headers[i + 1].len;
     }
 
     return NGX_OK;
@@ -474,8 +475,7 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
     sr->method = NGX_HTTP_GET;
 
     if (ngx_http_iojs_init_subrequest_headers(sr,
-                                              data->headers,
-                                              data->headersLen,
+                                              &data->headers,
                                               sr_body.len) == NGX_ERROR)
     {
         return NGX_ERROR;

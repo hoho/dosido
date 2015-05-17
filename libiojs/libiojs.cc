@@ -509,6 +509,80 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 }
 
 
+static inline int
+iojsAggregateHeaders(Environment *env, Local<Object> headers,
+                     std::vector<std::pair<std::string, std::string>> *ret)
+{
+    int sz = 0;
+
+    Local<Array> names = headers->GetOwnPropertyNames();
+    Local<String> strval;
+    Local<String> val;
+    uint32_t i;
+    int keyLen;
+    int valLen;
+
+    // XXX: Headers aggregation should probably be done better and more
+    //      efficient. Maybe someday.
+    sz = 0;
+    for (i = names->Length(); i--;) {
+        strval = names->Get(i)->ToString();
+        val = headers->Get(strval)->ToString();
+
+        Utf8Value _key(env->isolate(), strval);
+        Utf8Value _val(env->isolate(), val);
+
+        keyLen = strval->Utf8Length();
+        valLen = val->Utf8Length();
+
+        ret->push_back(std::make_pair(
+                std::string(*_key, keyLen),
+                std::string(*_val, valLen)
+        ));
+
+        sz += sizeof(iojsString) + sizeof(iojsString) + keyLen + valLen;
+    }
+
+    return sz;
+}
+
+
+static inline void
+iojsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
+                         char *allocated, iojsHeaders *ret)
+{
+    if (h->size()) {
+        std::vector<std::pair<std::string, std::string>>::reverse_iterator it;
+        uint32_t        i;
+        unsigned long   sz;
+        iojsString     *harr = reinterpret_cast<iojsString *>(allocated);
+
+        allocated += sizeof(iojsString) * h->size() * 2;
+        ret->strings = harr;
+        ret->len = h->size() * 2;
+
+        i = 0;
+
+        for (it = h->rbegin(); it != h->rend(); ++it) {
+            sz = it->first.length();
+            harr[i].len = sz;
+            harr[i++].data = allocated;
+            memcpy(allocated, it->first.c_str(), sz);
+            allocated += sz;
+
+            sz = it->second.length();
+            harr[i].len = sz;
+            harr[i++].data = allocated;
+            memcpy(allocated, it->second.c_str(), sz);
+            allocated += sz;
+        }
+    } else {
+        ret->strings = NULL;
+        ret->len = 0;
+    }
+}
+
+
 static void
 iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 {
@@ -632,36 +706,9 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                 }
 
                 std::vector<std::pair<std::string, std::string>> h;
-                std::vector<std::pair<std::string, std::string>>::reverse_iterator it;
-                Local<Array> names = headers->GetOwnPropertyNames();
-                Local<String> val;
-                uint32_t i;
-                int keyLen;
-                int valLen;
 
-                // XXX: Headers aggregation should probably be done better and more
-                //      efficient. Maybe someday.
-                sz = 0;
-                for (i = names->Length(); i--;) {
-                    strval = names->Get(i)->ToString();
-                    val = headers->Get(strval)->ToString();
-
-                    Utf8Value _key(env->isolate(), strval);
-                    Utf8Value _val(env->isolate(), val);
-
-                    keyLen = strval->Utf8Length();
-                    valLen = val->Utf8Length();
-
-                    h.push_back(std::make_pair(
-                            std::string(*_key, keyLen),
-                            std::string(*_val, valLen)
-                    ));
-
-                    sz += sizeof(iojsString) + sizeof(iojsString) +
-                          keyLen + valLen;
-                }
-
-                sz += urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
+                sz += iojsAggregateHeaders(env, headers, &h) +
+                      urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
 
                 iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
                 IOJS_CHECK_OUT_OF_MEMORY(sr);
@@ -710,28 +757,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     sr->body.len = 0;
                 }
 
-                if (h.size()) {
-                    iojsString *harr = reinterpret_cast<iojsString *>(ptr);
-                    ptr += sizeof(iojsString) * h.size() * 2;
-                    sr->headers = harr;
-                    sr->headersLen = h.size() * 2;
-
-                    i = 0;
-
-                    for (it = h.rbegin(); it != h.rend(); ++it) {
-                        sz = it->first.length();
-                        harr[i].len = sz;
-                        harr[i++].data = ptr;
-                        memcpy(ptr, it->first.c_str(), sz);
-                        ptr += sz;
-
-                        sz = it->second.length();
-                        harr[i].len = sz;
-                        harr[i++].data = ptr;
-                        memcpy(ptr, it->second.c_str(), sz);
-                        ptr += sz;
-                    }
-                }
+                iojsHeadersToStringArray(&h, ptr, &sr->headers);
             }
             break;
 
