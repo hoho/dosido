@@ -1,6 +1,6 @@
 use Test::Nginx::Socket;
 
-plan tests => repeat_each() * 2 * blocks();
+plan tests => repeat_each() * 2 * blocks() + 3;
 
 run_tests();
 
@@ -21,6 +21,10 @@ __DATA__
     }
 --- request
 GET /srtest1
+--- response_headers
+X-Response1: Value1
+X-Response2: Value2
+X-Response3:
 --- response_body
 {"X-Hoho":"Haha","X-Hihi":"Huhu"}|chunk1|chunk2
 --- error_code: 200
