@@ -554,7 +554,7 @@ iojsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
     if (h->size()) {
         std::vector<std::pair<std::string, std::string>>::reverse_iterator it;
         uint32_t        i;
-        unsigned long   sz;
+        size_t          sz;
         iojsString     *harr = reinterpret_cast<iojsString *>(allocated);
 
         allocated += sizeof(iojsString) * h->size() * 2;
@@ -614,7 +614,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
     bool isstr;
     Local<String> strval;
 
-    int sz = 0;
+    size_t sz = 0;
     type = static_cast<iojsByJSCommandType>(_type);
 
     switch (type) {
@@ -664,6 +664,22 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
         case BY_JS_RESPONSE_HEADERS:
             cmd->type = FROM_JS_RESPONSE_HEADERS;
+            {
+                Local<Object> headers = arg->ToObject();
+                std::vector<std::pair<std::string, std::string>> h;
+
+                sz = iojsAggregateHeaders(env, headers, &h) +
+                     sizeof(iojsHeaders);
+
+                iojsHeaders *ret = reinterpret_cast<iojsHeaders *>(malloc(sz));
+                IOJS_CHECK_OUT_OF_MEMORY(ret);
+                cmd->data = ret;
+                cmd->free = free;
+
+                iojsHeadersToStringArray(&h,
+                                         reinterpret_cast<char *>(&ret[1]),
+                                         ret);
+            }
             break;
 
         case BY_JS_RESPONSE_BODY:
@@ -707,8 +723,8 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
                 std::vector<std::pair<std::string, std::string>> h;
 
-                sz += iojsAggregateHeaders(env, headers, &h) +
-                      urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
+                sz = iojsAggregateHeaders(env, headers, &h) +
+                     urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
 
                 iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
                 IOJS_CHECK_OUT_OF_MEMORY(sr);
