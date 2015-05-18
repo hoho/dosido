@@ -71,7 +71,7 @@ typedef struct {
 
 typedef struct {
     iojsString     *strings;
-    unsigned long   len;
+    size_t          len;
 } iojsHeaders;
 
 

@@ -317,15 +317,40 @@ error:
 
 
 ngx_inline static ngx_int_t
+ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
+                           iojsHeaders *headers)
+{
+    size_t            len = headers->len;
+    iojsString       *arr = headers->strings;
+    size_t            i;
+    ngx_table_elt_t  *h;
+
+    for (i = 0; i < len; i += 2) {
+        h = ngx_list_push(list);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+
+        h->hash = 1;
+
+        h->key.data = ngx_pstrdup(pool, (ngx_str_t *)&arr[i]);
+        h->key.len = arr[i].len;
+
+        h->value.data = ngx_pstrdup(pool, (ngx_str_t *)&arr[i + 1]);
+        h->value.len = arr[i + 1].len;
+    }
+
+    return NGX_OK;
+}
+
+
+ngx_inline static ngx_int_t
 ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
                                       iojsHeaders *headers,
                                       off_t len)
 {
     ngx_table_elt_t  *h;
     u_char           *p;
-    unsigned long     i;
-    unsigned long     _headersLen = headers->len;
-    iojsString       *_headers = headers->strings;
 
     memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
 
@@ -355,22 +380,9 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
     h->value.data = p;
     h->value.len = ngx_sprintf(h->value.data, "%O", len) - h->value.data;
 
-    for (i = 0; i < _headersLen; i += 2) {
-        h = ngx_list_push(&sr->headers_in.headers);
-        if (h == NULL) {
-            return NGX_ERROR;
-        }
-
-        h->hash = 1;
-
-        h->key.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&_headers[i]);
-        h->key.len = _headers[i].len;
-
-        h->value.data = ngx_pstrdup(sr->pool, (ngx_str_t *)&_headers[i + 1]);
-        h->value.len = _headers[i + 1].len;
-    }
-
-    return NGX_OK;
+    return ngx_http_iojs_push_headers(sr->pool,
+                                      &sr->headers_in.headers,
+                                      headers);
 }
 
 
@@ -577,7 +589,11 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 dd("Sending response headers");
 
-                if (ngx_http_send_header(r) != NGX_OK) {
+                rc = ngx_http_iojs_push_headers(r->pool,
+                                                &r->headers_out.headers,
+                                                cmd->data);
+
+                if (rc != NGX_OK || (ngx_http_send_header(r) != NGX_OK)) {
                     ngx_http_finalize_request(r, NGX_ERROR);
                     return;
                 }
