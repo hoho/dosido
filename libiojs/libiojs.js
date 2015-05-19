@@ -158,7 +158,7 @@ process.on('SIGINT', function() {
             self.httpProtocol = meta[2];
         }
 
-        this._headers = headers;
+        this.headers = headers;
 
         Readable.call(this, {
             read: function read() {
@@ -173,21 +173,21 @@ process.on('SIGINT', function() {
     }
     util.inherits(Request, Readable);
     Request.prototype.getHeader = function getHeader(name) {
-        return this._headers[name];
+        return this.headers[name];
     };
 
 
     function Response(callback, payload) {
         var headersSent = false;
 
-        this._headers = {};
+        this.headers = {};
         this.statusCode = 200;
         this.statusMessage = 'OK';
 
         Writable.call(this, {
             write: function write(chunk, encoding, cb) {
                 if (!headersSent) {
-                    callback(BY_JS_RESPONSE_HEADERS, payload, this._headers);
+                    callback(BY_JS_RESPONSE_HEADERS, payload, this.headers);
                     headersSent = true;
                 }
 
@@ -199,7 +199,7 @@ process.on('SIGINT', function() {
     }
     util.inherits(Response, Writable);
     Response.prototype.setHeader = function setHeader(name, value) {
-        this._headers[name] = value;
+        this.headers[name] = value;
     };
 
 
@@ -208,7 +208,7 @@ process.on('SIGINT', function() {
             this.statusCode = meta[0];
             this.statusMessage = meta[1];
         }
-        this._headers = headers;
+        this.headers = headers;
 
         Readable.call(this, {
             read: function read() {}
@@ -218,7 +218,7 @@ process.on('SIGINT', function() {
     }
     util.inherits(Subrequest, Readable);
     Subrequest.prototype.getHeader = function getHeader(name) {
-        return this._headers[name];
+        return this.headers[name];
     };
 
 
