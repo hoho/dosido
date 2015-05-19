@@ -13,6 +13,7 @@ module.exports = function(i, o, sr, params) {
         });
         ret.on('end', function() {
             o.setHeader('X-Response3', 'Value3');
+            o.write('|' + JSON.stringify(i.headers));
             o.end('\n');
         });
     });

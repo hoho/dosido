@@ -21,12 +21,17 @@ __DATA__
     }
 --- request
 GET /srtest1
+
+--- more_headers
+X-Request1: Vavava1
+X-Request2: Vavava2
+
 --- response_headers
 X-Response1: Value1
 X-Response2: Value2
 X-Response3:
 --- response_body
-{"X-Hoho":"Haha","X-Hihi":"Huhu"}|chunk1|chunk2
+{"X-Hoho":"Haha","X-Hihi":"Huhu"}|chunk1|chunk2|{"Host":"localhost","Connection":"close","X-Request1":"Vavava1","X-Request2":"Vavava2"}
 --- error_code: 200
 
 
