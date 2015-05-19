@@ -7,7 +7,7 @@ module.exports = function(i, o, sr, params) {
         headers: {'X-Test1': 'Value1'},
         body: new Array(50001).join('sr1')
     }, function(ret) {
-        o.write(JSON.stringify(ret._headers));
+        o.write(JSON.stringify(ret.headers));
         var data1 = [];
         ret.on('data', function(chunk) { data1.push(chunk); });
         ret.on('end', function() {
@@ -17,7 +17,7 @@ module.exports = function(i, o, sr, params) {
                 headers: {'X-Test4': 'Value4'},
                 body: new Array(50001).join('sr4')
             }, function(ret) {
-                o.write(JSON.stringify(ret._headers));
+                o.write(JSON.stringify(ret.headers));
                 o.setHeader('X-Ololo', 'Piu');
                 o.write(data1.join(''));
                 var data4 = [];

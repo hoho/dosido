@@ -5,7 +5,7 @@ module.exports = function(i, o, sr, params) {
         headers: {'X-Test': 'Hehe', 'X-Test2': 'Haha'},
         body: new Array(50001).join('bo')
     }, function(ret) {
-        o.write(JSON.stringify(ret._headers));
+        o.write(JSON.stringify(ret.headers));
         var data = [];
         ret.on('data', function(chunk) {
             o.write(chunk);

@@ -7,7 +7,7 @@ module.exports = function(i, o, sr, params) {
         body: 'Hello body'
     }, function(ret) {
         o.setHeader('X-Response2', 'Value2');
-        o.write(JSON.stringify(ret._headers));
+        o.write(JSON.stringify(ret.headers));
         ret.on('data', function(chunk) {
             o.write('|' + chunk);
         });
