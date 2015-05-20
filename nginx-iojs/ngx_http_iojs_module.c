@@ -290,7 +290,7 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
 
     dd("Read request body (r: %p)", r);
 
-    if (r->request_body->bufs == NULL) {
+    if (r->request_body == NULL || r->request_body->bufs == NULL) {
         rc = iojsChunk(ctx->js_ctx, NULL, 0, 1, 0);
         if (rc)
             goto error;
