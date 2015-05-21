@@ -71,7 +71,9 @@ typedef struct {
 
 typedef struct {
     iojsString     *strings;
-    size_t          len;
+    unsigned long   len;
+    int64_t         statusCode;
+    iojsString      statusMessage;
 } iojsHeaders;
 
 

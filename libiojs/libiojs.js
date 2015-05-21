@@ -187,7 +187,12 @@ process.on('SIGINT', function() {
         Writable.call(this, {
             write: function write(chunk, encoding, cb) {
                 if (!headersSent) {
-                    callback(BY_JS_RESPONSE_HEADERS, payload, this.headers);
+                    callback(
+                        BY_JS_RESPONSE_HEADERS,
+                        payload,
+                        [+this.statusCode || 200, this.statusMessage + ''],
+                        this.headers
+                    );
                     headersSent = true;
                 }
 

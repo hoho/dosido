@@ -590,7 +590,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
     HandleScope scope(env->isolate());
 
-    int32_t _type = args[0]->IntegerValue();
+    int64_t _type = args[0]->IntegerValue();
     iojsContext *jsCtx =
             static_cast<iojsContext *>(args[1].As<v8::External>()->Value());
 
@@ -665,11 +665,15 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         case BY_JS_RESPONSE_HEADERS:
             cmd->type = FROM_JS_RESPONSE_HEADERS;
             {
-                Local<Object> headers = arg->ToObject();
+                Local<Object> meta = arg->ToObject();
+                Local<Integer> status = meta->Get(0)->ToInteger(); // statusCode.
+                Local<String> msg = meta->Get(1)->ToString(); // statusMessage.
+                Local<Object> headers = args[3]->ToObject(); // headers.
+                int msgLen = msg->Utf8Length();
                 std::vector<std::pair<std::string, std::string>> h;
 
                 sz = iojsAggregateHeaders(env, headers, &h) +
-                     sizeof(iojsHeaders);
+                     sizeof(iojsHeaders) + msgLen;
 
                 iojsHeaders *ret = reinterpret_cast<iojsHeaders *>(malloc(sz));
                 IOJS_CHECK_OUT_OF_MEMORY(ret);
@@ -679,6 +683,14 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                 iojsHeadersToStringArray(&h,
                                          reinterpret_cast<char *>(&ret[1]),
                                          ret);
+                ret->statusCode = status->IntegerValue();
+                ret->statusMessage.len = msgLen;
+                if (msgLen) {
+                    Utf8Value _msg(env->isolate(), msg);
+                    ret->statusMessage.data = \
+                            reinterpret_cast<char *>(ret) + sz - msgLen;
+                    memcpy(ret->statusMessage.data, *_msg, msgLen);
+                }
             }
             break;
 

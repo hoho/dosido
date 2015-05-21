@@ -317,6 +317,17 @@ error:
 
 
 ngx_inline static ngx_int_t
+ngx_http_iojs_set_response_meta(ngx_http_request_t *r, iojsHeaders *headers)
+{
+    r->headers_out.status = headers->statusCode;
+    //r->headers_out.status_line.len = headers->statusMessage.len;
+    //r->headers_out.status_line.data = \
+    //        ngx_pstrdup(r->pool, (ngx_str_t *)&headers->statusMessage);
+    return NGX_OK;
+}
+
+
+ngx_inline static ngx_int_t
 ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
                            iojsHeaders *headers)
 {
@@ -589,9 +600,13 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 dd("Sending response headers");
 
-                rc = ngx_http_iojs_push_headers(r->pool,
-                                                &r->headers_out.headers,
-                                                cmd->data);
+                rc = ngx_http_iojs_set_response_meta(r, cmd->data);
+
+                if (rc == NGX_OK) {
+                    rc = ngx_http_iojs_push_headers(r->pool,
+                                                    &r->headers_out.headers,
+                                                    cmd->data);
+                }
 
                 if (rc != NGX_OK || (ngx_http_send_header(r) != NGX_OK)) {
                     ngx_http_finalize_request(r, NGX_ERROR);
