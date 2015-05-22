@@ -320,9 +320,13 @@ ngx_inline static ngx_int_t
 ngx_http_iojs_set_response_meta(ngx_http_request_t *r, iojsHeaders *headers)
 {
     r->headers_out.status = headers->statusCode;
-    //r->headers_out.status_line.len = headers->statusMessage.len;
-    //r->headers_out.status_line.data = \
-    //        ngx_pstrdup(r->pool, (ngx_str_t *)&headers->statusMessage);
+
+    if (headers->statusMessage.len > 0) {
+        r->headers_out.status_line.len = headers->statusMessage.len;
+        r->headers_out.status_line.data = \
+                ngx_pstrdup(r->pool, (ngx_str_t *) &headers->statusMessage);
+    }
+
     return NGX_OK;
 }
 

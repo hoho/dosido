@@ -182,7 +182,7 @@ process.on('SIGINT', function() {
 
         this.headers = {};
         this.statusCode = 200;
-        this.statusMessage = 'OK';
+        this.statusMessage = '';
 
         Writable.call(this, {
             write: function write(chunk, encoding, cb) {
@@ -190,7 +190,7 @@ process.on('SIGINT', function() {
                     callback(
                         BY_JS_RESPONSE_HEADERS,
                         payload,
-                        [+this.statusCode || 200, this.statusMessage + ''],
+                        [+this.statusCode || 200, this.statusMessage],
                         this.headers
                     );
                     headersSent = true;
