@@ -69,3 +69,15 @@ GET /srtest3
 --- response_body eval
 "{\"X-Response1\":\"Response1\"}{\"X-Response4\":\"Response4\"}" . ("a" x 50000) . ("b" x 50000) . ("gh" x 500 x 10) . "\n"
 --- error_code: 200
+
+
+=== TEST 4: status codes
+--- config
+    location /srtest4 {
+        js_pass ../subrequest4.js;
+    }
+--- request
+GET /srtest4
+--- response_body
+Status: 301 — 301 (Ololo)|Status: 400 — 400 ()|Status: 502 — 502
+--- error_code: 200
