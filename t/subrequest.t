@@ -2,6 +2,7 @@ use Test::Nginx::Socket;
 
 plan tests => repeat_each() * 2 * blocks() + 3;
 
+#no_shuffle();
 run_tests();
 
 __DATA__
@@ -75,6 +76,11 @@ GET /srtest3
 --- config
     location /srtest4 {
         js_pass ../subrequest4.js;
+    }
+    location /sr4/ {
+        internal;
+        rewrite /sr4(.*) $1 break;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_SERVER_PORT;
     }
 --- request
 GET /srtest4
