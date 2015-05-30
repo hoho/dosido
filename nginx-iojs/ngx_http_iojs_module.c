@@ -331,6 +331,41 @@ ngx_http_iojs_set_response_meta(ngx_http_request_t *r, iojsHeaders *headers)
 }
 
 
+ngx_inline static ngx_table_elt_t *
+ngx_http_iojs_find_header(ngx_list_t *list, ngx_str_t *key)
+{
+    ngx_table_elt_t             *h;
+    ngx_list_part_t             *part;
+    ngx_uint_t                   i;
+
+    part = &list->part;
+    h = part->elts;
+
+    for (i = 0; /* void */; i++) {
+
+        if (i >= part->nelts) {
+            if (part->next == NULL) {
+                break;
+            }
+
+            part = part->next;
+            h = part->elts;
+            i = 0;
+        }
+
+        if (h[i].hash != 0 &&
+            h[i].key.len == key->len &&
+            ngx_strncasecmp(key->data, h[i].key.data, h[i].key.len) == 0)
+        {
+            dd("found out header %.*s", (int)h[i].key.len, h[i].key.data);
+            return h;
+        }
+    }
+
+    return NULL;
+}
+
+
 ngx_inline static ngx_int_t
 ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
                            iojsHeaders *headers)
@@ -341,9 +376,13 @@ ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
     ngx_table_elt_t  *h;
 
     for (i = 0; i < len; i += 2) {
-        h = ngx_list_push(list);
+        h = ngx_http_iojs_find_header(list, (ngx_str_t *)&arr[i]);
+
         if (h == NULL) {
-            return NGX_ERROR;
+            h = ngx_list_push(list);
+            if (h == NULL) {
+                return NGX_ERROR;
+            }
         }
 
         h->hash = 1;
@@ -364,9 +403,6 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
                                       iojsHeaders *headers,
                                       off_t len)
 {
-    ngx_table_elt_t  *h;
-    u_char           *p;
-
     memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
 
     sr->headers_in.content_length_n = len;
@@ -376,24 +412,6 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
     {
         return NGX_ERROR;
     }
-
-    h = ngx_list_push(&sr->headers_in.headers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-
-    h->hash = 1;
-    ngx_str_set(&h->key, "Content-Length");
-
-    sr->headers_in.content_length = h;
-
-    p = ngx_palloc(sr->pool, NGX_OFF_T_LEN);
-    if (p == NULL) {
-        return NGX_ERROR;
-    }
-
-    h->value.data = p;
-    h->value.len = ngx_sprintf(h->value.data, "%O", len) - h->value.data;
 
     return ngx_http_iojs_push_headers(sr->pool,
                                       &sr->headers_in.headers,
