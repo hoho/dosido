@@ -85,5 +85,5 @@ GET /srtest3
 --- request
 GET /srtest4
 --- response_body
-Status: 301 — 301 (Ololo)|Status: 400 — 400 ()|Status: 502 — 502
+Status: 301 — 301 (Ololo)|Status: 400 — 400 ()|Status: 403 — 403 (403 Forbidden)|Status: 502 — 502 (502 Bad Gateway)
 --- error_code: 200
