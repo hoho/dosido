@@ -558,8 +558,13 @@
              'return require("vm").runInThisContext(' +
              JSON.stringify(body) + ', { filename: ' +
              JSON.stringify(name) + ' });\n';
-    var result = module._compile(script, name + '-wrapper');
-    if (process._print_eval) console.log(result);
+    // Defer evaluation for a tick.  This is a workaround for deferred
+    // events not firing when evaluating scripts from the command line,
+    // see https://github.com/nodejs/io.js/issues/1600.
+    process.nextTick(function() {
+      var result = module._compile(script, name + '-wrapper');
+      if (process._print_eval) console.log(result);
+    });
   }
 
   function createWritableStdioStream(fd) {
@@ -573,12 +578,6 @@
         var tty = NativeModule.require('tty');
         stream = new tty.WriteStream(fd);
         stream._type = 'tty';
-
-        // Hack to have stream not keep the event loop alive.
-        // See https://github.com/joyent/node/issues/1726
-        if (stream._handle && stream._handle.unref) {
-          stream._handle.unref();
-        }
         break;
 
       case 'FILE':
@@ -595,20 +594,7 @@
           readable: false,
           writable: true
         });
-
-        // FIXME Should probably have an option in net.Socket to create a
-        // stream from an existing fd which is writable only. But for now
-        // we'll just add this hack and set the `readable` member to false.
-        // Test: ./node test/fixtures/echo.js < /etc/passwd
-        stream.readable = false;
-        stream.read = null;
         stream._type = 'pipe';
-
-        // FIXME Hack to have stream not keep the event loop alive.
-        // See https://github.com/joyent/node/issues/1726
-        if (stream._handle && stream._handle.unref) {
-          stream._handle.unref();
-        }
         break;
 
       default:
@@ -853,10 +839,7 @@
   // Load preload modules
   startup.preloadModules = function() {
     if (process._preload_modules) {
-      var Module = NativeModule.require('module');
-      process._preload_modules.forEach(function(module) {
-        Module._load(module);
-      });
+      NativeModule.require('module')._preloadModules(process._preload_modules);
     }
   };
 

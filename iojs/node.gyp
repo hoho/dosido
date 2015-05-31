@@ -70,8 +70,10 @@
       'lib/vm.js',
       'lib/zlib.js',
 
+      'lib/internal/child_process.js',
       'lib/internal/freelist.js',
       'lib/internal/smalloc.js',
+      'lib/internal/socket_list.js',
       'lib/internal/repl.js',
     ],
   },
@@ -110,6 +112,7 @@
       'sources': [
         'src/debug-agent.cc',
         'src/async-wrap.cc',
+        'src/env.cc',
         'src/fs_event_wrap.cc',
         'src/cares_wrap.cc',
         'src/handle_wrap.cc',
