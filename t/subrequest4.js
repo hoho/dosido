@@ -16,7 +16,7 @@ module.exports = function(i, o, sr, params) {
             ret.on('data', function(chunk) { output.push(chunk + ' — ' + ret.statusCode + ' (' + ret.statusMessage + ')'); });
             ret.on('end', function() { srDone(); });
         });
-        sr({url: '/sr4/srtest4', headers: {'X-Test-Status': '502'}}, function(ret) {
+        sr({url: '/sr4/srtest4', headers: {'X-Test-Status': '502', 'X-Test-Status-Message': 'Alala'}}, function(ret) {
             ret.on('data', function(chunk) { output.push(chunk + ' — ' + ret.statusCode + ' (' + ret.statusMessage + ')'); });
             ret.on('end', function() { srDone(); });
         });

@@ -187,10 +187,11 @@ process.on('SIGINT', function() {
         Writable.call(this, {
             write: function write(chunk, encoding, cb) {
                 if (!headersSent) {
+                    var code = +this.statusCode || 200;
                     callback(
                         BY_JS_RESPONSE_HEADERS,
                         payload,
-                        [+this.statusCode || 200, this.statusMessage],
+                        [code, this.statusMessage ? code + ' ' + this.statusMessage : ''],
                         this.headers
                     );
                     headersSent = true;
