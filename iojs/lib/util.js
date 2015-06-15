@@ -1,7 +1,9 @@
 'use strict';
 
 const uv = process.binding('uv');
+const Buffer = require('buffer').Buffer;
 const Debug = require('vm').runInDebugContext('Debug');
+const internalUtil = require('internal/util');
 
 const formatRegExp = /%[sdj%]/g;
 exports.format = function(f) {
@@ -63,16 +65,7 @@ exports.deprecate = function(fn, msg) {
 
   var warned = false;
   function deprecated() {
-    if (!warned) {
-      if (process.throwDeprecation) {
-        throw new Error(msg);
-      } else if (process.traceDeprecation) {
-        console.trace(msg);
-      } else {
-        console.error(msg);
-      }
-      warned = true;
-    }
+    warned = internalUtil.printDeprecationMessage(msg, warned);
     return fn.apply(this, arguments);
   }
 

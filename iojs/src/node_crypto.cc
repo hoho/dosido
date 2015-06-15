@@ -4878,6 +4878,32 @@ void GetHashes(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+void GetCurves(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  const size_t num_curves = EC_get_builtin_curves(nullptr, 0);
+  Local<Array> arr = Array::New(env->isolate(), num_curves);
+  EC_builtin_curve* curves;
+  size_t alloc_size;
+
+  if (num_curves) {
+    alloc_size = sizeof(*curves) * num_curves;
+    curves = static_cast<EC_builtin_curve*>(malloc(alloc_size));
+
+    CHECK_NE(curves, nullptr);
+
+    if (EC_get_builtin_curves(curves, num_curves)) {
+      for (size_t i = 0; i < num_curves; i++) {
+        arr->Set(i, OneByteString(env->isolate(), OBJ_nid2sn(curves[i].nid)));
+      }
+    }
+
+    free(curves);
+  }
+
+  args.GetReturnValue().Set(arr);
+}
+
+
 void Certificate::Initialize(Environment* env, Handle<Object> target) {
   HandleScope scope(env->isolate());
 
@@ -5071,6 +5097,15 @@ void InitCryptoOnce() {
   CRYPTO_set_locking_callback(crypto_lock_cb);
   CRYPTO_THREADID_set_callback(crypto_threadid_cb);
 
+#ifdef OPENSSL_FIPS
+  if (!FIPS_mode_set(1)) {
+    int err = ERR_get_error();
+    fprintf(stderr, "openssl fips failed: %s\n", ERR_error_string(err, NULL));
+    UNREACHABLE();
+  }
+#endif  // OPENSSL_FIPS
+
+
   // Turn off compression. Saves memory and protects against CRIME attacks.
 #if !defined(OPENSSL_NO_COMP)
 #if OPENSSL_VERSION_NUMBER < 0x00908000L
@@ -5160,6 +5195,7 @@ void InitCrypto(Handle<Object> target,
   env->SetMethod(target, "getSSLCiphers", GetSSLCiphers);
   env->SetMethod(target, "getCiphers", GetCiphers);
   env->SetMethod(target, "getHashes", GetHashes);
+  env->SetMethod(target, "getCurves", GetCurves);
   env->SetMethod(target, "publicEncrypt",
                  PublicKeyCipher::Cipher<PublicKeyCipher::kPublic,
                                          EVP_PKEY_encrypt_init,

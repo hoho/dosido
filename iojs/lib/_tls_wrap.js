@@ -8,6 +8,7 @@ const util = require('util');
 const listenerCount = require('events').listenerCount;
 const common = require('_tls_common');
 const StreamWrap = require('_stream_wrap').StreamWrap;
+const Buffer = require('buffer').Buffer;
 const Duplex = require('stream').Duplex;
 const debug = util.debuglog('tls');
 const Timer = process.binding('timer_wrap').Timer;
@@ -61,6 +62,9 @@ function loadSession(self, hello, cb) {
     if (err)
       return cb(err);
 
+    if (!self._handle)
+      return cb(new Error('Socket is closed'));
+
     // NOTE: That we have disabled OpenSSL's internal session storage in
     // `node_crypto.cc` and hence its safe to rely on getting servername only
     // from clienthello or this place.
@@ -90,6 +94,9 @@ function loadSNI(self, servername, cb) {
 
     if (err)
       return cb(err);
+
+    if (!self._handle)
+      return cb(new Error('Socket is closed'));
 
     // TODO(indutny): eventually disallow raw `SecureContext`
     if (context)
@@ -127,6 +134,9 @@ function requestOCSP(self, hello, ctx, cb) {
     if (err)
       return cb(err);
 
+    if (!self._handle)
+      return cb(new Error('Socket is closed'));
+
     if (response)
       self._handle.setOCSPResponse(response);
     cb(null);
@@ -157,6 +167,9 @@ function oncertcb(info) {
       if (err)
         return self.destroy(err);
 
+      if (!self._handle)
+        return self.destroy(new Error('Socket is closed'));
+
       self._handle.certCbDone();
     });
   });
@@ -178,6 +191,9 @@ function onnewsession(key, session) {
     if (once)
       return;
     once = true;
+
+    if (!self._handle)
+      return self.destroy(new Error('Socket is closed'));
 
     self._handle.newSessionDone();
 
@@ -290,12 +306,17 @@ TLSSocket.prototype._wrapHandle = function(handle) {
   });
 
   this.on('close', function() {
-    this._destroySSL();
+    // Make sure we are not doing it on OpenSSL's stack
+    setImmediate(destroySSL, this);
     res = null;
   });
 
   return res;
 };
+
+function destroySSL(self) {
+  self._destroySSL();
+}
 
 TLSSocket.prototype._destroySSL = function _destroySSL() {
   if (!this.ssl) return;

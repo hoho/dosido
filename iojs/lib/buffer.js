@@ -1,8 +1,10 @@
+/* eslint-disable require-buffer */
 'use strict';
 
 const binding = process.binding('buffer');
 const smalloc = process.binding('smalloc');
 const util = require('util');
+const internalUtil = require('internal/util');
 const alloc = smalloc.alloc;
 const truncate = smalloc.truncate;
 const sliceOnto = smalloc.sliceOnto;
@@ -504,16 +506,7 @@ Buffer.prototype.write = function(string, offset, length, encoding) {
 
   // XXX legacy write(string, encoding, offset, length) - remove in v0.13
   } else {
-    if (!writeWarned) {
-      if (process.throwDeprecation)
-        throw new Error(writeMsg);
-      else if (process.traceDeprecation)
-        console.trace(writeMsg);
-      else
-        console.error(writeMsg);
-      writeWarned = true;
-    }
-
+    writeWarned = internalUtil.printDeprecationMessage(writeMsg, writeWarned);
     var swap = encoding;
     encoding = offset;
     offset = length >>> 0;

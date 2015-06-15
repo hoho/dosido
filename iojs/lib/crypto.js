@@ -10,10 +10,12 @@ try {
   var randomBytes = binding.randomBytes;
   var getCiphers = binding.getCiphers;
   var getHashes = binding.getHashes;
+  var getCurves = binding.getCurves;
 } catch (e) {
   throw new Error('node.js not compiled with openssl crypto support.');
 }
 
+const Buffer = require('buffer').Buffer;
 const constants = require('constants');
 const stream = require('stream');
 const util = require('util');
@@ -652,13 +654,17 @@ exports.randomBytes = exports.pseudoRandomBytes = randomBytes;
 exports.rng = exports.prng = randomBytes;
 
 exports.getCiphers = function() {
-  return filterDuplicates(getCiphers.call(null, arguments));
+  return filterDuplicates(getCiphers());
 };
 
 
 exports.getHashes = function() {
-  return filterDuplicates(getHashes.call(null, arguments));
+  return filterDuplicates(getHashes());
+};
 
+
+exports.getCurves = function() {
+  return filterDuplicates(getCurves());
 };
 
 
