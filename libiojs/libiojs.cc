@@ -936,6 +936,9 @@ iojsLoadScripts(Environment *env,
 
     try_catch.SetVerbose(false);
 
+    // Workaround to actually run _third_party_main.js.
+    env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
+
     Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(),
                                                       "libiojs.js");
     Local<Value> f_value = execute(
@@ -951,9 +954,16 @@ iojsLoadScripts(Environment *env,
     }
 
     CHECK(f_value->IsFunction());
-    Local<Function> f = Local<Function>::Cast(f_value);
+    Local<Function> f = f_value.As<Function>();
 
-    Local<Object> global = env->context()->Global();
+    Local<String> require_name = FIXED_ONE_BYTE_STRING(env->isolate(),
+                                                       "_require");
+    Local<Value> require_value = env->process_object()->Get(require_name);
+    CHECK(require_value->IsFunction());
+    // Remove temporary `process._require` set up by _third_party_main.js.
+    env->process_object()->Delete(require_name);
+    Local<Function> require = require_value.As<Function>();
+
     Local<Array> scripts = Array::New(env->isolate(), iojsScripts.len);
 
     size_t   i;
@@ -966,8 +976,9 @@ iojsLoadScripts(Environment *env,
                                    script->filename, script->len));
     }
 
-    Local<Value> arg = scripts;
-    f_value = f->Call(global, 1, &arg);
+    Local<Value> args[2] = {require, scripts};
+
+    f_value = f->Call(f, 2, args);
 
     if (try_catch.HasCaught())  {
         report(env, try_catch);
@@ -978,11 +989,7 @@ iojsLoadScripts(Environment *env,
     CHECK(f_value->IsArray());
     iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
-    if (iojsStartPolling(env, iojsRunIncomingTask))
-        goto done;
-
-    // Workaround to actually run _third_party_main.js.
-    env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
+    iojsStartPolling(env, iojsRunIncomingTask);
 
 done:
     iojsError = ret;
