@@ -9,6 +9,7 @@ if [ $FLAVOUR = "win" ]; then
     IOJS_LIBS="psapi.lib \
 		iphlpapi.lib \
 		winmm.lib \
+		userenv.lib \
 		../iojs/Release/lib/iojs.lib \
 		../iojs/Release/lib/libuv.lib \
 		../iojs/Release/lib/cares.lib \

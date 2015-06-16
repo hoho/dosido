@@ -5,7 +5,7 @@ if /i "%1"=="configure" goto configure
 if /i "%1"=="nginx" goto nginx
 
 :libiojs
-set GYP_DEFINES="iojs_target_type=static_library"
+set GYP_DEFINES="node_target_type=static_library"
 iojs\vcbuild.bat %*
 if /i "%1"=="libiojs" goto exit
 
