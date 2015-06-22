@@ -6,9 +6,9 @@ FLAVOUR=`python -c 'from os import path; import sys; \
         print GetFlavor({})'`
 
 if [ $FLAVOUR = "win" ]; then
-    SYMBOLS=`python -c 'import subprocess; import re; \
-            symbols = subprocess.Popen("dumpbin /all ../iojs/Release/lib/iojs.lib", stdout=subprocess.PIPE).stdout.read(); \
-            print " ".join(map(lambda s: re.sub(r".*?(_+register_[^\s]+).*", r"/INCLUDE:\1", s), filter(lambda s: s.find("_register_") >= 0, symbols.split("\n"))))'`
+    FORCE_SYMBOLS=`python -c 'import subprocess; import re; \
+                  symbols = subprocess.Popen("dumpbin /all ../iojs/Release/lib/iojs.lib", stdout=subprocess.PIPE).stdout.read(); \
+                  print " ".join(map(lambda s: re.sub(r".*?(_+register_[^\s]+).*", r"/include:\1", s), filter(lambda s: s.find("_register_") >= 0, symbols.split("\n"))))'`
 
     IOJS_LIBS="psapi.lib \
 		iphlpapi.lib \
@@ -22,7 +22,7 @@ if [ $FLAVOUR = "win" ]; then
 		../iojs/build/Release/lib/v8_libbase.lib \
 		../iojs/build/Release/lib/v8_nosnapshot.lib \
 		../iojs/build/Release/lib/v8_libplatform.lib \
-		$SYMBOLS"
+		/link $FORCE_SYMBOLS"
 else
     if [ $FLAVOUR = "mac" ]; then
         FORCE_LOAD_BEGIN="-Wl,-force_load,"
