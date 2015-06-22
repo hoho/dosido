@@ -52,7 +52,7 @@ inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
 }
 inline ssize_t iojsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
 {
-    return send(fd, (const char *)buf, count, 0)
+    return send(fd, (const char *)buf, count, 0);
 }
 inline ssize_t iojsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
 {
