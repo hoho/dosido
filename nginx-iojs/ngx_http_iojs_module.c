@@ -791,6 +791,7 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     jsPipeEv.data = &jsPipe;
     jsPipeEv.handler = ngx_http_iojs_receive;
     jsPipeEv.log = cycle->log;
+    jsPipeEv.index = NGX_INVALID_INDEX;
 
     dd("add pipe handler");
     ngx_add_event(&jsPipeEv, NGX_READ_EVENT, 0);
