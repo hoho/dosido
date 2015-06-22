@@ -6,43 +6,101 @@
 #include <fcntl.h>
 
 #ifdef _WIN32
-#include <io.h>
-inline int iojsPipe(int pipefd[2])
+
+#define PIPE_FD_TYPE SOCKET
+
+inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
 {
-    return _pipe(pipefd, 65535, _O_BINARY);
+    int                       err;
+    PIPE_FD_TYPE              listenSocket;
+    struct sockaddr_in        addr;
+    socklen_t                 addrlen = sizeof(addr);
+    PIPE_FD_TYPE              writeSocket;
+    PIPE_FD_TYPE              readSocket;
+    u_long                    set = 1;
+
+    listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = 0;
+
+    err = bind(listenSocket, (sockaddr*)&addr, sizeof(addr));
+    if (err) return err;
+    err = getsockname(listenSocket, (struct sockaddr*)&addr, &addrlen);
+    if (err) return err;
+
+    err = listen(listenSocket, SOMAXCONN);
+    if (err) return err;
+
+    writeSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    err = ioctlsocket(writeSocket, FIONBIO, &set);
+    if (err) return err;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    connect(writeSocket, (sockaddr*)&addr, sizeof(addr));
+
+    readSocket = accept(listenSocket, NULL, NULL);
+    err = ioctlsocket(readSocket, FIONBIO, &set);
+    if (err) return err;
+
+    closesocket(listenSocket);
+
+    pipefd[0] = readSocket;
+    pipefd[1] = writeSocket;
+
+    return 0;
 }
-inline ssize_t iojsWrite(int fd, const void *buf, size_t count)
+inline ssize_t iojsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
 {
-    return _write(fd, buf, count);
+    return send(fd, (const char *)buf, count, 0)
 }
-inline ssize_t iojsRead(int fd, void *buf, size_t count)
+inline ssize_t iojsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
 {
-    return _read(fd, buf, count);
+    return recv(fd, (char *)buf, count, 0);
 }
-inline int iojsClose(int fd)
+inline int iojsClose(PIPE_FD_TYPE fd)
 {
-    return _close(fd);
+    return closesocket(fd);
 }
+
 #else
+
+#define PIPE_FD_TYPE int
+
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
-inline int iojsPipe(int pipefd[2])
+
+inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
 {
-    return pipe(pipefd);
+    int err = pipe(pipefd);
+    if (err) return err;
+
+    int set = 1;
+
+    do err = ioctl(pipefd[0], FIONBIO, &set);
+    while (err == -1 && errno == EINTR);
+    if (err) return -errno;
+
+    do err = ioctl(pipefd[1], FIONBIO, &set);
+    while (err == -1 && errno == EINTR);
+    if (err) return -errno;
+
+    return err;
 }
-inline ssize_t iojsWrite(int fd, const void *buf, size_t count)
+inline ssize_t iojsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
 {
     return write(fd, buf, count);
 }
-inline ssize_t iojsRead(int fd, void *buf, size_t count)
+inline ssize_t iojsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
 {
     return read(fd, buf, count);
 }
-inline int iojsClose(int fd)
+inline int iojsClose(PIPE_FD_TYPE fd)
 {
     return close(fd);
 }
+
 #endif
 
 
@@ -65,8 +123,8 @@ using v8::TryCatch;
 using v8::Value;
 
 
-static int                            iojsIncomingPipeFd[2] = {-1, -1};
-static int                            iojsOutgoingPipeFd[2] = {-1, -1};
+static PIPE_FD_TYPE                   iojsIncomingPipeFd[2] = {-1, -1};
+static PIPE_FD_TYPE                   iojsOutgoingPipeFd[2] = {-1, -1};
 static uv_barrier_t                   iojsStartBlocker;
 static uv_thread_t                    iojsThreadId;
 static uv_poll_t                      iojsCommandPoll;
@@ -226,8 +284,8 @@ iojsStartPolling(Environment *env, uv_poll_cb cb)
 {
     int ret;
 
-    ret = uv_poll_init(env->event_loop(),
-                       &iojsCommandPoll, iojsIncomingPipeFd[0]);
+    ret = uv_poll_init_socket(env->event_loop(),
+                              &iojsCommandPoll, iojsIncomingPipeFd[0]);
     if (ret)
         return ret;
 
@@ -250,17 +308,10 @@ iojsClosePipes(void)
 {
     iojsLoggerFunc(IOJS_LOG_INFO, "Closing io.js pipes");
 
-    if (iojsIncomingPipeFd[0] != -1)
-        iojsClose(iojsIncomingPipeFd[0]);
-
-    if (iojsIncomingPipeFd[1] != -1)
-        iojsClose(iojsIncomingPipeFd[1]);
-
-    if (iojsOutgoingPipeFd[0] != -1)
-        iojsClose(iojsOutgoingPipeFd[0]);
-
-    if (iojsOutgoingPipeFd[1] != -1)
-        iojsClose(iojsOutgoingPipeFd[1]);
+    iojsClose(iojsIncomingPipeFd[0]);
+    iojsClose(iojsIncomingPipeFd[1]);
+    iojsClose(iojsOutgoingPipeFd[0]);
+    iojsClose(iojsOutgoingPipeFd[1]);
 }
 
 
@@ -268,55 +319,16 @@ static inline int
 iojsOpenPipes(void)
 {
     int err;
-#ifndef _WIN32
-    int r;
-    int set = 1;
-#endif
 
     iojsLoggerFunc(IOJS_LOG_INFO, "Opening io.js pipes");
 
     err = iojsPipe(iojsIncomingPipeFd);
-    if (err) {
-        err = -errno;
-        goto error;
-    }
+    if (err) goto error;
+
     err = iojsPipe(iojsOutgoingPipeFd);
-    if (err) {
-        err = -errno;
-        goto error;
-    }
+    if (err) goto error;
 
     iojsLoggerFunc(IOJS_LOG_INFO, "Opened io.js pipes");
-
-#ifndef _WIN32
-    do r = ioctl(iojsIncomingPipeFd[0], FIONBIO, &set);
-    while (r == -1 && errno == EINTR);
-    if (r) {
-        err = -errno;
-        goto error;
-    }
-
-    do r = ioctl(iojsIncomingPipeFd[1], FIONBIO, &set);
-    while (r == -1 && errno == EINTR);
-    if (r) {
-        err = -errno;
-        goto error;
-    }
-
-    do r = ioctl(iojsOutgoingPipeFd[0], FIONBIO, &set);
-    while (r == -1 && errno == EINTR);
-    if (r) {
-        err = -errno;
-        goto error;
-    }
-
-    do r = ioctl(iojsOutgoingPipeFd[1], FIONBIO, &set);
-    while (r == -1 && errno == EINTR);
-    if (r) {
-        err = -errno;
-        goto error;
-    }
-#endif
 
     return 0;
 
@@ -989,7 +1001,7 @@ iojsLoadScripts(Environment *env,
     CHECK(f_value->IsArray());
     iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
-    iojsStartPolling(env, iojsRunIncomingTask);
+    ret = iojsStartPolling(env, iojsRunIncomingTask);
 
 done:
     iojsError = ret;
