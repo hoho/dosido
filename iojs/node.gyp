@@ -200,7 +200,11 @@
         'NODE_WANT_INTERNALS=1',
       ],
 
+
       'conditions': [
+        [ 'node_tag!=""', {
+          'defines': [ 'NODE_TAG="<(node_tag)"' ],
+        }],
         # No node_main.cc for anything except executable
         [ 'node_target_type!="executable"', {
           'include_dirs': [

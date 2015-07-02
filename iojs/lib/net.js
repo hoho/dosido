@@ -925,7 +925,9 @@ function lookupAndConnect(self, options) {
   // TODO(evanlucas) should we hot path this for localhost?
   var addressType = exports.isIP(host);
   if (addressType) {
-    connect(self, host, port, addressType, localAddress, localPort);
+    process.nextTick(function() {
+      connect(self, host, port, addressType, localAddress, localPort);
+    });
     return;
   }
 
@@ -941,7 +943,7 @@ function lookupAndConnect(self, options) {
     dnsopts.hints = dns.ADDRCONFIG | dns.V4MAPPED;
 
   debug('connect: find host ' + host);
-  debug('connect: dns options ' + dnsopts);
+  debug('connect: dns options', dnsopts);
   self._host = host;
   var lookup = options.lookup || dns.lookup;
   lookup(host, dnsopts, function(err, ip, addressType) {

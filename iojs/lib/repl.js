@@ -611,9 +611,7 @@ REPLServer.prototype.complete = function(line, callback) {
       if (!expr) {
         // If context is instance of vm.ScriptContext
         // Get global vars synchronously
-        if (this.useGlobal ||
-            this.context.constructor &&
-            this.context.constructor.name === 'Context') {
+        if (this.useGlobal || vm.isContext(this.context)) {
           var contextProto = this.context;
           while (contextProto = Object.getPrototypeOf(contextProto)) {
             completionGroups.push(Object.getOwnPropertyNames(contextProto));
@@ -857,7 +855,6 @@ function addStandardGlobals(completionGroups, filter) {
 }
 
 function defineDefaultCommands(repl) {
-  // TODO remove me after 0.3.x
   repl.defineCommand('break', {
     help: 'Sometimes you get stuck, this gets you out',
     action: function() {
@@ -996,7 +993,7 @@ function isRecoverableError(e, self) {
       self._inTemplateLiteral = true;
       return true;
     }
-    return /^(Unexpected end of input|Unexpected token :)/.test(message);
+    return /^(Unexpected end of input|Unexpected token)/.test(message);
   }
   return false;
 }
