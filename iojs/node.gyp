@@ -195,7 +195,6 @@
       'defines': [
         'NODE_ARCH="<(target_arch)"',
         'NODE_PLATFORM="<(OS)"',
-        'NODE_TAG="<(node_tag)"',
         'NODE_V8_OPTIONS="<(node_v8_options)"',
         'NODE_WANT_INTERNALS=1',
       ],
