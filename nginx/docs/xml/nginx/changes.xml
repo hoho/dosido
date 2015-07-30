@@ -5,6 +5,180 @@
 <change_log title="nginx">
 
 
+<changes ver="1.9.3" date="14.07.2015">
+
+<change type="change">
+<para lang="ru">
+дублирующиеся блоки http, mail и stream теперь запрещены.
+</para>
+<para lang="en">
+duplicate "http", "mail", and "stream" blocks are now disallowed.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+ограничение количества соединений в модуле stream.
+</para>
+<para lang="en">
+connection limiting in the stream module.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+органичение скорости в модуле stream.
+</para>
+<para lang="en">
+data rate limiting in the stream module.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+директива zone в блоке upstream не работала на Windows.
+</para>
+<para lang="en">
+the "zone" directive inside the "upstream" block did not work on Windows.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+совместимость с LibreSSL в модуле stream.<br/>
+Спасибо Piotr Sikora.
+</para>
+<para lang="en">
+compatibility with LibreSSL in the stream module.<br/>
+Thanks to Piotr Sikora.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+в параметре --builddir в configure.<br/>
+Спасибо Piotr Sikora.
+</para>
+<para lang="en">
+in the "--builddir" configure parameter.<br/>
+Thanks to Piotr Sikora.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+директива ssl_stapling_file не работала;
+ошибка появилась в 1.9.2.<br/>
+Спасибо Faidon Liambotis и Brandon Black.
+</para>
+<para lang="en">
+the "ssl_stapling_file" directive did not work;
+the bug had appeared in 1.9.2.<br/>
+Thanks to Faidon Liambotis and Brandon Black.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+при использовании директивы ssl_stapling
+в рабочем процессе мог произойти segmentation fault;
+ошибка появилась в 1.9.2.<br/>
+Спасибо Matthew Baldwin.
+</para>
+<para lang="en">
+a segmentation fault might occur in a worker process
+if the "ssl_stapling" directive was used;
+the bug had appeared in 1.9.2.<br/>
+Thanks to Matthew Baldwin.
+</para>
+</change>
+
+</changes>
+
+
+<changes ver="1.9.2" date="16.06.2015">
+
+<change type="feature">
+<para lang="ru">
+параметр backlog директивы listen
+в почтовом прокси-сервере и модуле stream.
+</para>
+<para lang="en">
+the "backlog" parameter of the "listen" directives
+of the mail proxy and stream modules.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+директивы allow и deny в модуле stream.
+</para>
+<para lang="en">
+the "allow" and "deny" directives in the stream module.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+директива proxy_bind в модуле stream.
+</para>
+<para lang="en">
+the "proxy_bind" directive in the stream module.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+директива proxy_protocol в модуле stream.
+</para>
+<para lang="en">
+the "proxy_protocol" directive in the stream module.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+ключ -T.
+</para>
+<para lang="en">
+the -T switch.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+параметр REQUEST_SCHEME добавлен в стандартные конфигурационные файлы
+fastcgi.conf, fastcgi_params, scgi_params и uwsgi_params.
+</para>
+<para lang="en">
+the REQUEST_SCHEME parameter added to the fastcgi.conf, fastcgi_params,
+scgi_params, and uwsgi_params standard configuration files.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+параметр reuseport директивы listen в модуле stream
+не работал.
+</para>
+<para lang="en">
+the "reuseport" parameter of the "listen" directive of the stream module
+did not work.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+OCSP stapling в некоторых случаях мог вернуть устаревший OCSP-ответ.
+</para>
+<para lang="en">
+OCSP stapling might return an expired OCSP response in some cases.
+</para>
+</change>
+
+</changes>
+
+
 <changes ver="1.9.1" date="26.05.2015">
 
 <change type="change">
@@ -278,7 +452,7 @@ Thanks to Sven Peter, Franck Levionnois, and Filipe Da Silva.
 <change type="feature">
 <para lang="ru">
 уменьшение времени запуска
-при использовании дирекивы "hash ... consistent" в блоке upstream.<br/>
+при использовании директивы "hash ... consistent" в блоке upstream.<br/>
 Спасибо Wai Keen Woon.
 </para>
 <para lang="en">
@@ -4977,7 +5151,7 @@ responses from cache might hang.
 ошибка появилась в 1.1.9.
 </para>
 <para lang="en">
-a segmentation fault occured in a worker process if AIO was used on Linux;
+a segmentation fault occurred in a worker process if AIO was used on Linux;
 the bug had appeared in 1.1.9.
 </para>
 </change>
@@ -5927,7 +6101,7 @@ Thanks to Maxim Dounin.
 Спасибо Lanshun Zhou.
 </para>
 <para lang="en">
-in parameter validaiton of a "proxy_pass" directive with variables.<br/>
+in parameter validation of a "proxy_pass" directive with variables.<br/>
 Thanks to Lanshun Zhou.
 </para>
 </change>
@@ -14899,7 +15073,7 @@ the bug had appeared in 0.5.21.
 </para>
 <para lang="en">
 if server has more than about ten locations, then regex locations
-might be choosen not in that order as they were specified.
+might be chosen not in that order as they were specified.
 </para>
 </change>
 
@@ -15185,7 +15359,7 @@ in the HTTPS protocol in the "proxy_pass" directive.
 возвращали старое закэшированное значение.
 </para>
 <para lang="en">
-in some cases non-cachable variables (such as $uri variable)
+in some cases non-cacheable variables (such as $uri variable)
 returned old cached value.
 </para>
 </change>
@@ -15252,12 +15426,12 @@ the bug had appeared in 0.5.15.
 <change type="feature">
 <para lang="ru">
 почтовый прокси-сервер поддерживает аутентифицированное SMTP-проксирование и
-директивы smtp_auth, smtp_capablities и xclient.<br/>
+директивы smtp_auth, smtp_capabilities и xclient.<br/>
 Спасибо Антону Южанинову и Максиму Дунину.
 </para>
 <para lang="en">
 the mail proxy supports authenticated SMTP proxying and
-the "smtp_auth", "smtp_capablities", and "xclient" directives.<br/>
+the "smtp_auth", "smtp_capabilities", and "xclient" directives.<br/>
 Thanks to Anton Yuzhaninov and Maxim Dounin.
 </para>
 </change>
@@ -18760,7 +18934,7 @@ the ngx_http_perl_module.
 директива valid_referers разрешает использовать рефереры совсем без URI.
 </para>
 <para lang="en">
-the "valid_referers" directive allows the referreres without URI part.
+the "valid_referers" directive allows the referrers without URI part.
 </para>
 </change>
 
@@ -19080,10 +19254,10 @@ the "so_keepalive" directive in IMAP/POP3 proxy.
 <change type="bugfix">
 <para lang="ru">
 nginx теперь вызывает abort() при обнаружении незакрытых соединений
-только при планом выходе и включённой директиве debug_points.
+только при плавном выходе и включённой директиве debug_points.
 </para>
 <para lang="en">
-if there are unclosed connection nginx now calls abort() only on gracefull
+if there are unclosed connection nginx now calls abort() only on graceful
 quit and active "debug_points" directive.
 </para>
 </change>
@@ -20862,7 +21036,7 @@ if many parts or the big parts were included by SSI.
 начинал запрашивать все бэкенды снова.
 </para>
 <para lang="en">
-if all backends had returned the 404 reponse and the "http_404" parameter of
+if all backends had returned the 404 response and the "http_404" parameter of
 the "proxy_next_upstream" or "fastcgi_next_upstream" directives was used,
 then nginx started to request all backends again.
 </para>
