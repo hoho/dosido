@@ -7,6 +7,7 @@
 #include "src/accessors.h"
 #include "src/arguments.h"
 #include "src/compiler.h"
+#include "src/cpu-profiler.h"
 #include "src/deoptimizer.h"
 #include "src/frames.h"
 #include "src/runtime/runtime-utils.h"
@@ -32,32 +33,6 @@ RUNTIME_FUNCTION(Runtime_IsSloppyModeFunction) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_GetDefaultReceiver) {
-  SealHandleScope shs(isolate);
-  DCHECK(args.length() == 1);
-  CONVERT_ARG_CHECKED(JSReceiver, callable, 0);
-
-  if (!callable->IsJSFunction()) {
-    HandleScope scope(isolate);
-    Handle<Object> delegate;
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-        isolate, delegate, Execution::TryGetFunctionDelegate(
-                               isolate, Handle<JSReceiver>(callable)));
-    callable = JSFunction::cast(*delegate);
-  }
-  JSFunction* function = JSFunction::cast(callable);
-
-  SharedFunctionInfo* shared = function->shared();
-  if (shared->native() || is_strict(shared->language_mode())) {
-    return isolate->heap()->undefined_value();
-  }
-  // Returns undefined for strict or native functions, or
-  // the associated global receiver for "normal" functions.
-
-  return function->global_proxy();
-}
-
-
 RUNTIME_FUNCTION(Runtime_FunctionGetName) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
@@ -67,32 +42,15 @@ RUNTIME_FUNCTION(Runtime_FunctionGetName) {
 }
 
 
-static Handle<String> NameToFunctionName(Handle<Name> name) {
-  Handle<String> stringName(name->GetHeap()->empty_string());
-
-  // TODO(caitp): Follow proper rules in section 9.2.11 (SetFunctionName)
-  if (name->IsSymbol()) {
-    Handle<Object> description(Handle<Symbol>::cast(name)->name(),
-                               name->GetIsolate());
-    if (description->IsString()) {
-      stringName = Handle<String>::cast(description);
-    }
-  } else {
-    stringName = Handle<String>::cast(name);
-  }
-
-  return stringName;
-}
-
-
 RUNTIME_FUNCTION(Runtime_FunctionSetName) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 2);
 
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, f, 0);
-  CONVERT_ARG_HANDLE_CHECKED(Name, name, 1);
+  CONVERT_ARG_HANDLE_CHECKED(String, name, 1);
 
-  f->shared()->set_name(*NameToFunctionName(name));
+  name = String::Flatten(name);
+  f->shared()->set_name(*name);
   return isolate->heap()->undefined_value();
 }
 
@@ -294,10 +252,6 @@ RUNTIME_FUNCTION(Runtime_SetCode) {
   int number_of_literals = source->NumberOfLiterals();
   Handle<FixedArray> literals =
       isolate->factory()->NewFixedArray(number_of_literals, TENURED);
-  if (number_of_literals > 0) {
-    literals->set(JSFunction::kLiteralNativeContextIndex,
-                  context->native_context());
-  }
   target->set_context(*context);
   target->set_literals(*literals);
 
@@ -427,6 +381,7 @@ RUNTIME_FUNCTION(Runtime_FunctionBindArguments) {
 
   // TODO(lrn): Create bound function in C++ code from premade shared info.
   bound_function->shared()->set_bound(true);
+  bound_function->shared()->set_inferred_name(isolate->heap()->empty_string());
   // Get all arguments of calling function (Function.prototype.bind).
   int argc = 0;
   SmartArrayPointer<Handle<Object> > arguments =
@@ -629,13 +584,13 @@ RUNTIME_FUNCTION(Runtime_GetConstructorDelegate) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_CallFunction) {
+RUNTIME_FUNCTION(Runtime_CallFunction) {
   SealHandleScope shs(isolate);
   return __RT_impl_Runtime_Call(args, isolate);
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_IsConstructCall) {
+RUNTIME_FUNCTION(Runtime_IsConstructCall) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 0);
   JavaScriptFrameIterator it(isolate);
@@ -644,7 +599,7 @@ RUNTIME_FUNCTION(RuntimeReference_IsConstructCall) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_IsFunction) {
+RUNTIME_FUNCTION(Runtime_IsFunction) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_CHECKED(Object, obj, 0);

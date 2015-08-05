@@ -132,7 +132,6 @@ class OptimizedFunctionVisitor BASE_EMBEDDED {
   V(kNotAHeapNumberUndefined, "not a heap number/undefined")                   \
   V(kNotAJavaScriptObject, "not a JavaScript object")                          \
   V(kNotASmi, "not a Smi")                                                     \
-  V(kNotHeapNumber, "not heap number")                                         \
   V(kNull, "null")                                                             \
   V(kOutOfBounds, "out of bounds")                                             \
   V(kOutsideOfRange, "Outside of range")                                       \
@@ -161,7 +160,8 @@ class OptimizedFunctionVisitor BASE_EMBEDDED {
   V(kUnknownMap, "Unknown map")                                                \
   V(kValueMismatch, "value mismatch")                                          \
   V(kWrongInstanceType, "wrong instance type")                                 \
-  V(kWrongMap, "wrong map")
+  V(kWrongMap, "wrong map")                                                    \
+  V(kUndefinedOrNullInForIn, "null or undefined in for-in")
 
 
 class Deoptimizer : public Malloced {
@@ -184,15 +184,16 @@ class Deoptimizer : public Malloced {
   static const char* GetDeoptReason(DeoptReason deopt_reason);
 
   struct DeoptInfo {
-    DeoptInfo(int r, const char* m, DeoptReason d)
-        : raw_position(r), mnemonic(m), deopt_reason(d) {}
+    DeoptInfo(SourcePosition position, const char* m, DeoptReason d)
+        : position(position), mnemonic(m), deopt_reason(d), inlining_id(0) {}
 
-    int raw_position;
+    SourcePosition position;
     const char* mnemonic;
     DeoptReason deopt_reason;
+    int inlining_id;
   };
 
-  static DeoptInfo GetDeoptInfo(Code* code, int bailout_id);
+  static DeoptInfo GetDeoptInfo(Code* code, byte* from);
 
   struct JumpTableEntry : public ZoneObject {
     inline JumpTableEntry(Address entry, const DeoptInfo& deopt_info,
@@ -322,11 +323,10 @@ class Deoptimizer : public Malloced {
   static const int kNotDeoptimizationEntry = -1;
 
   // Generators for the deoptimization entry code.
-  class EntryGenerator BASE_EMBEDDED {
+  class TableEntryGenerator BASE_EMBEDDED {
    public:
-    EntryGenerator(MacroAssembler* masm, BailoutType type)
-        : masm_(masm), type_(type) { }
-    virtual ~EntryGenerator() { }
+    TableEntryGenerator(MacroAssembler* masm, BailoutType type, int count)
+        : masm_(masm), type_(type), count_(count) {}
 
     void Generate();
 
@@ -335,24 +335,13 @@ class Deoptimizer : public Malloced {
     BailoutType type() const { return type_; }
     Isolate* isolate() const { return masm_->isolate(); }
 
-    virtual void GeneratePrologue() { }
-
-   private:
-    MacroAssembler* masm_;
-    Deoptimizer::BailoutType type_;
-  };
-
-  class TableEntryGenerator : public EntryGenerator {
-   public:
-    TableEntryGenerator(MacroAssembler* masm, BailoutType type,  int count)
-        : EntryGenerator(masm, type), count_(count) { }
-
-   protected:
-    virtual void GeneratePrologue();
+    void GeneratePrologue();
 
    private:
     int count() const { return count_; }
 
+    MacroAssembler* masm_;
+    Deoptimizer::BailoutType type_;
     int count_;
   };
 
@@ -541,9 +530,12 @@ class FrameDescription {
     return malloc(size + frame_size - kPointerSize);
   }
 
+// Bug in VS2015 RC, reported fixed in RTM. Microsoft bug: 1153909.
+#if !defined(_MSC_FULL_VER) || _MSC_FULL_VER != 190022816
   void operator delete(void* pointer, uint32_t frame_size) {
     free(pointer);
   }
+#endif  // _MSC_FULL_VER
 
   void operator delete(void* description) {
     free(description);
@@ -763,25 +755,27 @@ class TranslationIterator BASE_EMBEDDED {
 };
 
 
-#define TRANSLATION_OPCODE_LIST(V)                                             \
-  V(BEGIN)                                                                     \
-  V(JS_FRAME)                                                                  \
-  V(CONSTRUCT_STUB_FRAME)                                                      \
-  V(GETTER_STUB_FRAME)                                                         \
-  V(SETTER_STUB_FRAME)                                                         \
-  V(ARGUMENTS_ADAPTOR_FRAME)                                                   \
-  V(COMPILED_STUB_FRAME)                                                       \
-  V(DUPLICATED_OBJECT)                                                         \
-  V(ARGUMENTS_OBJECT)                                                          \
-  V(CAPTURED_OBJECT)                                                           \
-  V(REGISTER)                                                                  \
-  V(INT32_REGISTER)                                                            \
-  V(UINT32_REGISTER)                                                           \
-  V(DOUBLE_REGISTER)                                                           \
-  V(STACK_SLOT)                                                                \
-  V(INT32_STACK_SLOT)                                                          \
-  V(UINT32_STACK_SLOT)                                                         \
-  V(DOUBLE_STACK_SLOT)                                                         \
+#define TRANSLATION_OPCODE_LIST(V) \
+  V(BEGIN)                         \
+  V(JS_FRAME)                      \
+  V(CONSTRUCT_STUB_FRAME)          \
+  V(GETTER_STUB_FRAME)             \
+  V(SETTER_STUB_FRAME)             \
+  V(ARGUMENTS_ADAPTOR_FRAME)       \
+  V(COMPILED_STUB_FRAME)           \
+  V(DUPLICATED_OBJECT)             \
+  V(ARGUMENTS_OBJECT)              \
+  V(CAPTURED_OBJECT)               \
+  V(REGISTER)                      \
+  V(INT32_REGISTER)                \
+  V(UINT32_REGISTER)               \
+  V(BOOL_REGISTER)                 \
+  V(DOUBLE_REGISTER)               \
+  V(STACK_SLOT)                    \
+  V(INT32_STACK_SLOT)              \
+  V(UINT32_STACK_SLOT)             \
+  V(BOOL_STACK_SLOT)               \
+  V(DOUBLE_STACK_SLOT)             \
   V(LITERAL)
 
 
@@ -819,10 +813,12 @@ class Translation BASE_EMBEDDED {
   void StoreRegister(Register reg);
   void StoreInt32Register(Register reg);
   void StoreUint32Register(Register reg);
+  void StoreBoolRegister(Register reg);
   void StoreDoubleRegister(DoubleRegister reg);
   void StoreStackSlot(int index);
   void StoreInt32StackSlot(int index);
   void StoreUint32StackSlot(int index);
+  void StoreBoolStackSlot(int index);
   void StoreDoubleStackSlot(int index);
   void StoreLiteral(int literal_id);
   void StoreArgumentsObject(bool args_known, int args_index, int args_length);
@@ -852,6 +848,7 @@ class SlotRef BASE_EMBEDDED {
     TAGGED,
     INT32,
     UINT32,
+    BOOLBIT,
     DOUBLE,
     LITERAL,
     DEFERRED_OBJECT,   // Object captured by the escape analysis.
@@ -969,7 +966,7 @@ class MaterializedObjectStore {
 
   Handle<FixedArray> Get(Address fp);
   void Set(Address fp, Handle<FixedArray> materialized_objects);
-  void Remove(Address fp);
+  bool Remove(Address fp);
 
  private:
   Isolate* isolate() { return isolate_; }

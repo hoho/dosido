@@ -34,11 +34,29 @@ std::ostream& operator<<(std::ostream& os, const CallDescriptor& d) {
   // TODO(svenpanne) Output properties etc. and be less cryptic.
   return os << d.kind() << ":" << d.debug_name() << ":r" << d.ReturnCount()
             << "j" << d.JSParameterCount() << "i" << d.InputCount() << "f"
-            << d.FrameStateCount();
+            << d.FrameStateCount() << "t" << d.SupportsTailCalls();
+}
+
+
+bool CallDescriptor::HasSameReturnLocationsAs(
+    const CallDescriptor* other) const {
+  if (ReturnCount() != other->ReturnCount()) return false;
+  for (size_t i = 0; i < ReturnCount(); ++i) {
+    if (GetReturnLocation(i) != other->GetReturnLocation(i)) return false;
+  }
+  return true;
 }
 
 
 CallDescriptor* Linkage::ComputeIncoming(Zone* zone, CompilationInfo* info) {
+  if (info->code_stub() != NULL) {
+    // Use the code stub interface descriptor.
+    CallInterfaceDescriptor descriptor =
+        info->code_stub()->GetCallInterfaceDescriptor();
+    return GetStubCallDescriptor(info->isolate(), zone, descriptor, 0,
+                                 CallDescriptor::kNoFlags,
+                                 Operator::kNoProperties);
+  }
   if (info->function() != NULL) {
     // If we already have the function literal, use the number of parameters
     // plus the receiver.
@@ -53,14 +71,6 @@ CallDescriptor* Linkage::ComputeIncoming(Zone* zone, CompilationInfo* info) {
     return GetJSCallDescriptor(zone, info->is_osr(),
                                1 + shared->internal_formal_parameter_count(),
                                CallDescriptor::kNoFlags);
-  }
-  if (info->code_stub() != NULL) {
-    // Use the code stub interface descriptor.
-    CallInterfaceDescriptor descriptor =
-        info->code_stub()->GetCallInterfaceDescriptor();
-    return GetStubCallDescriptor(info->isolate(), zone, descriptor, 0,
-                                 CallDescriptor::kNoFlags,
-                                 Operator::kNoProperties);
   }
   return NULL;  // TODO(titzer): ?
 }
@@ -96,15 +106,11 @@ FrameOffset Linkage::GetFrameOffset(int spill_slot, Frame* frame,
 
 // static
 bool Linkage::NeedsFrameState(Runtime::FunctionId function) {
-  if (!FLAG_turbo_deoptimization) {
-    return false;
-  }
-
   // Most runtime functions need a FrameState. A few chosen ones that we know
   // not to call into arbitrary JavaScript, not to throw, and not to deoptimize
   // are blacklisted here and can be called without a FrameState.
   switch (function) {
-    case Runtime::kDeclareGlobals:                 // TODO(jarin): Is it safe?
+    case Runtime::kAllocateInTargetSpace:
     case Runtime::kDefineClassMethod:              // TODO(jarin): Is it safe?
     case Runtime::kDefineGetterPropertyUnchecked:  // TODO(jarin): Is it safe?
     case Runtime::kDefineSetterPropertyUnchecked:  // TODO(jarin): Is it safe?
@@ -114,22 +120,22 @@ bool Linkage::NeedsFrameState(Runtime::FunctionId function) {
     case Runtime::kNewArguments:
     case Runtime::kNewClosure:
     case Runtime::kNewFunctionContext:
+    case Runtime::kNewRestParamSlow:
     case Runtime::kPushBlockContext:
     case Runtime::kPushCatchContext:
     case Runtime::kReThrow:
     case Runtime::kSetProperty:  // TODO(jarin): Is it safe?
-    case Runtime::kStringCompare:
+    case Runtime::kStringCompareRT:
     case Runtime::kStringEquals:
     case Runtime::kToFastProperties:  // TODO(jarin): Is it safe?
     case Runtime::kTraceEnter:
     case Runtime::kTraceExit:
-    case Runtime::kTypeof:
-    case Runtime::kNewRestParamSlow:
       return false;
     case Runtime::kInlineArguments:
     case Runtime::kInlineCallFunction:
     case Runtime::kInlineDateField:
-    case Runtime::kInlineOptimizedGetPrototype:
+    case Runtime::kInlineDeoptimizeNow:
+    case Runtime::kInlineGetPrototype:
     case Runtime::kInlineRegExpExec:
       return true;
     default:
@@ -141,6 +147,17 @@ bool Linkage::NeedsFrameState(Runtime::FunctionId function) {
   const Runtime::Function* const f = Runtime::FunctionForId(function);
   if (f->intrinsic_type == Runtime::IntrinsicType::INLINE) return false;
 
+  return true;
+}
+
+
+bool CallDescriptor::UsesOnlyRegisters() const {
+  for (size_t i = 0; i < InputCount(); ++i) {
+    if (!GetInputLocation(i).is_register()) return false;
+  }
+  for (size_t i = 0; i < ReturnCount(); ++i) {
+    if (!GetReturnLocation(i).is_register()) return false;
+  }
   return true;
 }
 
@@ -174,7 +191,7 @@ CallDescriptor* Linkage::GetRuntimeCallDescriptor(
 CallDescriptor* Linkage::GetStubCallDescriptor(
     Isolate* isolate, Zone* zone, const CallInterfaceDescriptor& descriptor,
     int stack_parameter_count, CallDescriptor::Flags flags,
-    Operator::Properties properties) {
+    Operator::Properties properties, MachineType return_type) {
   UNIMPLEMENTED();
   return NULL;
 }

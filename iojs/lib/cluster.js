@@ -278,11 +278,11 @@ function masterInit() {
     cluster.emit('setup', settings);
   }
 
+  var debugPortOffset = 1;
+
   function createWorkerProcess(id, env) {
     var workerEnv = util._extend({}, process.env);
     var execArgv = cluster.settings.execArgv.slice();
-    var debugPort = process.debugPort + id;
-    var hasDebugArg = false;
 
     workerEnv = util._extend(workerEnv, env);
     workerEnv.NODE_UNIQUE_ID = '' + id;
@@ -291,13 +291,11 @@ function masterInit() {
       var match = execArgv[i].match(/^(--debug|--debug-(brk|port))(=\d+)?$/);
 
       if (match) {
+        let debugPort = process.debugPort + debugPortOffset;
+        ++debugPortOffset;
         execArgv[i] = match[1] + '=' + debugPort;
-        hasDebugArg = true;
       }
     }
-
-    if (!hasDebugArg)
-      execArgv = ['--debug-port=' + debugPort].concat(execArgv);
 
     return fork(cluster.settings.exec, cluster.settings.args, {
       env: workerEnv,
@@ -318,6 +316,8 @@ function masterInit() {
       id: id,
       process: workerProcess
     });
+
+    worker.on('message', this.emit.bind(this, 'message'));
 
     function removeWorker(worker) {
       assert(worker);
@@ -601,12 +601,22 @@ function workerInit() {
       return 0;
     }
 
+    // XXX(bnoordhuis) Probably no point in implementing ref() and unref()
+    // because the control channel is going to keep the worker alive anyway.
+    function ref() {
+    }
+
+    function unref() {
+    }
+
     // Faux handle. Mimics a TCPWrap with just enough fidelity to get away
     // with it. Fools net.Server into thinking that it's backed by a real
     // handle.
     var handle = {
       close: close,
-      listen: listen
+      listen: listen,
+      ref: ref,
+      unref: unref,
     };
     if (message.sockname) {
       handle.getsockname = getsockname;  // TCP handles only.

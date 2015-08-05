@@ -4,7 +4,7 @@ var assert = require('assert');
 
 if (!common.hasCrypto) {
   console.log('1..0 # Skipped: missing crypto');
-  process.exit();
+  return;
 }
 var crypto = require('crypto');
 
@@ -53,5 +53,5 @@ function checkCall(cb, desc) {
 // #5126, "FATAL ERROR: v8::Object::SetIndexedPropertiesToExternalArrayData()
 // length exceeds max acceptable value"
 assert.throws(function() {
-  crypto.randomBytes(0x3fffffff + 1);
+  crypto.randomBytes((-1 >>> 0) + 1);
 }, TypeError);

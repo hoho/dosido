@@ -5,6 +5,7 @@
 #include "node_http_parser.h"
 #include "node_javascript.h"
 #include "node_version.h"
+#include "node_internals.h"
 
 #if defined HAVE_PERFCTR
 #include "node_counters.h"
@@ -107,9 +108,9 @@ using v8::StackTrace;
 using v8::String;
 using v8::TryCatch;
 using v8::Uint32;
+using v8::Uint32Array;
 using v8::V8;
 using v8::Value;
-using v8::kExternalUint32Array;
 
 static bool print_eval = false;
 static bool force_repl = false;
@@ -166,23 +167,17 @@ ArrayBufferAllocator ArrayBufferAllocator::the_singleton;
 
 
 void* ArrayBufferAllocator::Allocate(size_t length) {
-  if (length > kMaxLength)
-    return nullptr;
-  char* data = new char[length];
-  memset(data, 0, length);
-  return data;
+  return calloc(length, 1);
 }
 
 
 void* ArrayBufferAllocator::AllocateUninitialized(size_t length) {
-  if (length > kMaxLength)
-    return nullptr;
-  return new char[length];
+  return malloc(length);
 }
 
 
 void ArrayBufferAllocator::Free(void* data, size_t length) {
-  delete[] static_cast<char*>(data);
+  free(data);
 }
 
 
@@ -947,20 +942,19 @@ void SetupDomainUse(const FunctionCallbackInfo<Value>& args) {
   env->set_tick_callback_function(tick_callback_function);
 
   CHECK(args[0]->IsArray());
-  CHECK(args[1]->IsObject());
-
   env->set_domain_array(args[0].As<Array>());
-
-  Local<Object> domain_flag_obj = args[1].As<Object>();
-  Environment::DomainFlag* domain_flag = env->domain_flag();
-  domain_flag_obj->SetIndexedPropertiesToExternalArrayData(
-      domain_flag->fields(),
-      kExternalUint32Array,
-      domain_flag->fields_count());
 
   // Do a little housekeeping.
   env->process_object()->Delete(
       FIXED_ONE_BYTE_STRING(args.GetIsolate(), "_setupDomainUse"));
+
+  uint32_t* const fields = env->domain_flag()->fields();
+  uint32_t const fields_count = env->domain_flag()->fields_count();
+
+  Local<ArrayBuffer> array_buffer =
+      ArrayBuffer::New(env->isolate(), fields, sizeof(*fields) * fields_count);
+
+  args.GetReturnValue().Set(Uint32Array::New(array_buffer, 0, fields_count));
 }
 
 void RunMicrotasks(const FunctionCallbackInfo<Value>& args) {
@@ -971,24 +965,25 @@ void RunMicrotasks(const FunctionCallbackInfo<Value>& args) {
 void SetupNextTick(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
-  CHECK(args[0]->IsObject());
-  CHECK(args[1]->IsFunction());
-  CHECK(args[2]->IsObject());
+  CHECK(args[0]->IsFunction());
+  CHECK(args[1]->IsObject());
 
-  // Values use to cross communicate with processNextTick.
-  Local<Object> tick_info_obj = args[0].As<Object>();
-  tick_info_obj->SetIndexedPropertiesToExternalArrayData(
-      env->tick_info()->fields(),
-      kExternalUint32Array,
-      env->tick_info()->fields_count());
+  env->set_tick_callback_function(args[0].As<Function>());
 
-  env->set_tick_callback_function(args[1].As<Function>());
-
-  env->SetMethod(args[2].As<Object>(), "runMicrotasks", RunMicrotasks);
+  env->SetMethod(args[1].As<Object>(), "runMicrotasks", RunMicrotasks);
 
   // Do a little housekeeping.
   env->process_object()->Delete(
       FIXED_ONE_BYTE_STRING(args.GetIsolate(), "_setupNextTick"));
+
+  // Values use to cross communicate with processNextTick.
+  uint32_t* const fields = env->tick_info()->fields();
+  uint32_t const fields_count = env->tick_info()->fields_count();
+
+  Local<ArrayBuffer> array_buffer =
+      ArrayBuffer::New(env->isolate(), fields, sizeof(*fields) * fields_count);
+
+  args.GetReturnValue().Set(Uint32Array::New(array_buffer, 0, fields_count));
 }
 
 void PromiseRejectCallback(PromiseRejectMessage message) {
@@ -1092,8 +1087,6 @@ Handle<Value> MakeCallback(Environment* env,
         return Undefined(env->isolate());
     }
   }
-  env->tick_callback_function()->Call(process, 0, nullptr);
-  CHECK_EQ(env->context(), env->isolate()->GetCurrentContext());
 
   if (try_catch.HasCaught()) {
     return Undefined(env->isolate());
@@ -1420,16 +1413,7 @@ void AppendExceptionLine(Environment* env,
   if (arrow_str.IsEmpty() || err_obj.IsEmpty() || !err_obj->IsNativeError())
     goto print;
 
-  msg = err_obj->Get(env->message_string());
-  stack = err_obj->Get(env->stack_string());
-
-  if (msg.IsEmpty() || stack.IsEmpty())
-    goto print;
-
-  err_obj->Set(env->message_string(),
-               String::Concat(arrow_str, msg->ToString(env->isolate())));
-  err_obj->Set(env->stack_string(),
-               String::Concat(arrow_str, stack->ToString(env->isolate())));
+  err_obj->SetHiddenValue(env->arrow_message_string(), arrow_str);
   return;
 
  print:
@@ -1449,17 +1433,27 @@ static void ReportException(Environment* env,
   AppendExceptionLine(env, er, message);
 
   Local<Value> trace_value;
+  Local<Value> arrow;
 
-  if (er->IsUndefined() || er->IsNull())
+  if (er->IsUndefined() || er->IsNull()) {
     trace_value = Undefined(env->isolate());
-  else
-    trace_value = er->ToObject(env->isolate())->Get(env->stack_string());
+  } else {
+    Local<Object> err_obj = er->ToObject(env->isolate());
+
+    trace_value = err_obj->Get(env->stack_string());
+    arrow = err_obj->GetHiddenValue(env->arrow_message_string());
+  }
 
   node::Utf8Value trace(env->isolate(), trace_value);
 
   // range errors have a trace member set to undefined
   if (trace.length() > 0 && !trace_value->IsUndefined()) {
-    fprintf(stderr, "%s\n", *trace);
+    if (arrow.IsEmpty() || !arrow->IsString()) {
+      fprintf(stderr, "%s\n", *trace);
+    } else {
+      node::Utf8Value arrow_string(env->isolate(), arrow);
+      fprintf(stderr, "%s\n%s\n", *arrow_string, *trace);
+    }
   } else {
     // this really only happens for RangeErrors, since they're the only
     // kind that won't have all this info in the trace, or when non-Error
@@ -1483,7 +1477,17 @@ static void ReportException(Environment* env,
     } else {
       node::Utf8Value name_string(env->isolate(), name);
       node::Utf8Value message_string(env->isolate(), message);
-      fprintf(stderr, "%s: %s\n", *name_string, *message_string);
+
+      if (arrow.IsEmpty() || !arrow->IsString()) {
+        fprintf(stderr, "%s: %s\n", *name_string, *message_string);
+      } else {
+        node::Utf8Value arrow_string(env->isolate(), arrow);
+        fprintf(stderr,
+                "%s\n%s: %s\n",
+                *arrow_string,
+                *name_string,
+                *message_string);
+      }
     }
   }
 
@@ -2756,6 +2760,39 @@ void SetupProcessObject(Environment* env,
                     "platform",
                     OneByteString(env->isolate(), NODE_PLATFORM));
 
+  // process.release
+  Local<Object> release = Object::New(env->isolate());
+  READONLY_PROPERTY(process, "release", release);
+  READONLY_PROPERTY(release, "name", OneByteString(env->isolate(), "io.js"));
+
+// if this is a release build and no explicit base has been set
+// substitute the standard release download URL
+#ifndef NODE_RELEASE_URLBASE
+# if NODE_VERSION_IS_RELEASE
+#  define NODE_RELEASE_URLBASE "https://iojs.org/download/release/"
+# endif
+#endif
+
+#if defined(NODE_RELEASE_URLBASE)
+#  define _RELEASE_URLPFX NODE_RELEASE_URLBASE "v" NODE_VERSION_STRING "/"
+#  define _RELEASE_URLFPFX _RELEASE_URLPFX "iojs-v" NODE_VERSION_STRING
+
+  READONLY_PROPERTY(release,
+                    "sourceUrl",
+                    OneByteString(env->isolate(),
+                    _RELEASE_URLFPFX ".tar.gz"));
+  READONLY_PROPERTY(release,
+                    "headersUrl",
+                    OneByteString(env->isolate(),
+                    _RELEASE_URLFPFX "-headers.tar.gz"));
+#  ifdef _WIN32
+  READONLY_PROPERTY(release,
+                    "libUrl",
+                    OneByteString(env->isolate(),
+                    _RELEASE_URLPFX "win-" NODE_ARCH "/iojs.lib"));
+#  endif
+#endif
+
   // process.argv
   Local<Array> arguments = Array::New(env->isolate(), argc);
   for (int i = 0; i < argc; ++i) {
@@ -3071,7 +3108,7 @@ static void PrintHelp() {
          "  --v8-options          print v8 command line options\n"
 #if defined(NODE_HAVE_I18N_SUPPORT)
          "  --icu-data-dir=dir    set ICU data load path to dir\n"
-         "                          (overrides NODE_ICU_DATA)\n"
+         "                        (overrides NODE_ICU_DATA)\n"
 #if !defined(NODE_HAVE_SMALL_ICU)
          "                        Note: linked-in ICU data is\n"
          "                        present.\n"
@@ -3620,6 +3657,11 @@ void Init(int* argc,
   // TODO(bnoordhuis): Remove test/parallel/test-arm-math-exp-regress-1376.js
   // and this workaround when v8:4019 has been fixed and the patch back-ported.
   V8::SetFlagsFromString("--nofast_math", sizeof("--nofast_math") - 1);
+  // See https://github.com/nodejs/io.js/pull/2220#issuecomment-126200059
+  // and https://code.google.com/p/v8/issues/detail?id=4338
+  // TODO(targos): Remove this workaround when v8:4338 has been fixed and the
+  // patch back-ported.
+  V8::SetFlagsFromString("--novector_ics", sizeof("--novector_ics") - 1);
 #endif
 
 #if defined(NODE_V8_OPTIONS)

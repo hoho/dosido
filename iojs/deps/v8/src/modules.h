@@ -20,7 +20,7 @@ class ModuleDescriptor : public ZoneObject {
   // Factory methods.
 
   static ModuleDescriptor* New(Zone* zone) {
-    return new (zone) ModuleDescriptor();
+    return new (zone) ModuleDescriptor(zone);
   }
 
   // ---------------------------------------------------------------------------
@@ -28,7 +28,12 @@ class ModuleDescriptor : public ZoneObject {
 
   // Add a name to the list of exports. If it already exists, or this descriptor
   // is frozen, that's an error.
-  void Add(const AstRawString* name, Zone* zone, bool* ok);
+  void AddLocalExport(const AstRawString* export_name,
+                      const AstRawString* local_name, Zone* zone, bool* ok);
+
+  // Add module_specifier to the list of requested modules,
+  // if not already present.
+  void AddModuleRequest(const AstRawString* module_specifier, Zone* zone);
 
   // Do not allow any further refinements, directly or through unification.
   void Freeze() { frozen_ = true; }
@@ -57,6 +62,13 @@ class ModuleDescriptor : public ZoneObject {
     return index_;
   }
 
+  const AstRawString* LookupLocalExport(const AstRawString* export_name,
+                                        Zone* zone);
+
+  const ZoneList<const AstRawString*>& requested_modules() const {
+    return requested_modules_;
+  }
+
   // ---------------------------------------------------------------------------
   // Iterators.
 
@@ -67,9 +79,13 @@ class ModuleDescriptor : public ZoneObject {
   class Iterator {
    public:
     bool done() const { return entry_ == NULL; }
-    const AstRawString* name() const {
+    const AstRawString* export_name() const {
       DCHECK(!done());
       return static_cast<const AstRawString*>(entry_->key);
+    }
+    const AstRawString* local_name() const {
+      DCHECK(!done());
+      return static_cast<const AstRawString*>(entry_->value);
     }
     void Advance() { entry_ = exports_->Next(entry_); }
 
@@ -87,11 +103,16 @@ class ModuleDescriptor : public ZoneObject {
   // ---------------------------------------------------------------------------
   // Implementation.
  private:
+  explicit ModuleDescriptor(Zone* zone)
+      : frozen_(false),
+        exports_(NULL),
+        requested_modules_(1, zone),
+        index_(-1) {}
+
   bool frozen_;
   ZoneHashMap* exports_;   // Module exports and their types (allocated lazily)
+  ZoneList<const AstRawString*> requested_modules_;
   int index_;
-
-  ModuleDescriptor() : frozen_(false), exports_(NULL), index_(-1) {}
 };
 
 } }  // namespace v8::internal

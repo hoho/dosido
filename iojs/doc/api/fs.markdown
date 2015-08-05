@@ -577,7 +577,10 @@ If you want to be notified when the file was modified, not just accessed
 you need to compare `curr.mtime` and `prev.mtime`.
 
 _Note: when an `fs.watchFile` operation results in an `ENOENT` error, it will
-invoke the callback once. This is a change in functionality since v0.10._
+ invoke the listener once, with all the fields zeroed (or, for dates, the Unix
+ Epoch). In Windows, `blksize` and `blocks` fields will be `undefined`, instead
+ of zero. If the file is created later on, the listener will be called again,
+ with the latest stat objects. This is a change in functionality since v0.10._
 
 _Note: `fs.watch` is more efficient than `fs.watchFile` and `fs.unwatchFile`.
 `fs.watch` should be used instead of `fs.watchFile` and `fs.unwatchFile`
@@ -675,7 +678,7 @@ Test whether or not the given path exists by checking with the file system.
 Then call the `callback` argument with either true or false.  Example:
 
     fs.exists('/etc/passwd', function (exists) {
-      util.debug(exists ? "it's there" : "no passwd!");
+      console.log(exists ? "it's there" : 'no passwd!');
     });
 
 `fs.exists()` is an anachronism and exists only for historical reasons.
@@ -717,8 +720,8 @@ a possible error argument. If any of the accessibility checks fail, the error
 argument will be populated. The following example checks if the file
 `/etc/passwd` can be read and written by the current process.
 
-    fs.access('/etc/passwd', fs.R_OK | fs.W_OK, function(err) {
-      util.debug(err ? 'no access!' : 'can read/write');
+    fs.access('/etc/passwd', fs.R_OK | fs.W_OK, function (err) {
+      console.log(err ? 'no access!' : 'can read/write');
     });
 
 ## fs.accessSync(path[, mode])

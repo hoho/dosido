@@ -80,15 +80,14 @@ int StaticNewSpaceVisitor<StaticVisitor>::VisitJSArrayBuffer(
     Map* map, HeapObject* object) {
   Heap* heap = map->GetHeap();
 
-  STATIC_ASSERT(JSArrayBuffer::kWeakFirstViewOffset ==
-                JSArrayBuffer::kWeakNextOffset + kPointerSize);
-  VisitPointers(heap, HeapObject::RawField(
-                          object, JSArrayBuffer::BodyDescriptor::kStartOffset),
-                HeapObject::RawField(object, JSArrayBuffer::kWeakNextOffset));
   VisitPointers(
-      heap, HeapObject::RawField(
-                object, JSArrayBuffer::kWeakNextOffset + 2 * kPointerSize),
+      heap,
+      HeapObject::RawField(object, JSArrayBuffer::BodyDescriptor::kStartOffset),
       HeapObject::RawField(object, JSArrayBuffer::kSizeWithInternalFields));
+  if (!JSArrayBuffer::cast(object)->is_external()) {
+    heap->RegisterLiveArrayBuffer(true,
+                                  JSArrayBuffer::cast(object)->backing_store());
+  }
   return JSArrayBuffer::kSizeWithInternalFields;
 }
 
@@ -99,10 +98,6 @@ int StaticNewSpaceVisitor<StaticVisitor>::VisitJSTypedArray(
   VisitPointers(
       map->GetHeap(),
       HeapObject::RawField(object, JSTypedArray::BodyDescriptor::kStartOffset),
-      HeapObject::RawField(object, JSTypedArray::kWeakNextOffset));
-  VisitPointers(
-      map->GetHeap(), HeapObject::RawField(
-                          object, JSTypedArray::kWeakNextOffset + kPointerSize),
       HeapObject::RawField(object, JSTypedArray::kSizeWithInternalFields));
   return JSTypedArray::kSizeWithInternalFields;
 }
@@ -114,10 +109,6 @@ int StaticNewSpaceVisitor<StaticVisitor>::VisitJSDataView(Map* map,
   VisitPointers(
       map->GetHeap(),
       HeapObject::RawField(object, JSDataView::BodyDescriptor::kStartOffset),
-      HeapObject::RawField(object, JSDataView::kWeakNextOffset));
-  VisitPointers(
-      map->GetHeap(),
-      HeapObject::RawField(object, JSDataView::kWeakNextOffset + kPointerSize),
       HeapObject::RawField(object, JSDataView::kSizeWithInternalFields));
   return JSDataView::kSizeWithInternalFields;
 }
@@ -233,7 +224,7 @@ void StaticMarkingVisitor<StaticVisitor>::VisitCell(Heap* heap,
                                                     RelocInfo* rinfo) {
   DCHECK(rinfo->rmode() == RelocInfo::CELL);
   Cell* cell = rinfo->target_cell();
-  // No need to record slots because the cell space is not compacted during GC.
+  heap->mark_compact_collector()->RecordRelocSlot(rinfo, cell);
   if (!rinfo->host()->IsWeakObject(cell)) {
     StaticVisitor::MarkObject(heap, cell);
   }
@@ -540,16 +531,14 @@ void StaticMarkingVisitor<StaticVisitor>::VisitJSArrayBuffer(
     Map* map, HeapObject* object) {
   Heap* heap = map->GetHeap();
 
-  STATIC_ASSERT(JSArrayBuffer::kWeakFirstViewOffset ==
-                JSArrayBuffer::kWeakNextOffset + kPointerSize);
   StaticVisitor::VisitPointers(
       heap,
       HeapObject::RawField(object, JSArrayBuffer::BodyDescriptor::kStartOffset),
-      HeapObject::RawField(object, JSArrayBuffer::kWeakNextOffset));
-  StaticVisitor::VisitPointers(
-      heap, HeapObject::RawField(
-                object, JSArrayBuffer::kWeakNextOffset + 2 * kPointerSize),
       HeapObject::RawField(object, JSArrayBuffer::kSizeWithInternalFields));
+  if (!JSArrayBuffer::cast(object)->is_external()) {
+    heap->RegisterLiveArrayBuffer(false,
+                                  JSArrayBuffer::cast(object)->backing_store());
+  }
 }
 
 
@@ -559,10 +548,6 @@ void StaticMarkingVisitor<StaticVisitor>::VisitJSTypedArray(
   StaticVisitor::VisitPointers(
       map->GetHeap(),
       HeapObject::RawField(object, JSTypedArray::BodyDescriptor::kStartOffset),
-      HeapObject::RawField(object, JSTypedArray::kWeakNextOffset));
-  StaticVisitor::VisitPointers(
-      map->GetHeap(), HeapObject::RawField(
-                          object, JSTypedArray::kWeakNextOffset + kPointerSize),
       HeapObject::RawField(object, JSTypedArray::kSizeWithInternalFields));
 }
 
@@ -573,10 +558,6 @@ void StaticMarkingVisitor<StaticVisitor>::VisitJSDataView(Map* map,
   StaticVisitor::VisitPointers(
       map->GetHeap(),
       HeapObject::RawField(object, JSDataView::BodyDescriptor::kStartOffset),
-      HeapObject::RawField(object, JSDataView::kWeakNextOffset));
-  StaticVisitor::VisitPointers(
-      map->GetHeap(),
-      HeapObject::RawField(object, JSDataView::kWeakNextOffset + kPointerSize),
       HeapObject::RawField(object, JSDataView::kSizeWithInternalFields));
 }
 
@@ -584,18 +565,9 @@ void StaticMarkingVisitor<StaticVisitor>::VisitJSDataView(Map* map,
 template <typename StaticVisitor>
 void StaticMarkingVisitor<StaticVisitor>::MarkMapContents(Heap* heap,
                                                           Map* map) {
-  // Make sure that the back pointer stored either in the map itself or
-  // inside its transitions array is marked. Skip recording the back
-  // pointer slot since map space is not compacted.
-  StaticVisitor::MarkObject(heap, HeapObject::cast(map->GetBackPointer()));
-
-  // Treat pointers in the transitions array as weak and also mark that
-  // array to prevent visiting it later. Skip recording the transition
-  // array slot, since it will be implicitly recorded when the pointer
-  // fields of this map are visited.
-  if (map->HasTransitionArray()) {
-    TransitionArray* transitions = map->transitions();
-    MarkTransitionArray(heap, transitions);
+  Object* raw_transitions = map->raw_transitions();
+  if (TransitionArray::IsFullTransitionArray(raw_transitions)) {
+    MarkTransitionArray(heap, TransitionArray::cast(raw_transitions));
   }
 
   // Since descriptor arrays are potentially shared, ensure that only the
@@ -631,20 +603,18 @@ void StaticMarkingVisitor<StaticVisitor>::MarkTransitionArray(
     Heap* heap, TransitionArray* transitions) {
   if (!StaticVisitor::MarkObjectWithoutPush(heap, transitions)) return;
 
-  // Simple transitions do not have keys nor prototype transitions.
-  if (transitions->IsSimpleTransition()) return;
-
   if (transitions->HasPrototypeTransitions()) {
     // Mark prototype transitions array but do not push it onto marking
     // stack, this will make references from it weak. We will clean dead
-    // prototype transitions in ClearNonLiveTransitions.
+    // prototype transitions in ClearNonLiveReferences.
     Object** slot = transitions->GetPrototypeTransitionsSlot();
     HeapObject* obj = HeapObject::cast(*slot);
     heap->mark_compact_collector()->RecordSlot(slot, slot, obj);
     StaticVisitor::MarkObjectWithoutPush(heap, obj);
   }
 
-  for (int i = 0; i < transitions->number_of_transitions(); ++i) {
+  int num_transitions = TransitionArray::NumberOfTransitions(transitions);
+  for (int i = 0; i < num_transitions; ++i) {
     StaticVisitor::VisitPointer(heap, transitions->GetKeySlot(i));
   }
 }
@@ -691,7 +661,7 @@ bool StaticMarkingVisitor<StaticVisitor>::IsFlushable(Heap* heap,
   // Code is either on stack, in compilation cache or referenced
   // by optimized version of function.
   MarkBit code_mark = Marking::MarkBitFrom(function->code());
-  if (code_mark.Get()) {
+  if (Marking::IsBlackOrGrey(code_mark)) {
     return false;
   }
 
@@ -720,7 +690,7 @@ bool StaticMarkingVisitor<StaticVisitor>::IsFlushable(
   // Code is either on stack, in compilation cache or referenced
   // by optimized version of function.
   MarkBit code_mark = Marking::MarkBitFrom(shared_info->code());
-  if (code_mark.Get()) {
+  if (Marking::IsBlackOrGrey(code_mark)) {
     return false;
   }
 
@@ -849,6 +819,8 @@ void Code::CodeIterateBody(ObjectVisitor* v) {
                   RelocInfo::ModeMask(RelocInfo::EMBEDDED_OBJECT) |
                   RelocInfo::ModeMask(RelocInfo::CELL) |
                   RelocInfo::ModeMask(RelocInfo::EXTERNAL_REFERENCE) |
+                  RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE) |
+                  RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE_ENCODED) |
                   RelocInfo::ModeMask(RelocInfo::JS_RETURN) |
                   RelocInfo::ModeMask(RelocInfo::DEBUG_BREAK_SLOT) |
                   RelocInfo::ModeMask(RelocInfo::RUNTIME_ENTRY);
@@ -876,6 +848,8 @@ void Code::CodeIterateBody(Heap* heap) {
                   RelocInfo::ModeMask(RelocInfo::EMBEDDED_OBJECT) |
                   RelocInfo::ModeMask(RelocInfo::CELL) |
                   RelocInfo::ModeMask(RelocInfo::EXTERNAL_REFERENCE) |
+                  RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE) |
+                  RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE_ENCODED) |
                   RelocInfo::ModeMask(RelocInfo::JS_RETURN) |
                   RelocInfo::ModeMask(RelocInfo::DEBUG_BREAK_SLOT) |
                   RelocInfo::ModeMask(RelocInfo::RUNTIME_ENTRY);

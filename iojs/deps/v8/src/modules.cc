@@ -11,28 +11,51 @@
 namespace v8 {
 namespace internal {
 
-// ---------------------------------------------------------------------------
-// Addition.
 
-void ModuleDescriptor::Add(const AstRawString* name, Zone* zone, bool* ok) {
-  void* key = const_cast<AstRawString*>(name);
+void ModuleDescriptor::AddLocalExport(const AstRawString* export_name,
+                                      const AstRawString* local_name,
+                                      Zone* zone, bool* ok) {
+  DCHECK(!IsFrozen());
+  void* key = const_cast<AstRawString*>(export_name);
 
-  ZoneHashMap** map = &exports_;
   ZoneAllocationPolicy allocator(zone);
 
-  if (*map == nullptr) {
-    *map = new (zone->New(sizeof(ZoneHashMap)))
+  if (exports_ == nullptr) {
+    exports_ = new (zone->New(sizeof(ZoneHashMap)))
         ZoneHashMap(ZoneHashMap::PointersMatch,
                     ZoneHashMap::kDefaultHashMapCapacity, allocator);
   }
 
   ZoneHashMap::Entry* p =
-      (*map)->Lookup(key, name->hash(), !IsFrozen(), allocator);
-  if (p == nullptr || p->value != nullptr) {
+      exports_->LookupOrInsert(key, export_name->hash(), allocator);
+  DCHECK_NOT_NULL(p);
+  if (p->value != nullptr) {
+    // Duplicate export.
     *ok = false;
+    return;
   }
 
-  p->value = key;
+  p->value = const_cast<AstRawString*>(local_name);
+}
+
+
+void ModuleDescriptor::AddModuleRequest(const AstRawString* module_specifier,
+                                        Zone* zone) {
+  // TODO(adamk): Avoid this O(N) operation on each insert by storing
+  // a HashMap, or by de-duping after parsing.
+  if (requested_modules_.Contains(module_specifier)) return;
+  requested_modules_.Add(module_specifier, zone);
+}
+
+
+const AstRawString* ModuleDescriptor::LookupLocalExport(
+    const AstRawString* export_name, Zone* zone) {
+  if (exports_ == nullptr) return nullptr;
+  ZoneHashMap::Entry* entry = exports_->Lookup(
+      const_cast<AstRawString*>(export_name), export_name->hash());
+  if (entry == nullptr) return nullptr;
+  DCHECK_NOT_NULL(entry->value);
+  return static_cast<const AstRawString*>(entry->value);
 }
 }
 }  // namespace v8::internal

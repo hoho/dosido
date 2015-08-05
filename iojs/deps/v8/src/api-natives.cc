@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 #include "src/api-natives.h"
-#include "src/isolate-inl.h"
+
+#include "src/api.h"
+#include "src/isolate.h"
+#include "src/lookup.h"
 
 namespace v8 {
 namespace internal {
+
 
 namespace {
 
@@ -81,14 +85,14 @@ MaybeHandle<Object> DefineDataProperty(Isolate* isolate,
     LookupIterator it(object, Handle<Name>::cast(key),
                       LookupIterator::OWN_SKIP_INTERCEPTOR);
     Maybe<PropertyAttributes> maybe = JSReceiver::GetPropertyAttributes(&it);
-    DCHECK(maybe.has_value);
+    DCHECK(maybe.IsJust());
     duplicate = it.IsFound();
   } else {
     uint32_t index = 0;
     key->ToArrayIndex(&index);
     Maybe<bool> maybe = JSReceiver::HasOwnElement(object, index);
-    if (!maybe.has_value) return MaybeHandle<Object>();
-    duplicate = maybe.value;
+    if (!maybe.IsJust()) return MaybeHandle<Object>();
+    duplicate = maybe.FromJust();
   }
   if (duplicate) {
     Handle<Object> args[1] = {key};

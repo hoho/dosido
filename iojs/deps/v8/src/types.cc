@@ -178,7 +178,7 @@ TypeImpl<Config>::BitsetType::Lub(TypeImpl* type) {
   if (type->IsConstant()) return type->AsConstant()->Bound()->AsBitset();
   if (type->IsRange()) return type->AsRange()->Bound();
   if (type->IsContext()) return kInternal & kTaggedPointer;
-  if (type->IsArray()) return kArray;
+  if (type->IsArray()) return kOtherObject;
   if (type->IsFunction()) return kOtherObject;  // TODO(rossberg): kFunction
   UNREACHABLE();
   return kNone;
@@ -234,10 +234,10 @@ TypeImpl<Config>::BitsetType::Lub(i::Map* map) {
     case JS_CONTEXT_EXTENSION_OBJECT_TYPE:
     case JS_GENERATOR_OBJECT_TYPE:
     case JS_MODULE_TYPE:
-    case JS_GLOBAL_OBJECT_TYPE:
     case JS_BUILTINS_OBJECT_TYPE:
     case JS_GLOBAL_PROXY_TYPE:
     case JS_ARRAY_BUFFER_TYPE:
+    case JS_ARRAY_TYPE:
     case JS_TYPED_ARRAY_TYPE:
     case JS_DATA_VIEW_TYPE:
     case JS_SET_TYPE:
@@ -248,8 +248,8 @@ TypeImpl<Config>::BitsetType::Lub(i::Map* map) {
     case JS_WEAK_SET_TYPE:
       if (map->is_undetectable()) return kUndetectable;
       return kOtherObject;
-    case JS_ARRAY_TYPE:
-      return kArray;
+    case JS_GLOBAL_OBJECT_TYPE:
+      return kGlobalObject;
     case JS_FUNCTION_TYPE:
       return kOtherObject;  // TODO(rossberg): there should be a Function type.
     case JS_REGEXP_TYPE:
@@ -267,7 +267,7 @@ TypeImpl<Config>::BitsetType::Lub(i::Map* map) {
       // Also, it doesn't apply elsewhere. 8-(
       // We ought to find a cleaner solution for compiling stubs parameterised
       // over type or class variables, esp ones with bounds...
-      return kDetectable;
+      return kDetectable & kTaggedPointer;
     case DECLARED_ACCESSOR_INFO_TYPE:
     case EXECUTABLE_ACCESSOR_INFO_TYPE:
     case SHARED_FUNCTION_INFO_TYPE:
@@ -277,6 +277,7 @@ TypeImpl<Config>::BitsetType::Lub(i::Map* map) {
     case FOREIGN_TYPE:
     case SCRIPT_TYPE:
     case CODE_TYPE:
+    case PROPERTY_CELL_TYPE:
       return kInternal & kTaggedPointer;
     default:
       UNREACHABLE();
@@ -777,7 +778,7 @@ typename TypeImpl<Config>::TypeHandle TypeImpl<Config>::Intersect(
     bits &= ~number_bits;
     result->Set(0, BitsetType::New(bits, region));
   }
-  return NormalizeUnion(result, size);
+  return NormalizeUnion(result, size, region);
 }
 
 
@@ -992,7 +993,7 @@ typename TypeImpl<Config>::TypeHandle TypeImpl<Config>::Union(
 
   size = AddToUnion(type1, result, size, region);
   size = AddToUnion(type2, result, size, region);
-  return NormalizeUnion(result, size);
+  return NormalizeUnion(result, size, region);
 }
 
 
@@ -1016,9 +1017,9 @@ int TypeImpl<Config>::AddToUnion(
 }
 
 
-template<class Config>
+template <class Config>
 typename TypeImpl<Config>::TypeHandle TypeImpl<Config>::NormalizeUnion(
-    UnionHandle unioned, int size) {
+    UnionHandle unioned, int size, Region* region) {
   DCHECK(size >= 1);
   DCHECK(unioned->Get(0)->IsBitset());
   // If the union has just one element, return it.
@@ -1032,8 +1033,11 @@ typename TypeImpl<Config>::TypeHandle TypeImpl<Config>::NormalizeUnion(
     if (representation == unioned->Get(1)->Representation()) {
       return unioned->Get(1);
     }
-    // TODO(jarin) If the element at 1 is range of constant, slap
-    // the representation on it and return that.
+    if (unioned->Get(1)->IsRange()) {
+      return RangeType::New(unioned->Get(1)->AsRange()->Min(),
+                            unioned->Get(1)->AsRange()->Max(), unioned->Get(0),
+                            region);
+    }
   }
   unioned->Shrink(size);
   SLOW_DCHECK(unioned->Wellformed());

@@ -104,12 +104,12 @@ class IC {
 
   static bool IsCleared(Code* code) {
     InlineCacheState state = code->ic_state();
-    return state == UNINITIALIZED || state == PREMONOMORPHIC;
+    return !FLAG_use_ic || state == UNINITIALIZED || state == PREMONOMORPHIC;
   }
 
   static bool IsCleared(FeedbackNexus* nexus) {
     InlineCacheState state = nexus->StateFromFeedback();
-    return state == UNINITIALIZED || state == PREMONOMORPHIC;
+    return !FLAG_use_ic || state == UNINITIALIZED || state == PREMONOMORPHIC;
   }
 
   static bool ICUseVector(Code::Kind kind) {
@@ -134,6 +134,7 @@ class IC {
   Code* GetOriginalCode() const;
 
   bool AddressIsOptimizedCode() const;
+  bool AddressIsDeoptimizedCode() const;
 
   // Set the call-site target.
   inline void set_target(Code* code);
@@ -163,7 +164,7 @@ class IC {
 
   MaybeHandle<Object> TypeError(const char* type, Handle<Object> object,
                                 Handle<Object> key);
-  MaybeHandle<Object> ReferenceError(const char* type, Handle<Name> name);
+  MaybeHandle<Object> ReferenceError(Handle<Name> name);
 
   // Access the target code for the given IC address.
   static inline Code* GetTargetAtAddress(Address address,
@@ -396,7 +397,9 @@ class LoadIC : public IC {
   static Handle<Code> initialize_stub(Isolate* isolate,
                                       ExtraICState extra_state);
   static Handle<Code> initialize_stub_in_optimized_code(
-      Isolate* isolate, ExtraICState extra_state);
+      Isolate* isolate, ExtraICState extra_state, State initialization_state);
+  static Handle<Code> load_global(Isolate* isolate, Handle<GlobalObject> global,
+                                  Handle<String> name);
 
   MUST_USE_RESULT MaybeHandle<Object> Load(Handle<Object> object,
                                            Handle<Name> name);
@@ -415,7 +418,7 @@ class LoadIC : public IC {
     }
   }
 
-  Handle<Code> megamorphic_stub() OVERRIDE;
+  Handle<Code> megamorphic_stub() override;
 
   // Update the inline cache and the global stub cache based on the
   // lookup result.
@@ -423,7 +426,7 @@ class LoadIC : public IC {
 
   virtual Handle<Code> CompileHandler(LookupIterator* lookup,
                                       Handle<Object> unused,
-                                      CacheHolderFlag cache_holder) OVERRIDE;
+                                      CacheHolderFlag cache_holder) override;
 
  private:
   virtual Handle<Code> pre_monomorphic_stub() const;
@@ -481,7 +484,8 @@ class KeyedLoadIC : public LoadIC {
       (1 << Map::kIsAccessCheckNeeded) | (1 << Map::kHasIndexedInterceptor);
 
   static Handle<Code> initialize_stub(Isolate* isolate);
-  static Handle<Code> initialize_stub_in_optimized_code(Isolate* isolate);
+  static Handle<Code> initialize_stub_in_optimized_code(
+      Isolate* isolate, State initialization_state);
   static Handle<Code> ChooseMegamorphicStub(Isolate* isolate);
   static Handle<Code> pre_monomorphic_stub(Isolate* isolate);
 
@@ -539,7 +543,8 @@ class StoreIC : public IC {
                                          LanguageMode language_mode);
 
   static Handle<Code> initialize_stub(Isolate* isolate,
-                                      LanguageMode language_mode);
+                                      LanguageMode language_mode,
+                                      State initialization_state);
 
   MUST_USE_RESULT MaybeHandle<Object> Store(
       Handle<Object> object, Handle<Name> name, Handle<Object> value,
@@ -551,7 +556,7 @@ class StoreIC : public IC {
 
  protected:
   // Stub accessors.
-  Handle<Code> megamorphic_stub() OVERRIDE;
+  Handle<Code> megamorphic_stub() override;
   Handle<Code> slow_stub() const;
 
   virtual Handle<Code> pre_monomorphic_stub() const {
@@ -567,7 +572,7 @@ class StoreIC : public IC {
                     JSReceiver::StoreFromKeyed store_mode);
   virtual Handle<Code> CompileHandler(LookupIterator* lookup,
                                       Handle<Object> value,
-                                      CacheHolderFlag cache_holder) OVERRIDE;
+                                      CacheHolderFlag cache_holder) override;
 
  private:
   inline void set_target(Code* code);
@@ -631,6 +636,10 @@ class KeyedStoreIC : public StoreIC {
                                   LanguageMode language_mode);
   static void GenerateSloppyArguments(MacroAssembler* masm);
 
+  static Handle<Code> initialize_stub(Isolate* isolate,
+                                      LanguageMode language_mode,
+                                      State initialization_state);
+
  protected:
   virtual Handle<Code> pre_monomorphic_stub() const {
     return pre_monomorphic_stub(isolate(), language_mode());
@@ -673,7 +682,8 @@ class BinaryOpIC : public IC {
  public:
   explicit BinaryOpIC(Isolate* isolate) : IC(EXTRA_CALL_FRAME, isolate) {}
 
-  static Builtins::JavaScript TokenToJSBuiltin(Token::Value op);
+  static Builtins::JavaScript TokenToJSBuiltin(Token::Value op,
+                                               LanguageMode language_mode);
 
   MaybeHandle<Object> Transition(Handle<AllocationSite> allocation_site,
                                  Handle<Object> left,

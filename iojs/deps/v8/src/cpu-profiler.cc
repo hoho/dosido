@@ -120,16 +120,32 @@ ProfilerEventsProcessor::SampleProcessingResult
 
 void ProfilerEventsProcessor::Run() {
   while (!!base::NoBarrier_Load(&running_)) {
-    base::ElapsedTimer timer;
-    timer.Start();
-    // Keep processing existing events until we need to do next sample.
+    base::TimeTicks nextSampleTime =
+        base::TimeTicks::HighResolutionNow() + period_;
+    base::TimeTicks now;
+    SampleProcessingResult result;
+    // Keep processing existing events until we need to do next sample
+    // or the ticks buffer is empty.
     do {
-      if (FoundSampleForNextCodeEvent == ProcessOneSample()) {
+      result = ProcessOneSample();
+      if (result == FoundSampleForNextCodeEvent) {
         // All ticks of the current last_processed_code_event_id_ are
         // processed, proceed to the next code event.
         ProcessCodeEvent();
       }
-    } while (!timer.HasExpired(period_));
+      now = base::TimeTicks::HighResolutionNow();
+    } while (result != NoSamplesInQueue && now < nextSampleTime);
+
+    if (nextSampleTime > now) {
+#if V8_OS_WIN
+      // Do not use Sleep on Windows as it is very imprecise.
+      // Could be up to 16ms jitter, which is unacceptable for the purpose.
+      while (base::TimeTicks::HighResolutionNow() < nextSampleTime) {
+      }
+#else
+      base::OS::Sleep(nextSampleTime - now);
+#endif
+    }
 
     // Schedule next sample. sampler_ is NULL in tests.
     if (sampler_) sampler_->DoSample();
@@ -201,7 +217,6 @@ void CpuProfiler::CallbackEvent(Name* name, Address entry_point) {
       Logger::CALLBACK_TAG,
       profiles_->GetName(name));
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -218,7 +233,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -235,7 +249,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -254,16 +267,10 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag, Code* code,
       NULL, code->instruction_start());
   if (info) {
     rec->entry->set_no_frame_ranges(info->ReleaseNoFrameRanges());
+    rec->entry->set_inlined_function_infos(info->inlined_function_infos());
   }
-  if (shared->script()->IsScript()) {
-    DCHECK(Script::cast(shared->script()));
-    Script* script = Script::cast(shared->script());
-    rec->entry->set_script_id(script->id()->value());
-    rec->entry->set_bailout_reason(
-        GetBailoutReason(shared->disable_optimization_reason()));
-  }
+  rec->entry->FillFunctionInfo(shared);
   rec->size = code->ExecutableSize();
-  rec->shared = shared->address();
   processor_->Enqueue(evt_rec);
 }
 
@@ -286,8 +293,8 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag, Code* code,
         int position = static_cast<int>(it.rinfo()->data());
         if (position >= 0) {
           int pc_offset = static_cast<int>(it.rinfo()->pc() - code->address());
-          int line_number = script->GetLineNumber(position);
-          line_table->SetPosition(pc_offset, line_number + 1);
+          int line_number = script->GetLineNumber(position) + 1;
+          line_table->SetPosition(pc_offset, line_number);
         }
       }
     }
@@ -298,12 +305,10 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag, Code* code,
       column, line_table, code->instruction_start());
   if (info) {
     rec->entry->set_no_frame_ranges(info->ReleaseNoFrameRanges());
+    rec->entry->set_inlined_function_infos(info->inlined_function_infos());
   }
-  rec->entry->set_script_id(script->id()->value());
+  rec->entry->FillFunctionInfo(shared);
   rec->size = code->ExecutableSize();
-  rec->shared = shared->address();
-  rec->entry->set_bailout_reason(
-      GetBailoutReason(shared->disable_optimization_reason()));
   processor_->Enqueue(evt_rec);
 }
 
@@ -320,7 +325,6 @@ void CpuProfiler::CodeCreateEvent(Logger::LogEventsAndTags tag,
       CodeEntry::kEmptyResourceName, CpuProfileNode::kNoLineNumberInfo,
       CpuProfileNode::kNoColumnNumberInfo, NULL, code->instruction_start());
   rec->size = code->ExecutableSize();
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -343,30 +347,20 @@ void CpuProfiler::CodeDisableOptEvent(Code* code, SharedFunctionInfo* shared) {
 }
 
 
-void CpuProfiler::CodeDeoptEvent(Code* code, int bailout_id, Address pc,
-                                 int fp_to_sp_delta) {
+void CpuProfiler::CodeDeoptEvent(Code* code, Address pc, int fp_to_sp_delta) {
   CodeEventsContainer evt_rec(CodeEventRecord::CODE_DEOPT);
   CodeDeoptEventRecord* rec = &evt_rec.CodeDeoptEventRecord_;
-  Deoptimizer::DeoptInfo info = Deoptimizer::GetDeoptInfo(code, bailout_id);
+  Deoptimizer::DeoptInfo info = Deoptimizer::GetDeoptInfo(code, pc);
   rec->start = code->address();
   rec->deopt_reason = Deoptimizer::GetDeoptReason(info.deopt_reason);
-  rec->raw_position = info.raw_position;
+  rec->position = info.position;
+  rec->pc_offset = pc - code->instruction_start();
   processor_->Enqueue(evt_rec);
   processor_->AddDeoptStack(isolate_, pc, fp_to_sp_delta);
 }
 
 
 void CpuProfiler::CodeDeleteEvent(Address from) {
-}
-
-
-void CpuProfiler::SharedFunctionInfoMoveEvent(Address from, Address to) {
-  CodeEventsContainer evt_rec(CodeEventRecord::SHARED_FUNC_MOVE);
-  SharedFunctionInfoMoveEventRecord* rec =
-      &evt_rec.SharedFunctionInfoMoveEventRecord_;
-  rec->from = from;
-  rec->to = to;
-  processor_->Enqueue(evt_rec);
 }
 
 
@@ -380,7 +374,6 @@ void CpuProfiler::GetterCallbackEvent(Name* name, Address entry_point) {
       profiles_->GetName(name),
       "get ");
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 
@@ -409,7 +402,6 @@ void CpuProfiler::SetterCallbackEvent(Name* name, Address entry_point) {
       profiles_->GetName(name),
       "set ");
   rec->size = 1;
-  rec->shared = NULL;
   processor_->Enqueue(evt_rec);
 }
 

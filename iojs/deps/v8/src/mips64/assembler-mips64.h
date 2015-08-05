@@ -41,8 +41,8 @@
 #include <set>
 
 #include "src/assembler.h"
+#include "src/compiler.h"
 #include "src/mips64/constants-mips64.h"
-#include "src/serialize.h"
 
 namespace v8 {
 namespace internal {
@@ -524,8 +524,6 @@ class Assembler : public AssemblerBase {
   // Return the code target address of the patch debug break slot
   inline static Address break_address_from_return_address(Address pc);
 
-  static void JumpLabelToJumpRegister(Address pc);
-
   static void QuietNaN(HeapObject* nan);
 
   // This sets the branch destination (which gets loaded at the call address).
@@ -538,6 +536,11 @@ class Assembler : public AssemblerBase {
         code,
         target);
   }
+
+  // This sets the internal reference at the pc.
+  inline static void deserialization_set_target_internal_reference_at(
+      Address pc, Address target,
+      RelocInfo::Mode mode = RelocInfo::INTERNAL_REFERENCE);
 
   // Size of an instruction.
   static const int kInstrSize = sizeof(Instr);
@@ -554,14 +557,11 @@ class Assembler : public AssemblerBase {
   static const int kSpecialTargetSize = 0;
 
   // Number of consecutive instructions used to store 32bit/64bit constant.
-  // Before jump-optimizations, this constant was used in
-  // RelocInfo::target_address_address() function to tell serializer address of
-  // the instruction that follows LUI/ORI instruction pair. Now, with new jump
-  // optimization, where jump-through-register instruction that usually
-  // follows LUI/ORI pair is substituted with J/JAL, this constant equals
-  // to 3 instructions (LUI+ORI+J/JAL/JR/JALR).
-  static const int kInstructionsFor32BitConstant = 3;
-  static const int kInstructionsFor64BitConstant = 5;
+  // This constant was used in RelocInfo::target_address_address() function
+  // to tell serializer address of the instruction that follows
+  // LUI/ORI instruction pair.
+  static const int kInstructionsFor32BitConstant = 2;
+  static const int kInstructionsFor64BitConstant = 4;
 
   // Distance between the instruction referring to the address of the call
   // target and the return address.
@@ -584,6 +584,8 @@ class Assembler : public AssemblerBase {
   // Number of instructions used for the JS return sequence. The constant is
   // used by the debugger to patch the JS return sequence.
   static const int kJSReturnSequenceInstructions = 7;
+  static const int kJSReturnSequenceLength =
+      kJSReturnSequenceInstructions * kInstrSize;
   static const int kDebugBreakSlotInstructions = 6;
   static const int kDebugBreakSlotLength =
       kDebugBreakSlotInstructions * kInstrSize;
@@ -878,15 +880,13 @@ class Assembler : public AssemblerBase {
   void movt(Register rd, Register rs, uint16_t cc = 0);
   void movf(Register rd, Register rs, uint16_t cc = 0);
 
-  void sel(SecondaryField fmt, FPURegister fd, FPURegister ft,
-      FPURegister fs, uint8_t sel);
-  void seleqz(Register rs, Register rt, Register rd);
-  void seleqz(SecondaryField fmt, FPURegister fd, FPURegister ft,
-      FPURegister fs);
+  void sel(SecondaryField fmt, FPURegister fd, FPURegister fs, FPURegister ft);
+  void seleqz(Register rd, Register rs, Register rt);
+  void seleqz(SecondaryField fmt, FPURegister fd, FPURegister fs,
+              FPURegister ft);
   void selnez(Register rs, Register rt, Register rd);
-  void selnez(SecondaryField fmt, FPURegister fd, FPURegister ft,
-      FPURegister fs);
-
+  void selnez(SecondaryField fmt, FPURegister fd, FPURegister fs,
+              FPURegister ft);
   // Bit twiddling.
   void clz(Register rd, Register rs);
   void ins_(Register rt, Register rs, uint16_t pos, uint16_t size);
@@ -914,14 +914,21 @@ class Assembler : public AssemblerBase {
   void cfc1(Register rt, FPUControlRegister fs);
 
   // Arithmetic.
+  void add_s(FPURegister fd, FPURegister fs, FPURegister ft);
   void add_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void sub_s(FPURegister fd, FPURegister fs, FPURegister ft);
   void sub_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void mul_s(FPURegister fd, FPURegister fs, FPURegister ft);
   void mul_d(FPURegister fd, FPURegister fs, FPURegister ft);
   void madd_d(FPURegister fd, FPURegister fr, FPURegister fs, FPURegister ft);
+  void div_s(FPURegister fd, FPURegister fs, FPURegister ft);
   void div_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void abs_s(FPURegister fd, FPURegister fs);
   void abs_d(FPURegister fd, FPURegister fs);
   void mov_d(FPURegister fd, FPURegister fs);
+  void neg_s(FPURegister fd, FPURegister fs);
   void neg_d(FPURegister fd, FPURegister fs);
+  void sqrt_s(FPURegister fd, FPURegister fs);
   void sqrt_d(FPURegister fd, FPURegister fs);
 
   // Conversion.
@@ -935,6 +942,10 @@ class Assembler : public AssemblerBase {
   void floor_w_d(FPURegister fd, FPURegister fs);
   void ceil_w_s(FPURegister fd, FPURegister fs);
   void ceil_w_d(FPURegister fd, FPURegister fs);
+  void rint_s(FPURegister fd, FPURegister fs);
+  void rint_d(FPURegister fd, FPURegister fs);
+  void rint(SecondaryField fmt, FPURegister fd, FPURegister fs);
+
 
   void cvt_l_s(FPURegister fd, FPURegister fs);
   void cvt_l_d(FPURegister fd, FPURegister fs);
@@ -947,10 +958,18 @@ class Assembler : public AssemblerBase {
   void ceil_l_s(FPURegister fd, FPURegister fs);
   void ceil_l_d(FPURegister fd, FPURegister fs);
 
-  void min(SecondaryField fmt, FPURegister fd, FPURegister ft, FPURegister fs);
-  void mina(SecondaryField fmt, FPURegister fd, FPURegister ft, FPURegister fs);
-  void max(SecondaryField fmt, FPURegister fd, FPURegister ft, FPURegister fs);
-  void maxa(SecondaryField fmt, FPURegister fd, FPURegister ft, FPURegister fs);
+  void min(SecondaryField fmt, FPURegister fd, FPURegister fs, FPURegister ft);
+  void mina(SecondaryField fmt, FPURegister fd, FPURegister fs, FPURegister ft);
+  void max(SecondaryField fmt, FPURegister fd, FPURegister fs, FPURegister ft);
+  void maxa(SecondaryField fmt, FPURegister fd, FPURegister fs, FPURegister ft);
+  void min_s(FPURegister fd, FPURegister fs, FPURegister ft);
+  void min_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void max_s(FPURegister fd, FPURegister fs, FPURegister ft);
+  void max_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void mina_s(FPURegister fd, FPURegister fs, FPURegister ft);
+  void mina_d(FPURegister fd, FPURegister fs, FPURegister ft);
+  void maxa_s(FPURegister fd, FPURegister fs, FPURegister ft);
+  void maxa_d(FPURegister fd, FPURegister fs, FPURegister ft);
 
   void cvt_s_w(FPURegister fd, FPURegister fs);
   void cvt_s_l(FPURegister fd, FPURegister fs);
@@ -1060,7 +1079,7 @@ class Assembler : public AssemblerBase {
 
   // Record a deoptimization reason that can be used by a log or cpu profiler.
   // Use --trace-deopt to enable.
-  void RecordDeoptReason(const int reason, const int raw_position);
+  void RecordDeoptReason(const int reason, const SourcePosition position);
 
   static int RelocateInternalReference(RelocInfo::Mode rmode, byte* pc,
                                        intptr_t pc_delta);
@@ -1165,13 +1184,16 @@ class Assembler : public AssemblerBase {
   // the relocation info.
   TypeFeedbackId recorded_ast_id_;
 
+  inline static void set_target_internal_reference_encoded_at(Address pc,
+                                                              Address target);
+
   int64_t buffer_space() const { return reloc_info_writer.pos() - pc_; }
 
   // Decode branch instruction at pos and return branch target pos.
-  int64_t target_at(int64_t pos, bool is_internal);
+  int target_at(int pos, bool is_internal);
 
   // Patch branch instruction at pos to branch to given branch target pos.
-  void target_at_put(int64_t pos, int64_t target_pos, bool is_internal);
+  void target_at_put(int pos, int target_pos, bool is_internal);
 
   // Say if we need to relocate with this mode.
   bool MustUseReg(RelocInfo::Mode rmode);
@@ -1266,7 +1288,7 @@ class Assembler : public AssemblerBase {
   void GrowBuffer();
   inline void emit(Instr x);
   inline void emit(uint64_t x);
-  inline void CheckTrampolinePoolQuick();
+  inline void CheckTrampolinePoolQuick(int extra_instructions = 0);
 
   // Instruction generation.
   // We have 3 different kind of encoding layout on MIPS.

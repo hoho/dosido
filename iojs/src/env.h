@@ -44,6 +44,7 @@ namespace node {
   V(address_string, "address")                                                \
   V(args_string, "args")                                                      \
   V(argv_string, "argv")                                                      \
+  V(arrow_message_string, "arrowMessage")                                     \
   V(async, "async")                                                           \
   V(async_queue_string, "_asyncQueue")                                        \
   V(atime_string, "atime")                                                    \
@@ -185,7 +186,6 @@ namespace node {
   V(session_id_string, "sessionId")                                           \
   V(signal_string, "signal")                                                  \
   V(size_string, "size")                                                      \
-  V(smalloc_p_string, "_smalloc_p")                                           \
   V(sni_context_err_string, "Invalid SNI context")                            \
   V(sni_context_string, "sni_context")                                        \
   V(speed_string, "speed")                                                    \
@@ -231,6 +231,7 @@ namespace node {
   V(async_hooks_post_function, v8::Function)                                  \
   V(binding_cache_object, v8::Object)                                         \
   V(buffer_constructor_function, v8::Function)                                \
+  V(buffer_prototype_object, v8::Object)                                      \
   V(context, v8::Context)                                                     \
   V(domain_array, v8::Array)                                                  \
   V(fs_stats_constructor_function, v8::Function)                              \
@@ -398,15 +399,13 @@ class Environment {
   inline AsyncHooks* async_hooks();
   inline DomainFlag* domain_flag();
   inline TickInfo* tick_info();
+  inline uint64_t timer_base() const;
 
   static inline Environment* from_cares_timer_handle(uv_timer_t* handle);
   inline uv_timer_t* cares_timer_handle();
   inline ares_channel cares_channel();
   inline ares_channel* cares_channel_ptr();
   inline ares_task_list* cares_task_list();
-
-  inline bool using_smalloc_alloc_cb() const;
-  inline void set_using_smalloc_alloc_cb(bool value);
 
   inline bool using_abort_on_uncaught_exc() const;
   inline void set_using_abort_on_uncaught_exc(bool value);
@@ -422,6 +421,9 @@ class Environment {
 
   void PrintSyncTrace() const;
   inline void set_trace_sync_io(bool value);
+
+  inline uint32_t* heap_statistics_buffer() const;
+  inline void set_heap_statistics_buffer(uint32_t* pointer);
 
   inline void ThrowError(const char* errmsg);
   inline void ThrowTypeError(const char* errmsg);
@@ -501,10 +503,10 @@ class Environment {
   AsyncHooks async_hooks_;
   DomainFlag domain_flag_;
   TickInfo tick_info_;
+  const uint64_t timer_base_;
   uv_timer_t cares_timer_handle_;
   ares_channel cares_channel_;
   ares_task_list cares_task_list_;
-  bool using_smalloc_alloc_cb_;
   bool using_domains_;
   bool using_abort_on_uncaught_exc_;
   bool using_asyncwrap_;
@@ -517,6 +519,8 @@ class Environment {
   ListHead<HandleCleanup,
            &HandleCleanup::handle_cleanup_queue_> handle_cleanup_queue_;
   int handle_cleanup_waiting_;
+
+  uint32_t* heap_statistics_buffer_ = nullptr;
 
 #define V(PropertyName, TypeName)                                             \
   v8::Persistent<TypeName> PropertyName ## _;

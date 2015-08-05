@@ -197,11 +197,11 @@ void NamedLoadHandlerCompiler::GenerateLoadFunctionPrototype(
 void PropertyHandlerCompiler::GenerateCheckPropertyCell(
     MacroAssembler* masm, Handle<JSGlobalObject> global, Handle<Name> name,
     Register scratch, Label* miss) {
-  Handle<Cell> cell = JSGlobalObject::EnsurePropertyCell(global, name);
+  Handle<PropertyCell> cell = JSGlobalObject::EnsurePropertyCell(global, name);
   DCHECK(cell->value()->IsTheHole());
   Handle<WeakCell> weak_cell = masm->isolate()->factory()->NewWeakCell(cell);
   __ LoadWeakValue(scratch, weak_cell, miss);
-  __ ldr(scratch, FieldMemOperand(scratch, Cell::kValueOffset));
+  __ ldr(scratch, FieldMemOperand(scratch, PropertyCell::kValueOffset));
   __ LoadRoot(ip, Heap::kTheHoleValueRootIndex);
   __ cmp(scratch, ip);
   __ b(ne, miss);
@@ -411,14 +411,38 @@ void NamedStoreHandlerCompiler::GenerateFieldTypeChecks(HeapType* field_type,
 
 Register PropertyHandlerCompiler::CheckPrototypes(
     Register object_reg, Register holder_reg, Register scratch1,
-    Register scratch2, Handle<Name> name, Label* miss,
-    PrototypeCheckType check) {
+    Register scratch2, Handle<Name> name, Label* miss, PrototypeCheckType check,
+    ReturnHolder return_what) {
   Handle<Map> receiver_map = map();
 
   // Make sure there's no overlap between holder and object registers.
   DCHECK(!scratch1.is(object_reg) && !scratch1.is(holder_reg));
   DCHECK(!scratch2.is(object_reg) && !scratch2.is(holder_reg) &&
          !scratch2.is(scratch1));
+
+  if (FLAG_eliminate_prototype_chain_checks) {
+    Handle<Cell> validity_cell =
+        Map::GetOrCreatePrototypeChainValidityCell(receiver_map, isolate());
+    if (!validity_cell.is_null()) {
+      DCHECK_EQ(Smi::FromInt(Map::kPrototypeChainValid),
+                validity_cell->value());
+      __ mov(scratch1, Operand(validity_cell));
+      __ ldr(scratch1, FieldMemOperand(scratch1, Cell::kValueOffset));
+      __ cmp(scratch1, Operand(Smi::FromInt(Map::kPrototypeChainValid)));
+      __ b(ne, miss);
+    }
+
+    // The prototype chain of primitives (and their JSValue wrappers) depends
+    // on the native context, which can't be guarded by validity cells.
+    // |object_reg| holds the native context specific prototype in this case;
+    // we need to check its map.
+    if (check == CHECK_ALL_MAPS) {
+      __ ldr(scratch1, FieldMemOperand(object_reg, HeapObject::kMapOffset));
+      Handle<WeakCell> cell = Map::WeakCellForMap(receiver_map);
+      __ CmpWeakValue(scratch1, cell, scratch2);
+      __ b(ne, miss);
+    }
+  }
 
   // Keep track of the current object in register reg.
   Register reg = object_reg;
@@ -428,6 +452,17 @@ Register PropertyHandlerCompiler::CheckPrototypes(
   if (receiver_map->IsJSGlobalObjectMap()) {
     current = isolate()->global_object();
   }
+
+  // Check access rights to the global object.  This has to happen after
+  // the map check so that we know that the object is actually a global
+  // object.
+  // This allows us to install generated handlers for accesses to the
+  // global proxy (as opposed to using slow ICs). See corresponding code
+  // in LookupForRead().
+  if (receiver_map->IsJSGlobalProxyMap()) {
+    __ CheckAccessGlobalProxy(reg, scratch2, miss);
+  }
+
   Handle<JSObject> prototype = Handle<JSObject>::null();
   Handle<Map> current_map = receiver_map;
   Handle<Map> holder_map(holder()->map());
@@ -453,48 +488,48 @@ Register PropertyHandlerCompiler::CheckPrototypes(
              current->property_dictionary()->FindEntry(name) ==
                  NameDictionary::kNotFound);
 
+      if (FLAG_eliminate_prototype_chain_checks && depth > 1) {
+        // TODO(jkummerow): Cache and re-use weak cell.
+        __ LoadWeakValue(reg, isolate()->factory()->NewWeakCell(current), miss);
+      }
       GenerateDictionaryNegativeLookup(masm(), miss, reg, name, scratch1,
                                        scratch2);
-
-      __ ldr(scratch1, FieldMemOperand(reg, HeapObject::kMapOffset));
-      reg = holder_reg;  // From now on the object will be in holder_reg.
-      __ ldr(reg, FieldMemOperand(scratch1, Map::kPrototypeOffset));
+      if (!FLAG_eliminate_prototype_chain_checks) {
+        __ ldr(scratch1, FieldMemOperand(reg, HeapObject::kMapOffset));
+        __ ldr(holder_reg, FieldMemOperand(scratch1, Map::kPrototypeOffset));
+      }
     } else {
       Register map_reg = scratch1;
-      __ ldr(map_reg, FieldMemOperand(reg, HeapObject::kMapOffset));
-      if (depth != 1 || check == CHECK_ALL_MAPS) {
+      if (!FLAG_eliminate_prototype_chain_checks) {
+        __ ldr(map_reg, FieldMemOperand(reg, HeapObject::kMapOffset));
+      }
+      if (current_map->IsJSGlobalObjectMap()) {
+        GenerateCheckPropertyCell(masm(), Handle<JSGlobalObject>::cast(current),
+                                  name, scratch2, miss);
+      } else if (!FLAG_eliminate_prototype_chain_checks &&
+                 (depth != 1 || check == CHECK_ALL_MAPS)) {
         Handle<WeakCell> cell = Map::WeakCellForMap(current_map);
         __ CmpWeakValue(map_reg, cell, scratch2);
         __ b(ne, miss);
       }
-
-      // Check access rights to the global object.  This has to happen after
-      // the map check so that we know that the object is actually a global
-      // object.
-      // This allows us to install generated handlers for accesses to the
-      // global proxy (as opposed to using slow ICs). See corresponding code
-      // in LookupForRead().
-      if (current_map->IsJSGlobalProxyMap()) {
-        __ CheckAccessGlobalProxy(reg, scratch2, miss);
-      } else if (current_map->IsJSGlobalObjectMap()) {
-        GenerateCheckPropertyCell(masm(), Handle<JSGlobalObject>::cast(current),
-                                  name, scratch2, miss);
+      if (!FLAG_eliminate_prototype_chain_checks) {
+        __ ldr(holder_reg, FieldMemOperand(map_reg, Map::kPrototypeOffset));
       }
-
-      reg = holder_reg;  // From now on the object will be in holder_reg.
-
-      __ ldr(reg, FieldMemOperand(map_reg, Map::kPrototypeOffset));
     }
 
+    reg = holder_reg;  // From now on the object will be in holder_reg.
     // Go to the next object in the prototype chain.
     current = prototype;
     current_map = handle(current->map());
   }
 
+  DCHECK(!current_map->IsJSGlobalProxyMap());
+
   // Log the check depth.
   LOG(isolate(), IntEvent("check-maps-depth", depth + 1));
 
-  if (depth != 0 || check == CHECK_ALL_MAPS) {
+  if (!FLAG_eliminate_prototype_chain_checks &&
+      (depth != 0 || check == CHECK_ALL_MAPS)) {
     // Check the holder map.
     __ ldr(scratch1, FieldMemOperand(reg, HeapObject::kMapOffset));
     Handle<WeakCell> cell = Map::WeakCellForMap(current_map);
@@ -502,15 +537,13 @@ Register PropertyHandlerCompiler::CheckPrototypes(
     __ b(ne, miss);
   }
 
-  // Perform security check for access to the global object.
-  DCHECK(current_map->IsJSGlobalProxyMap() ||
-         !current_map->is_access_check_needed());
-  if (current_map->IsJSGlobalProxyMap()) {
-    __ CheckAccessGlobalProxy(reg, scratch1, miss);
+  bool return_holder = return_what == RETURN_HOLDER;
+  if (FLAG_eliminate_prototype_chain_checks && return_holder && depth != 0) {
+    __ LoadWeakValue(reg, isolate()->factory()->NewWeakCell(current), miss);
   }
 
   // Return the register containing the holder.
-  return reg;
+  return return_holder ? reg : no_reg;
 }
 
 
@@ -725,13 +758,13 @@ Handle<Code> NamedLoadHandlerCompiler::CompileLoadGlobal(
   if (IC::ICUseVector(kind())) {
     PushVectorAndSlot();
   }
-  FrontendHeader(receiver(), name, &miss);
+  FrontendHeader(receiver(), name, &miss, DONT_RETURN_ANYTHING);
 
   // Get the value from the cell.
   Register result = StoreDescriptor::ValueRegister();
   Handle<WeakCell> weak_cell = factory()->NewWeakCell(cell);
   __ LoadWeakValue(result, weak_cell, &miss);
-  __ ldr(result, FieldMemOperand(result, Cell::kValueOffset));
+  __ ldr(result, FieldMemOperand(result, PropertyCell::kValueOffset));
 
   // Check for deleted property if property can actually be deleted.
   if (is_configurable) {
