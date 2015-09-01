@@ -12,6 +12,22 @@
 
 struct sockaddr;
 
+// Variation on NODE_DEFINE_CONSTANT that sets a String value.
+#define NODE_DEFINE_STRING_CONSTANT(target, name, constant)                   \
+  do {                                                                        \
+    v8::Isolate* isolate = target->GetIsolate();                              \
+    v8::Local<v8::String> constant_name =                                     \
+        v8::String::NewFromUtf8(isolate, name);                               \
+    v8::Local<v8::String> constant_value =                                    \
+        v8::String::NewFromUtf8(isolate, constant);                           \
+    v8::PropertyAttribute constant_attributes =                               \
+        static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete);    \
+    target->ForceSet(isolate->GetCurrentContext(),                            \
+                     constant_name,                                           \
+                     constant_value,                                          \
+                     constant_attributes);                                    \
+  } while (0)
+
 namespace node {
 
 // Forward declaration
@@ -271,6 +287,21 @@ class NodeInstanceData {
 
     DISALLOW_COPY_AND_ASSIGN(NodeInstanceData);
 };
+
+namespace Buffer {
+v8::MaybeLocal<v8::Object> Copy(Environment* env, const char* data, size_t len);
+v8::MaybeLocal<v8::Object> New(Environment* env, size_t size);
+// Takes ownership of |data|.
+v8::MaybeLocal<v8::Object> New(Environment* env,
+                               char* data,
+                               size_t length,
+                               void (*callback)(char* data, void* hint),
+                               void* hint);
+// Takes ownership of |data|.  Must allocate |data| with malloc() or realloc()
+// because ArrayBufferAllocator::Free() deallocates it again with free().
+// Mixing operator new and free() is undefined behavior so don't do that.
+v8::MaybeLocal<v8::Object> New(Environment* env, char* data, size_t length);
+}  // namespace Buffer
 
 }  // namespace node
 

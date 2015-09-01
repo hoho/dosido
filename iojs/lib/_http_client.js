@@ -216,7 +216,7 @@ function socketCloseListener() {
   // is a no-op if no final chunk remains.
   socket.read();
 
-  // NOTE: Its important to get parser here, because it could be freed by
+  // NOTE: It's important to get parser here, because it could be freed by
   // the `socketOnData`.
   var parser = socket.parser;
   req.emit('close');
@@ -322,7 +322,7 @@ function socketOnData(d) {
     var bodyHead = d.slice(bytesParsed, d.length);
 
     var eventName = req.method === 'CONNECT' ? 'connect' : 'upgrade';
-    if (EventEmitter.listenerCount(req, eventName) > 0) {
+    if (req.listenerCount(eventName) > 0) {
       req.upgradeOrConnect = true;
 
       // detach the socket
@@ -359,7 +359,7 @@ function parserOnIncomingClient(res, shouldKeepAlive) {
   var req = socket._httpMessage;
 
 
-  // propogate "domain" setting...
+  // propagate "domain" setting...
   if (req.domain && !res.domain) {
     debug('setting "res.domain"');
     res.domain = req.domain;
@@ -465,7 +465,7 @@ function tickOnSocket(req, socket) {
   socket.parser = parser;
   socket._httpMessage = req;
 
-  // Setup "drain" propogation.
+  // Setup "drain" propagation.
   httpSocketSetup(socket);
 
   // Propagate headers limit from request object to parser

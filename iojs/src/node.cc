@@ -2124,6 +2124,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
 
   if (is_dlopen_error) {
     Local<String> errmsg = OneByteString(env->isolate(), uv_dlerror(&lib));
+    uv_dlclose(&lib);
 #ifdef _WIN32
     // Windows needs to add the filename into the error message
     errmsg = String::Concat(errmsg, args[1]->ToString(env->isolate()));
@@ -2133,10 +2134,12 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   }
 
   if (mp == nullptr) {
+    uv_dlclose(&lib);
     env->ThrowError("Module did not self-register.");
     return;
   }
   if (mp->nm_version != NODE_MODULE_VERSION) {
+    uv_dlclose(&lib);
     char errmsg[1024];
     snprintf(errmsg,
              sizeof(errmsg),
@@ -2146,6 +2149,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
     return;
   }
   if (mp->nm_flags & NM_F_BUILTIN) {
+    uv_dlclose(&lib);
     env->ThrowError("Built-in module self-registered.");
     return;
   }
@@ -2162,6 +2166,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   } else if (mp->nm_register_func != nullptr) {
     mp->nm_register_func(exports, module, mp->nm_priv);
   } else {
+    uv_dlclose(&lib);
     env->ThrowError("Module has no declared entry point.");
     return;
   }
@@ -2184,7 +2189,7 @@ static void OnFatalError(const char* location, const char* message) {
 
 NO_RETURN void FatalError(const char* location, const char* message) {
   OnFatalError(location, message);
-  // to supress compiler warning
+  // to suppress compiler warning
   abort();
 }
 
@@ -3106,6 +3111,9 @@ static void PrintHelp() {
          "  --track-heap-objects  track heap object allocations for heap "
          "snapshots\n"
          "  --v8-options          print v8 command line options\n"
+#if HAVE_OPENSSL
+         "  --tls-cipher-list=val use an alternative default TLS cipher list\n"
+#endif
 #if defined(NODE_HAVE_I18N_SUPPORT)
          "  --icu-data-dir=dir    set ICU data load path to dir\n"
          "                        (overrides NODE_ICU_DATA)\n"
@@ -3237,6 +3245,10 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--v8-options") == 0) {
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
+#if HAVE_OPENSSL
+    } else if (strncmp(arg, "--tls-cipher-list=", 18) == 0) {
+      default_cipher_list = arg + 18;
+#endif
 #if defined(NODE_HAVE_I18N_SUPPORT)
     } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
       icu_data_dir = arg + 15;
@@ -3701,7 +3713,8 @@ void Init(int* argc,
 #endif
   // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
   // the argv array or the elements it points to.
-  V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
+  if (v8_argc != 0)
+    V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
 
   // Anything that's still in v8_argv is not a V8 or a node option.
   for (int i = 1; i < v8_argc; i++) {

@@ -122,7 +122,7 @@ Note that `emitter.setMaxListeners(n)` still has precedence over
 
 ### emitter.listeners(event)
 
-Returns an array of listeners for the specified event.
+Returns a copy of the array of listeners for the specified event.
 
     server.on('connection', function (stream) {
       console.log('someone connected!');
@@ -137,10 +137,17 @@ Execute each of the listeners in order with the supplied arguments.
 Returns `true` if event had listeners, `false` otherwise.
 
 
+### emitter.listenerCount(type)
+
+* `type` {Value} The type of event
+
+Returns the number of listeners listening to the `type` of event.
+
 ### Class Method: EventEmitter.listenerCount(emitter, event)
 
-Return the number of listeners for a given event.
+    Stability: 0 - Deprecated: Use [emitter.listenerCount][] instead.
 
+Returns the number of listeners for a given event.
 
 ### Event: 'newListener'
 
@@ -179,3 +186,6 @@ constructor function. For example:
 
     // Inherit functions from `EventEmitter`'s prototype
     util.inherits(MyEventEmitter, EventEmitter);
+
+
+[emitter.listenerCount]: #events_emitter_listenercount_type

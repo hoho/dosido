@@ -5,7 +5,6 @@ const crypto = require('crypto');
 const net = require('net');
 const tls = require('tls');
 const util = require('util');
-const listenerCount = require('events').listenerCount;
 const common = require('_tls_common');
 const StreamWrap = require('_stream_wrap').StreamWrap;
 const Buffer = require('buffer').Buffer;
@@ -116,7 +115,7 @@ function requestOCSP(self, hello, ctx, cb) {
   if (ctx.context)
     ctx = ctx.context;
 
-  if (listenerCount(self.server, 'OCSPRequest') === 0) {
+  if (self.server.listenerCount('OCSPRequest') === 0) {
     return cb(null);
   } else {
     self.server.emit('OCSPRequest',
@@ -320,7 +319,9 @@ TLSSocket.prototype._wrapHandle = function(wrap) {
   var context = options.secureContext ||
                 options.credentials ||
                 tls.createSecureContext();
-  res = tls_wrap.wrap(handle, context.context, options.isServer);
+  res = tls_wrap.wrap(handle._externalStream,
+                      context.context,
+                      options.isServer);
   res._parent = handle;
   res._parentWrap = wrap;
   res._secureContext = context;
@@ -396,11 +397,11 @@ TLSSocket.prototype._init = function(socket, wrap) {
     ssl.handshakes = 0;
 
     if (this.server) {
-      if (listenerCount(this.server, 'resumeSession') > 0 ||
-          listenerCount(this.server, 'newSession') > 0) {
+      if (this.server.listenerCount('resumeSession') > 0 ||
+          this.server.listenerCount('newSession') > 0) {
         ssl.enableSessionCallbacks();
       }
-      if (listenerCount(this.server, 'OCSPRequest') > 0)
+      if (this.server.listenerCount('OCSPRequest') > 0)
         ssl.enableCertCb();
     }
   } else {
@@ -582,17 +583,6 @@ TLSSocket.prototype._start = function() {
   if (this._tlsOptions.requestOCSP)
     this._handle.requestOCSP();
   this._handle.start();
-};
-
-TLSSocket.prototype._isSessionResumed = function _isSessionResumed(session) {
-  if (!session)
-    return false;
-
-  var next = this.getSession();
-  if (!next)
-    return false;
-
-  return next.equals(session);
 };
 
 TLSSocket.prototype.setServername = function(name) {
@@ -1011,7 +1001,7 @@ exports.connect = function(/* [port, host], options, cb */) {
 
     // Verify that server's identity matches it's certificate's names
     // Unless server has resumed our existing session
-    if (!verifyError && !socket._isSessionResumed(options.session)) {
+    if (!verifyError && !socket.isSessionReused()) {
       var cert = socket.getPeerCertificate();
       verifyError = options.checkServerIdentity(hostname, cert);
     }

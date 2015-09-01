@@ -88,6 +88,7 @@ namespace node {
   V(exponent_string, "exponent")                                              \
   V(exports_string, "exports")                                                \
   V(ext_key_usage_string, "ext_key_usage")                                    \
+  V(external_stream_string, "_externalStream")                                \
   V(family_string, "family")                                                  \
   V(fatal_exception_string, "_fatalException")                                \
   V(fd_string, "fd")                                                          \
@@ -198,6 +199,7 @@ namespace node {
   V(syscall_string, "syscall")                                                \
   V(tick_callback_string, "_tickCallback")                                    \
   V(tick_domain_cb_string, "_tickDomainCallback")                             \
+  V(ticketkeycallback_string, "onticketkeycallback")                          \
   V(timeout_string, "timeout")                                                \
   V(times_string, "times")                                                    \
   V(timestamp_string, "timestamp")                                            \

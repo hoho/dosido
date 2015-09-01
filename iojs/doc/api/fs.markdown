@@ -557,11 +557,12 @@ The synchronous version of `fs.appendFile`. Returns `undefined`.
 Watch for changes on `filename`. The callback `listener` will be called each
 time the file is accessed.
 
-The second argument is optional. The `options` if provided should be an object
-containing two members a boolean, `persistent`, and `interval`. `persistent`
-indicates whether the process should continue to run as long as files are
-being watched. `interval` indicates how often the target should be polled,
-in milliseconds. The default is `{ persistent: true, interval: 5007 }`.
+The `options` argument may be omitted. If provided, it should be an object. The
+`options` object may contain a boolean named `persistent` that indicates
+whether the process should continue to run as long as files are being watched.
+The `options` object may specify an `interval` property indicating how often the
+target should be polled in milliseconds. The default is
+`{ persistent: true, interval: 5007 }`.
 
 The `listener` gets two arguments the current stat object and the previous
 stat object:
@@ -670,9 +671,7 @@ callback, and have some fallback logic if it is null.
 
 ## fs.exists(path, callback)
 
-`fs.exists()` is **deprecated**. For supported alternatives please check out
-[`fs.stat`](fs.html#fs_fs_stat_path_callback) or
-[`fs.access`](fs.html#fs_fs_access_path_mode_callback).
+    Stability: 0 - Deprecated: Use [fs.stat][] or [fs.access][] instead.
 
 Test whether or not the given path exists by checking with the file system.
 Then call the `callback` argument with either true or false.  Example:
@@ -696,9 +695,7 @@ and handle the error when it's not there.
 Synchronous version of [`fs.exists`](fs.html#fs_fs_exists_path_callback).
 Returns `true` if the file exists, `false` otherwise.
 
-`fs.existsSync()` is **deprecated**. For supported alternatives please check
-out [`fs.statSync`](fs.html#fs_fs_statsync_path) or
-[`fs.accessSync`](fs.html#fs_fs_accesssync_path_mode).
+    Stability: 0 - Deprecated: Use [fs.statSync][] or [fs.accessSync][] instead.
 
 ## fs.access(path[, mode], callback)
 
@@ -801,6 +798,10 @@ on Unix systems, it never was.
 
 Returns a new ReadStream object (See `Readable Stream`).
 
+Be aware that, unlike the default value set for `highWaterMark` on a
+readable stream (16 kb), the stream returned by this method has a
+default value of 64 kb for the same parameter.
+
 `options` is an object or string with the following defaults:
 
     { flags: 'r',
@@ -822,6 +823,9 @@ there's an error.  It is your responsibility to close it and make sure
 there's no file descriptor leak.  If `autoClose` is set to true (default
 behavior), on `error` or `end` the file descriptor will be closed
 automatically.
+
+`mode` sets the file mode (permission and sticky bits), but only if the
+file was created.
 
 An example to read the last 10 bytes of a file which is 100 bytes long:
 
@@ -847,14 +851,14 @@ Returns a new WriteStream object (See `Writable Stream`).
 `options` is an object or string with the following defaults:
 
     { flags: 'w',
-      encoding: null,
+      defaultEncoding: 'utf8',
       fd: null,
       mode: 0o666 }
 
 `options` may also include a `start` option to allow writing data at
 some position past the beginning of the file.  Modifying a file rather
 than replacing it may require a `flags` mode of `r+` rather than the
-default mode `w`. The `encoding` can be `'utf8'`, `'ascii'`, `binary`,
+default mode `w`. The `defaultEncoding` can be `'utf8'`, `'ascii'`, `binary`,
 or `'base64'`.
 
 Like `ReadStream` above, if `fd` is specified, `WriteStream` will ignore the
@@ -899,3 +903,9 @@ See more details in [fs.watch](#fs_fs_watch_filename_options_listener).
 * `error` {Error object}
 
 Emitted when an error occurs.
+
+
+[fs.stat]: #fs_fs_stat_path_callback
+[fs.access]: #fs_fs_access_path_mode_callback
+[fs.statSync]: #fs_fs_statsync_path
+[fs.accessSync]: #fs_fs_accesssync_path_mode

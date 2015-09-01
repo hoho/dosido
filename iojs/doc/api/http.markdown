@@ -66,7 +66,8 @@ added to the `'request'` event.
 
 ## http.createClient([port][, host])
 
-This function is **deprecated**; please use [http.request()][] instead.
+    Stability: 0 - Deprecated: Use [http.request][] instead.
+
 Constructs a new HTTP client. `port` and `host` refer to the server to be
 connected to.
 
@@ -452,6 +453,11 @@ If `data` is specified, it is equivalent to calling
 If `callback` is specified, it will be called when the response stream
 is finished.
 
+### response.finished
+
+Boolean value that indicates whether the response has completed. Starts
+as `false`. After `response.end()` executes, the value will be `true`.
+
 ## http.request(options[, callback])
 
 io.js maintains several connections per server to make HTTP requests.
@@ -462,6 +468,7 @@ automatically parsed with [url.parse()][].
 
 Options:
 
+- `protocol`: Protocol to use. Defaults to `'http'`.
 - `host`: A domain name or IP address of the server to issue the request to.
   Defaults to `'localhost'`.
 - `hostname`: Alias for `host`. To support `url.parse()` `hostname` is
@@ -911,7 +918,8 @@ is finished.
 
 ### request.abort()
 
-Aborts a request.  (New since v0.3.8.)
+Marks the request as aborting. Calling this will cause remaining data
+in the response to be dropped and the socket to be destroyed.
 
 ### request.setTimeout(timeout[, callback])
 
@@ -1085,8 +1093,7 @@ client's authentication details.
 [http.IncomingMessage]: #http_http_incomingmessage
 [http.ServerResponse]: #http_class_http_serverresponse
 [http.Server]: #http_class_http_server
-[http.request()]: #http_http_request_options_callback
-[http.request()]: #http_http_request_options_callback
+[http.request]: #http_http_request_options_callback
 [net.Server.close()]: net.html#net_server_close_callback
 [net.Server.listen(path)]: net.html#net_server_listen_path_callback
 [net.Server.listen(port)]: net.html#net_server_listen_port_hostname_backlog_callback
