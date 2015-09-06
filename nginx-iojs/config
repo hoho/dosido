@@ -18,9 +18,10 @@ if [ $FLAVOUR = "win" ]; then
 		../iojs/Release/lib/iojs.lib \
 		../iojs/Release/lib/libuv.lib \
 		../iojs/Release/lib/cares.lib \
+		../iojs/Release/lib/openssl.lib \
 		../iojs/Release/lib/http_parser.lib \
 		../iojs/build/Release/lib/v8_libplatform.lib \
-		../iojs/build/Release/lib/v8_base.lib \
+		../iojs/build/Release/lib/v8_base*.lib \
 		../iojs/build/Release/lib/v8_libbase.lib \
 		../iojs/build/Release/lib/v8_nosnapshot.lib \
 		$FORCE_SYMBOLS"

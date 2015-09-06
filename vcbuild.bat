@@ -32,7 +32,7 @@ bash auto/configure --with-cc=cl --builddir=objs ^
 		--with-http_ssl_module ^
 		--with-select_module ^
 		--with-ipv6 ^
-		--with-openssl=../deps/openssl ^
+		--with-openssl=../iojs/deps/openssl ^
 		--with-pcre=../deps/pcre ^
 		--with-zlib=../deps/zlib ^
 		--with-cc-opt="-I../libiojs -DFD_SETSIZE=1024 -D_WINSOCK_DEPRECATED_NO_WARNINGS /wd4307"
