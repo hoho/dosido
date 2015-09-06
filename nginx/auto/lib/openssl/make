@@ -1,8 +1,3 @@
-
-# Copyright (C) Igor Sysoev
-# Copyright (C) Nginx, Inc.
-
-
 case "$CC" in
 
     cl)
@@ -10,8 +5,7 @@ case "$CC" in
         cat << END                                            >> $NGX_MAKEFILE
 
 $OPENSSL/openssl/include/openssl/ssl.h:	$NGX_MAKEFILE
-	\$(MAKE) -f auto/lib/openssl/makefile.msvc			\
-		OPENSSL="$OPENSSL" OPENSSL_OPT="$OPENSSL_OPT"
+	@echo "Skip building OpenSSL, we will use openssl.lib from io.js"
 
 END
 
@@ -19,41 +13,19 @@ END
 
     bcc32)
 
-        ngx_opt=`echo "-DOPENSSL=\"$OPENSSL\" -DOPENSSL_OPT=\"$OPENSSL_OPT\"" \
-            | sed -e "s/\//$ngx_regex_dirsep/g"`
-
-        cat << END                                            >> $NGX_MAKEFILE
-
-`echo "$OPENSSL\\openssl\\lib\\libeay32.lib:				\
-	$OPENSSL\\openssl\\include\\openssl\\ssl.h"			\
-	| sed -e "s/\//$ngx_regex_dirsep/g"`
-
-`echo "$OPENSSL\\openssl\\lib\\ssleay32.lib:				\
-	$OPENSSL\\openssl\\include\\openssl\\ssl.h"			\
-	| sed -e "s/\//$ngx_regex_dirsep/g"`
-
-`echo "$OPENSSL\\openssl\\include\\openssl\\ssl.h:	$NGX_MAKEFILE"	\
-	| sed -e "s/\//$ngx_regex_dirsep/g"`
-	\$(MAKE) -f auto/lib/openssl/makefile.bcc $ngx_opt
+$OPENSSL/openssl/include/openssl/ssl.h:	$NGX_MAKEFILE
+	@echo "Skip building OpenSSL, we will use openssl.lib from io.js"
 
 END
 
     ;;
 
     *)
-        case $OPENSSL in
-            /*) ngx_prefix="$OPENSSL/.openssl" ;;
-            *)  ngx_prefix="$PWD/$OPENSSL/.openssl" ;;
-        esac
 
         cat << END                                            >> $NGX_MAKEFILE
 
-$OPENSSL/.openssl/include/openssl/ssl.h:	$NGX_MAKEFILE
-	cd $OPENSSL \\
-	&& if [ -f Makefile ]; then \$(MAKE) clean; fi \\
-	&& ./config --prefix=$ngx_prefix no-shared $OPENSSL_OPT \\
-	&& \$(MAKE) \\
-	&& \$(MAKE) install LIBDIR=lib
+$OPENSSL/.openssl/include/openssl/ssl.h:
+	@echo "Skip building OpenSSL, we will use libopenssl.a from io.js"
 
 END
 
