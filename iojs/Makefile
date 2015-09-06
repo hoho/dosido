@@ -5,6 +5,8 @@ PYTHON ?= python
 DESTDIR ?=
 SIGN ?=
 PREFIX ?= /usr/local
+FLAKY_TESTS ?= run
+TEST_CI_ARGS ?=
 STAGINGSERVER ?= iojs-www
 
 OSTYPE := $(shell uname -s | tr '[A-Z]' '[a-z]')
@@ -99,19 +101,39 @@ test/gc/node_modules/weak/build/Release/weakref.node: $(NODE_EXE)
 		--directory="$(shell pwd)/test/gc/node_modules/weak" \
 		--nodedir="$(shell pwd)"
 
-build-addons: $(NODE_EXE)
-	rm -rf test/addons/doc-*/
+# Implicitly depends on $(NODE_EXE), see the build-addons rule for rationale.
+test/addons/.docbuildstamp: doc/api/addons.markdown
+	$(RM) -r test/addons/doc-*/
 	$(NODE) tools/doc/addon-verify.js
-	$(foreach dir, \
-			$(sort $(dir $(wildcard test/addons/*/*.gyp))), \
-			$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
-					--directory="$(shell pwd)/$(dir)" \
-					--nodedir="$(shell pwd)" && ) echo "build done"
+	touch $@
+
+ADDONS_BINDING_GYPS := \
+	$(filter-out test/addons/doc-*/binding.gyp, \
+		$(wildcard test/addons/*/binding.gyp))
+
+# Implicitly depends on $(NODE_EXE), see the build-addons rule for rationale.
+test/addons/.buildstamp: $(ADDONS_BINDING_GYPS) | test/addons/.docbuildstamp
+	# Cannot use $(wildcard test/addons/*/) here, it's evaluated before
+	# embedded addons have been generated from the documentation.
+	for dirname in test/addons/*/; do \
+		$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+			--directory="$$PWD/$$dirname" \
+			--nodedir="$$PWD"; \
+	done
+	touch $@
+
+# .buildstamp and .docbuildstamp need $(NODE_EXE) but cannot depend on it
+# directly because it calls make recursively.  The parent make cannot know
+# if the subprocess touched anything so it pessimistically assumes that
+# .buildstamp and .docbuildstamp are out of date and need a rebuild.
+# Just goes to show that recursive make really is harmful...
+# TODO(bnoordhuis) Force rebuild after gyp or node-gyp update.
+build-addons: $(NODE_EXE) test/addons/.buildstamp
 
 test-gc: all test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=release gc
 
-test-build: all build-addons
+test-build: | all build-addons
 
 test-all: test-build test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=debug,release
@@ -119,8 +141,9 @@ test-all: test-build test/gc/node_modules/weak/build/Release/weakref.node
 test-all-valgrind: test-build
 	$(PYTHON) tools/test.py --mode=debug,release --valgrind
 
-test-ci:
-	$(PYTHON) tools/test.py -p tap --logfile test.tap --mode=release message parallel sequential
+test-ci: | build-addons
+	$(PYTHON) tools/test.py -p tap --logfile test.tap --mode=release --flaky-tests=$(FLAKY_TESTS) \
+		$(TEST_CI_ARGS) addons message parallel sequential
 
 test-release: test-build
 	$(PYTHON) tools/test.py --mode=release
@@ -323,9 +346,10 @@ $(PKG): release-only
 pkg: $(PKG)
 
 pkg-upload: pkg
-	ssh $(STAGINGSERVER) "mkdir -p staging/$(DISTTYPEDIR)/$(FULLVERSION)"
-	scp -p iojs-$(FULLVERSION).pkg $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).pkg
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).pkg.done"
+	ssh $(STAGINGSERVER) "mkdir -p iojs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 iojs-$(FULLVERSION).pkg
+	scp -p iojs-$(FULLVERSION).pkg $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).pkg
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).pkg.done"
 
 $(TARBALL): release-only $(NODE_EXE) doc
 	git checkout-index -a -f --prefix=$(TARNAME)/
@@ -349,18 +373,21 @@ endif
 tar: $(TARBALL)
 
 tar-upload: tar
-	ssh $(STAGINGSERVER) "mkdir -p staging/$(DISTTYPEDIR)/$(FULLVERSION)"
-	scp -p iojs-$(FULLVERSION).tar.gz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.gz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.gz.done"
+	ssh $(STAGINGSERVER) "mkdir -p iojs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 iojs-$(FULLVERSION).tar.gz
+	scp -p iojs-$(FULLVERSION).tar.gz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.gz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.gz.done"
 ifeq ($(XZ), 0)
-	scp -p iojs-$(FULLVERSION).tar.xz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.xz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.xz.done"
+	chmod 664 iojs-$(FULLVERSION).tar.xz
+	scp -p iojs-$(FULLVERSION).tar.xz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.xz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION).tar.xz.done"
 endif
 
 doc-upload: tar
-	ssh $(STAGINGSERVER) "mkdir -p staging/$(DISTTYPEDIR)/$(FULLVERSION)"
-	scp -r out/doc/ $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/doc.done"
+	ssh $(STAGINGSERVER) "mkdir -p iojs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod -R ug=rw-x+X,o=r+X out/doc/
+	scp -pr out/doc/ $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/docs/
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/docs.done"
 
 $(TARBALL)-headers: config.gypi release-only
 	$(PYTHON) ./configure \
@@ -382,12 +409,14 @@ endif
 tar-headers: $(TARBALL)-headers
 
 tar-headers-upload: tar-headers
-	ssh $(STAGINGSERVER) "mkdir -p staging/$(DISTTYPEDIR)/$(FULLVERSION)"
-	scp -p $(TARNAME)-headers.tar.gz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz.done"
+	ssh $(STAGINGSERVER) "mkdir -p iojs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 $(TARNAME)-headers.tar.gz
+	scp -p $(TARNAME)-headers.tar.gz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz.done"
 ifeq ($(XZ), 0)
-	scp -p $(TARNAME)-headers.tar.xz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz.done"
+	chmod 664 $(TARNAME)-headers.tar.xz
+	scp -p $(TARNAME)-headers.tar.xz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz.done"
 endif
 
 $(BINARYTAR): release-only
@@ -414,12 +443,14 @@ endif
 binary: $(BINARYTAR)
 
 binary-upload: binary
-	ssh $(STAGINGSERVER) "mkdir -p staging/$(DISTTYPEDIR)/$(FULLVERSION)"
-	scp -p iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz.done"
+	ssh $(STAGINGSERVER) "mkdir -p iojs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz
+	scp -p iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz.done"
 ifeq ($(XZ), 0)
-	scp -p iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz $(STAGINGSERVER):staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz
-	ssh $(STAGINGSERVER) "touch staging/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz.done"
+	chmod 664 iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz
+	scp -p iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz $(STAGINGSERVER):iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz
+	ssh $(STAGINGSERVER) "touch iojs/$(DISTTYPEDIR)/$(FULLVERSION)/iojs-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz.done"
 endif
 
 haswrk=$(shell which wrk > /dev/null 2>&1; echo $$?)

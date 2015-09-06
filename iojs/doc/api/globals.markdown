@@ -143,8 +143,6 @@ when to use `module.exports`.
 
 See the [module system documentation][] for more information.
 
-See the [module section][] for more information.
-
 ## setTimeout(cb, ms)
 
 Run callback `cb` after *at least* `ms` milliseconds. The actual delay depends
@@ -183,7 +181,6 @@ will not execute.
 The timer functions are global variables. See the [timers][] section.
 
 [buffer section]: buffer.html
-[module section]: modules.html
 [module system documentation]: modules.html
 [Modules]: modules.html#modules_modules
 [process object]: process.html#process_process

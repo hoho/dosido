@@ -24,7 +24,7 @@ all share server ports.
       });
     } else {
       // Workers can share any TCP connection
-      // In this case its a HTTP server
+      // In this case it is an HTTP server
       http.createServer(function(req, res) {
         res.writeHead(200);
         res.end("hello world\n");
@@ -99,9 +99,10 @@ for things like sessions and login.
 Because workers are all separate processes, they can be killed or
 re-spawned depending on your program's needs, without affecting other
 workers.  As long as there are some workers still alive, the server will
-continue to accept connections.  io.js does not automatically manage the
-number of workers for you, however.  It is your responsibility to manage
-the worker pool for your application's needs.
+continue to accept connections.  If no workers are alive, existing connections
+will be dropped and new connections will be refused.  io.js does not
+automatically manage the number of workers for you, however.  It is your
+responsibility to manage the worker pool for your application's needs.
 
 ## cluster.schedulingPolicy
 
@@ -384,7 +385,7 @@ it can be obtained using `cluster.worker`.
 
 ### worker.id
 
-* {String}
+* {Number}
 
 Each new worker is given its own unique id, this id is stored in the
 `id`.

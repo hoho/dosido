@@ -36,9 +36,9 @@ set noperfctr_msi_arg=
 set i18n_arg=
 set download_arg=
 set release_urls_arg=
+set build_release=
 
 :next-arg
-set build_release=
 if "%1"=="" goto args-done
 if /i "%1"=="debug"         set config=Debug&goto arg-ok
 if /i "%1"=="release"       set config=Release&goto arg-ok
@@ -54,7 +54,7 @@ if /i "%1"=="noetw"         set noetw=1&goto arg-ok
 if /i "%1"=="noperfctr"     set noperfctr=1&goto arg-ok
 if /i "%1"=="licensertf"    set licensertf=1&goto arg-ok
 if /i "%1"=="test"          set test_args=%test_args% sequential parallel message -J&set jslint=1&goto arg-ok
-if /i "%1"=="test-ci"       set test_args=%test_args% -p tap --logfile test.tap message sequential parallel&goto arg-ok
+if /i "%1"=="test-ci"       set test_args=%test_args% %test_ci_args% -p tap --logfile test.tap message sequential parallel&goto arg-ok
 if /i "%1"=="test-simple"   set test_args=%test_args% sequential parallel -J&goto arg-ok
 if /i "%1"=="test-message"  set test_args=%test_args% message&goto arg-ok
 if /i "%1"=="test-gc"       set test_args=%test_args% gc&set buildnodeweak=1&goto arg-ok
@@ -70,6 +70,7 @@ if /i "%1"=="small-icu"     set i18n_arg=%1&goto arg-ok
 if /i "%1"=="full-icu"      set i18n_arg=%1&goto arg-ok
 if /i "%1"=="intl-none"     set i18n_arg=%1&goto arg-ok
 if /i "%1"=="download-all"  set download_arg="--download=all"&goto arg-ok
+if /i "%1"=="ignore-flaky"  set test_args=%test_args% --flaky-tests=dontcare&goto arg-ok
 
 echo Warning: ignoring invalid command line option `%1`.
 
@@ -77,8 +78,10 @@ echo Warning: ignoring invalid command line option `%1`.
 :arg-ok
 shift
 goto next-arg
+
+:args-done
+
 if defined build_release (
-  set nosnapshot=1
   set config=Release
   set msi=1
   set licensertf=1
@@ -86,8 +89,6 @@ if defined build_release (
   set i18n_arg=small-icu
 )
 
-
-:args-done
 if "%config%"=="Debug" set debug_arg=--debug
 if defined nosnapshot set snapshot_arg=--without-snapshot
 if defined noetw set noetw_arg=--without-etw& set noetw_msi_arg=/p:NoETW=1
@@ -212,11 +213,12 @@ if not defined SSHCONFIG (
   exit /b 1
 )
 if not defined STAGINGSERVER set STAGINGSERVER=iojs-www
-ssh -F %SSHCONFIG% %STAGINGSERVER% "mkdir -p staging/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%"
-scp -F %SSHCONFIG% Release\iojs.exe %STAGINGSERVER%:staging/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/iojs.exe
-scp -F %SSHCONFIG% Release\iojs.lib %STAGINGSERVER%:staging/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/iojs.lib
-scp -F %SSHCONFIG% iojs-v%FULLVERSION%-%target_arch%.msi %STAGINGSERVER%:staging/%DISTTYPEDIR%/v%FULLVERSION%/
-ssh -F %SSHCONFIG% %STAGINGSERVER% "touch staging/%DISTTYPEDIR%/v%FULLVERSION%/iojs-v%FULLVERSION%-%target_arch%.msi.done staging/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%.done"
+ssh -F %SSHCONFIG% %STAGINGSERVER% "mkdir -p iojs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%"
+scp -F %SSHCONFIG% Release\iojs.exe %STAGINGSERVER%:iojs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/iojs.exe
+scp -F %SSHCONFIG% Release\iojs.lib %STAGINGSERVER%:iojs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/iojs.lib
+scp -F %SSHCONFIG% iojs-v%FULLVERSION%-%target_arch%.msi %STAGINGSERVER%:iojs/%DISTTYPEDIR%/v%FULLVERSION%/
+ssh -F %SSHCONFIG% %STAGINGSERVER% "touch iojs/%DISTTYPEDIR%/v%FULLVERSION%/iojs-v%FULLVERSION%-%target_arch%.msi.done iojs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%.done"
+ssh -F %SSHCONFIG% %STAGINGSERVER% "chmod -R ug=rw-x+X,o=r+X iojs/%DISTTYPEDIR%/v%FULLVERSION%/iojs-v%FULLVERSION%-%target_arch%.msi* iojs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%*"
 
 :run
 @rem Run tests if requested.
@@ -259,10 +261,10 @@ echo   vcbuild.bat                : builds release build
 echo   vcbuild.bat debug          : builds debug build
 echo   vcbuild.bat release msi    : builds release build and MSI installer package
 echo   vcbuild.bat test           : builds debug build and runs tests
+echo   vcbuild.bat build-release  : builds the release distribution as used by iojs.org
 goto exit
 
 :exit
-echo   vcbuild.bat build-release  : builds the release distribution as used by nodejs.org
 goto :EOF
 
 rem ***************

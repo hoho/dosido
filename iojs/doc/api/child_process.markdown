@@ -88,7 +88,7 @@ and the `.connected` property is false.
 * `message` {Object} a parsed JSON object or primitive value
 * `sendHandle` {Handle object} a Socket or Server object
 
-Messages send by `.send(message, [sendHandle])` are obtained using the
+Messages sent by `.send(message, [sendHandle])` are obtained using the
 `message` event.
 
 ### child.stdin
@@ -314,7 +314,7 @@ socket to a "special" child process. Other sockets will go to a "normal" process
         special.send('socket', socket);
         return;
       }
-      // just the usual dudes
+      // just the usual...
       normal.send('socket', socket);
     });
     server.listen(1337);
