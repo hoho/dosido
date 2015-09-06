@@ -14,13 +14,8 @@ libiojs:
 	$(MAKE) -C iojs
 
 
-.PHONY: check-deps
-check-deps:
-	@python check-deps.py
-
-
 .PHONY: configure
-configure: check-deps
+configure:
 	if [ `uname -m` = "x86_64" ]; then export KERNEL_BITS=64; fi && cd nginx && ./auto/configure \
 		--prefix=/usr/local \
 		--conf-path=/etc/dosido/nginx.conf \
@@ -43,7 +38,7 @@ configure: check-deps
 		--with-ipv6 \
 		--with-openssl=../iojs/deps/openssl \
 		--with-pcre=../deps/pcre \
-		--with-zlib=../deps/zlib \
+		--with-zlib=../iojs/deps/zlib \
 		--with-cc-opt=-I../libiojs
 
 

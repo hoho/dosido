@@ -34,7 +34,7 @@ bash auto/configure --with-cc=cl --builddir=objs ^
 		--with-ipv6 ^
 		--with-openssl=../iojs/deps/openssl ^
 		--with-pcre=../deps/pcre ^
-		--with-zlib=../deps/zlib ^
+		--with-zlib=../iojs/deps/zlib ^
 		--with-cc-opt="-I../libiojs -DFD_SETSIZE=1024 -D_WINSOCK_DEPRECATED_NO_WARNINGS /wd4307"
 cd ..
 if /i "%1"=="configure" goto exit
