@@ -78,7 +78,7 @@ prepare-test: iojs
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
-	./iojs/iojs t/testrunner.js
+	./iojs/node t/testrunner.js
 
 
 # Remove linked nginx binary and make a new one

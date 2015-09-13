@@ -7,7 +7,7 @@ FLAVOUR=`python -c 'from os import path; import sys; \
 
 if [ $FLAVOUR = "win" ]; then
     FORCE_SYMBOLS=`python -c 'import subprocess; import re; \
-                  symbols = subprocess.Popen("dumpbin /all ../iojs/Release/lib/iojs.lib", stdout=subprocess.PIPE).stdout.read(); \
+                  symbols = subprocess.Popen("dumpbin /all ../iojs/Release/lib/node.lib", stdout=subprocess.PIPE).stdout.read(); \
                   print " ".join(map(lambda s: re.sub(r".*?(_+register_[^\s]+).*", r"/include:\1", s), filter(lambda s: s.find("_register_") >= 0, symbols.split("\n"))))'`
 
     IOJS_LIBS="/link \
@@ -15,7 +15,7 @@ if [ $FLAVOUR = "win" ]; then
 		iphlpapi.lib \
 		winmm.lib \
 		userenv.lib \
-		../iojs/Release/lib/iojs.lib \
+		../iojs/Release/lib/node.lib \
 		../iojs/Release/lib/libuv.lib \
 		../iojs/Release/lib/cares.lib \
 		../iojs/Release/lib/openssl.lib \
@@ -37,7 +37,7 @@ else
         LIBSTD_VERSION=""
     fi
 
-    IOJS_LIBS="$FORCE_LOAD_BEGIN../iojs/out/Release/libiojs.a $FORCE_LOAD_END\
+    IOJS_LIBS="$FORCE_LOAD_BEGIN../iojs/out/Release/libnode.a $FORCE_LOAD_END\
 		../iojs/out/Release/libuv.a \
 		../iojs/out/Release/libcares.a \
 		$FORCE_LOAD_BEGIN../iojs/out/Release/libopenssl.a $FORCE_LOAD_END\
