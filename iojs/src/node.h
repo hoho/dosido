@@ -42,26 +42,26 @@
 #include "v8.h"  // NOLINT(build/include_order)
 #include "node_version.h"  // NODE_MODULE_VERSION
 
-#define IOJS_MAKE_VERSION(major, minor, patch)                                \
+#define NODE_MAKE_VERSION(major, minor, patch)                                \
   ((major) * 0x1000 + (minor) * 0x100 + (patch))
 
 #ifdef __clang__
-# define IOJS_CLANG_AT_LEAST(major, minor, patch)                             \
-  (IOJS_MAKE_VERSION(major, minor, patch) <=                                  \
-      IOJS_MAKE_VERSION(__clang_major__, __clang_minor__, __clang_patchlevel__))
+# define NODE_CLANG_AT_LEAST(major, minor, patch)                             \
+  (NODE_MAKE_VERSION(major, minor, patch) <=                                  \
+      NODE_MAKE_VERSION(__clang_major__, __clang_minor__, __clang_patchlevel__))
 #else
-# define IOJS_CLANG_AT_LEAST(major, minor, patch) (0)
+# define NODE_CLANG_AT_LEAST(major, minor, patch) (0)
 #endif
 
 #ifdef __GNUC__
-# define IOJS_GNUC_AT_LEAST(major, minor, patch)                              \
-  (IOJS_MAKE_VERSION(major, minor, patch) <=                                  \
-      IOJS_MAKE_VERSION(__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__))
+# define NODE_GNUC_AT_LEAST(major, minor, patch)                              \
+  (NODE_MAKE_VERSION(major, minor, patch) <=                                  \
+      NODE_MAKE_VERSION(__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__))
 #else
-# define IOJS_GNUC_AT_LEAST(major, minor, patch) (0)
+# define NODE_GNUC_AT_LEAST(major, minor, patch) (0)
 #endif
 
-#if IOJS_CLANG_AT_LEAST(2, 9, 0) || IOJS_GNUC_AT_LEAST(4, 5, 0)
+#if NODE_CLANG_AT_LEAST(2, 9, 0) || NODE_GNUC_AT_LEAST(4, 5, 0)
 # define NODE_DEPRECATED(message, declarator)                                 \
     __attribute__((deprecated(message))) declarator
 #elif defined(_MSC_VER)
@@ -131,24 +131,24 @@ inline v8::Local<v8::Value> UVException(int errorno,
  * cb, you will appear to leak 4-bytes for every invocation. Take heed.
  */
 
-NODE_EXTERN v8::Handle<v8::Value> MakeCallback(
+NODE_EXTERN v8::Local<v8::Value> MakeCallback(
     v8::Isolate* isolate,
-    v8::Handle<v8::Object> recv,
+    v8::Local<v8::Object> recv,
     const char* method,
     int argc,
-    v8::Handle<v8::Value>* argv);
-NODE_EXTERN v8::Handle<v8::Value> MakeCallback(
+    v8::Local<v8::Value>* argv);
+NODE_EXTERN v8::Local<v8::Value> MakeCallback(
     v8::Isolate* isolate,
-    v8::Handle<v8::Object> recv,
-    v8::Handle<v8::String> symbol,
+    v8::Local<v8::Object> recv,
+    v8::Local<v8::String> symbol,
     int argc,
-    v8::Handle<v8::Value>* argv);
-NODE_EXTERN v8::Handle<v8::Value> MakeCallback(
+    v8::Local<v8::Value>* argv);
+NODE_EXTERN v8::Local<v8::Value> MakeCallback(
     v8::Isolate* isolate,
-    v8::Handle<v8::Object> recv,
-    v8::Handle<v8::Function> callback,
+    v8::Local<v8::Object> recv,
+    v8::Local<v8::Function> callback,
     int argc,
-    v8::Handle<v8::Value>* argv);
+    v8::Local<v8::Value>* argv);
 
 }  // namespace node
 
@@ -190,7 +190,7 @@ class Environment;
 
 NODE_EXTERN Environment* CreateEnvironment(v8::Isolate* isolate,
                                            struct uv_loop_s* loop,
-                                           v8::Handle<v8::Context> context,
+                                           v8::Local<v8::Context> context,
                                            int argc,
                                            const char* const* argv,
                                            int exec_argc,
@@ -201,7 +201,7 @@ NODE_EXTERN void LoadEnvironment(Environment* env);
 // CreateEnvironment() + LoadEnvironment() from above.
 // `uv_default_loop()` will be passed as `loop`.
 NODE_EXTERN Environment* CreateEnvironment(v8::Isolate* isolate,
-                                           v8::Handle<v8::Context> context,
+                                           v8::Local<v8::Context> context,
                                            int argc,
                                            const char* const* argv,
                                            int exec_argc,
@@ -249,14 +249,14 @@ inline void NODE_SET_METHOD(const TypeName& recv,
 
 // Used to be a macro, hence the uppercase name.
 // Not a template because it only makes sense for FunctionTemplates.
-inline void NODE_SET_PROTOTYPE_METHOD(v8::Handle<v8::FunctionTemplate> recv,
+inline void NODE_SET_PROTOTYPE_METHOD(v8::Local<v8::FunctionTemplate> recv,
                                       const char* name,
                                       v8::FunctionCallback callback) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
-  v8::Handle<v8::Signature> s = v8::Signature::New(isolate, recv);
+  v8::Local<v8::Signature> s = v8::Signature::New(isolate, recv);
   v8::Local<v8::FunctionTemplate> t =
-      v8::FunctionTemplate::New(isolate, callback, v8::Handle<v8::Value>(), s);
+      v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), s);
   v8::Local<v8::Function> fn = t->GetFunction();
   recv->PrototypeTemplate()->Set(v8::String::NewFromUtf8(isolate, name), fn);
   v8::Local<v8::String> fn_name = v8::String::NewFromUtf8(isolate, name);
@@ -267,11 +267,11 @@ inline void NODE_SET_PROTOTYPE_METHOD(v8::Handle<v8::FunctionTemplate> recv,
 enum encoding {ASCII, UTF8, BASE64, UCS2, BINARY, HEX, BUFFER};
 NODE_EXTERN enum encoding ParseEncoding(
     v8::Isolate* isolate,
-    v8::Handle<v8::Value> encoding_v,
+    v8::Local<v8::Value> encoding_v,
     enum encoding default_encoding = BINARY);
 NODE_DEPRECATED("Use ParseEncoding(isolate, ...)",
                 inline enum encoding ParseEncoding(
-      v8::Handle<v8::Value> encoding_v,
+      v8::Local<v8::Value> encoding_v,
       enum encoding default_encoding = BINARY) {
   return ParseEncoding(v8::Isolate::GetCurrent(), encoding_v, default_encoding);
 })
@@ -312,11 +312,11 @@ NODE_DEPRECATED("Use Encode(isolate, ...)",
 
 // Returns -1 if the handle was not valid for decoding
 NODE_EXTERN ssize_t DecodeBytes(v8::Isolate* isolate,
-                                v8::Handle<v8::Value>,
+                                v8::Local<v8::Value>,
                                 enum encoding encoding = BINARY);
 NODE_DEPRECATED("Use DecodeBytes(isolate, ...)",
                 inline ssize_t DecodeBytes(
-    v8::Handle<v8::Value> val,
+    v8::Local<v8::Value> val,
     enum encoding encoding = BINARY) {
   return DecodeBytes(v8::Isolate::GetCurrent(), val, encoding);
 })
@@ -325,12 +325,12 @@ NODE_DEPRECATED("Use DecodeBytes(isolate, ...)",
 NODE_EXTERN ssize_t DecodeWrite(v8::Isolate* isolate,
                                 char* buf,
                                 size_t buflen,
-                                v8::Handle<v8::Value>,
+                                v8::Local<v8::Value>,
                                 enum encoding encoding = BINARY);
 NODE_DEPRECATED("Use DecodeWrite(isolate, ...)",
                 inline ssize_t DecodeWrite(char* buf,
                                            size_t buflen,
-                                           v8::Handle<v8::Value> val,
+                                           v8::Local<v8::Value> val,
                                            enum encoding encoding = BINARY) {
   return DecodeWrite(v8::Isolate::GetCurrent(), buf, buflen, val, encoding);
 })
@@ -359,14 +359,14 @@ const char *signo_string(int errorno);
 
 
 typedef void (*addon_register_func)(
-    v8::Handle<v8::Object> exports,
-    v8::Handle<v8::Value> module,
+    v8::Local<v8::Object> exports,
+    v8::Local<v8::Value> module,
     void* priv);
 
 typedef void (*addon_context_register_func)(
-    v8::Handle<v8::Object> exports,
-    v8::Handle<v8::Value> module,
-    v8::Handle<v8::Context> context,
+    v8::Local<v8::Object> exports,
+    v8::Local<v8::Value> module,
+    v8::Local<v8::Context> context,
     void* priv);
 
 #define NM_F_BUILTIN 0x01

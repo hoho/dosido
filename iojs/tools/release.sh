@@ -8,7 +8,7 @@
 
 set -e
 
-webhost=direct.iojs.org
+webhost=direct.nodejs.org
 webuser=dist
 promotablecmd=dist-promotable
 promotecmd=dist-promote
@@ -80,7 +80,7 @@ function sign {
     echo "GPG key for \"${version}\" tag is not yours, cannot sign"
   fi
 
-  shapath=$(ssh ${webuser}@${webhost} $signcmd iojs $version)
+  shapath=$(ssh ${webuser}@${webhost} $signcmd nodejs $version)
 
   if ! [[ ${shapath} =~ ^/.+/SHASUMS256.txt$ ]]; then
     echo 'Error: No SHASUMS file returned by sign!'
@@ -91,7 +91,7 @@ function sign {
 
   shafile=$(basename $shapath)
   shadir=$(dirname $shapath)
-  tmpdir="/tmp/_iojs_release.$$"
+  tmpdir="/tmp/_node_release.$$"
 
   mkdir -p $tmpdir
 
@@ -144,7 +144,7 @@ fi
 
 echo -e "\n# Checking for releases ..."
 
-promotable=$(ssh ${webuser}@${webhost} $promotablecmd iojs)
+promotable=$(ssh ${webuser}@${webhost} $promotablecmd nodejs)
 
 if [ "X${promotable}" == "X" ]; then
   echo "No releases to promote!"
@@ -177,7 +177,7 @@ for version in $versions; do
 
     echo -e "\n# Promoting ${version}..."
 
-    ssh ${webuser}@${webhost} $promotecmd iojs $version
+    ssh ${webuser}@${webhost} $promotecmd nodejs $version
 
     sign $version
 

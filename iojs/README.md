@@ -1,41 +1,34 @@
 
-io.js
+Node.js
 =====
 
-[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/nodejs/io.js?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/nodejs/node?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 This repository began as a GitHub fork of
 [joyent/node](https://github.com/joyent/node).
 
-io.js contributions, releases, and contributorship are under an
+Node.js contributions, releases, and contributorship are under an
 [open governance model](./GOVERNANCE.md).
 We intend to land, with increasing regularity, releases which are
 compatible with the npm ecosystem that has been built to date for
 Node.js.
 
-## Is it io.js or IO.js or iojs or IOjs or iOjS?
-
-The official name is **io.js**, which should never be capitalized,
-especially not at the start of a sentence, unless it is being
-displayed in a location that is customarily all-caps (such as
-the title of man pages).
-
 ## Download
 
 Binaries, installers, and source tarballs are available at
-<https://iojs.org>.
+<https://nodejs.org>.
 
-**Releases** are available at <https://iojs.org/dist/>, listed under
-their version string. The <https://iojs.org/dist/latest/> symlink
+**Releases** are available at <https://nodejs.org/dist/>, listed under
+their version string. The <https://nodejs.org/dist/latest/> symlink
 will point to the latest release directory.
 
 **Nightly** builds are available at
-<https://iojs.org/download/nightly/>, listed under their version
+<https://nodejs.org/download/nightly/>, listed under their version
 string which includes their date (in UTC time) and the commit SHA at
 the HEAD of the release.
 
 **API documentation** is available in each release and nightly
-directory under _docs_. <https://iojs.org/api/> points to the latest version.
+directory under _docs_. <https://nodejs.org/api/> points to the latest version.
 
 ### Verifying Binaries
 
@@ -45,10 +38,10 @@ download. To check that a downloaded file matches the checksum, run
 it through `sha256sum` with a command such as:
 
 ```
-$ grep iojs-vx.y.z.tar.gz SHASUMS256.txt | sha256sum -c -
+$ grep node-vx.y.z.tar.gz SHASUMS256.txt | sha256sum -c -
 ```
 
-_(Where "iojs-vx.y.z.tar.gz" is the name of the file you have
+_(Where "node-vx.y.z.tar.gz" is the name of the file you have
 downloaded)_
 
 Additionally, releases (not nightlies) have GPG signed copies of
@@ -69,7 +62,7 @@ _(See the bottom of this README for a full script to import active
 release keys)_
 
 You can then use `gpg --verify SHASUMS256.txt.asc` to verify that the
-file has been signed by an authorized member of the io.js team.
+file has been signed by an authorized member of the Node.js team.
 
 Once verified, use the SHASUMS256.txt.asc file to get the checksum for
 the binary verification command above.
@@ -117,13 +110,13 @@ $ make doc
 To read the documentation:
 
 ```text
-$ man doc/iojs.1
+$ man doc/node.1
 ```
 
-To test if io.js was built correctly:
+To test if Node.js was built correctly:
 
 ```
-$ iojs -e "console.log('Hello from io.js ' + process.version)"
+$ node -e "console.log('Hello from node.js ' + process.version)"
 ```
 
 ### Windows
@@ -147,10 +140,10 @@ To run the tests:
 > vcbuild test
 ```
 
-To test if io.js was built correctly:
+To test if Node.js was built correctly:
 
 ```
-$ iojs -e "console.log('Hello from io.js ' + process.version)"
+$ node -e "console.log('Hello from node.js ' + process.version)"
 ```
 
 ### Android / Android based devices, aka. Firefox OS
@@ -263,11 +256,11 @@ as `deps/icu` (You'll have: `deps/icu/source/...`)
 > vcbuild full-icu
 ```
 
-# Building io.js with FIPS-compliant OpenSSL
+# Building Node.js with FIPS-compliant OpenSSL
 
 NOTE: Windows is not yet supported
 
-It is possible to build io.js with
+It is possible to build Node.js with
 [OpenSSL FIPS module](https://www.openssl.org/docs/fips/fipsnotes.html).
 
 **Note** that building in this way does **not** allow you to
@@ -303,13 +296,12 @@ Instructions:
    (http://csrc.nist.gov/groups/STM/cmvp/documents/140-1/140sp/140sp1747.pdf).
    The only exception is that `./config no-asm` can be
    used in place of `./config` )
-6. Get into io.js checkout folder
+6. Get into Node.js checkout folder
 7. `./configure --openssl-fips=/path/to/openssl-fips/installdir`
    For example on ubuntu 12 the installation directory was
    /usr/local/ssl/fips-2.0
-8. Build io.js with `make -j`
+8. Build Node.js with `make -j`
 9. Verify with `node -p "process.versions.openssl"` (`1.0.2a-fips`)
-
 
 ## Resources for Newcomers
 
@@ -317,12 +309,12 @@ Instructions:
 * [GOVERNANCE.md](./GOVERNANCE.md)
 * IRC:
   [#io.js on Freenode.net](http://webchat.freenode.net?channels=io.js&uio=d4)
-* [iojs/io.js on Gitter](https://gitter.im/nodejs/io.js)
+* [nodejs/node on Gitter](https://gitter.im/nodejs/node)
 
 ## Security
 
-All security bugs in io.js are taken seriously and should be reported by
-emailing security@iojs.org. This will be delivered to a subset of the project
+All security bugs in node.js are taken seriously and should be reported by
+emailing security@nodejs.org. This will be delivered to a subset of the project
 team who handle security issues. Please don't disclose security bugs
 public until they have been handled by the security team.
 
@@ -332,63 +324,63 @@ handling your report.
 
 ## Current Project Team Members
 
-The io.js project team comprises a group of core collaborators and a sub-group
+The Node.js project team comprises a group of core collaborators and a sub-group
 that forms the _Technical Steering Committee_ (TSC) which governs the project. For more
-information about the governance of the io.js project, see
+information about the governance of the Node.js project, see
 [GOVERNANCE.md](./GOVERNANCE.md).
 
 ### TSC (Technical Steering Committee)
 
-* **Ben Noordhuis** &lt;info@bnoordhuis.nl&gt; ([@bnoordhuis](https://github.com/bnoordhuis))
-* **Bert Belder** &lt;bertbelder@gmail.com&gt; ([@piscisaureus](https://github.com/piscisaureus))
-* **Fedor Indutny** &lt;fedor.indutny@gmail.com&gt; ([@indutny](https://github.com/indutny))
-* **Trevor Norris** &lt;trev.norris@gmail.com&gt; ([@trevnorris](https://github.com/trevnorris))
-* **Chris Dickinson** &lt;christopher.s.dickinson@gmail.com&gt; ([@chrisdickinson](https://github.com/chrisdickinson))
-* **Rod Vagg** &lt;rod@vagg.org&gt; ([@rvagg](https://github.com/rvagg))
-* **Jeremiah Senkpiel** &lt;fishrock123@rocketmail.com&gt; ([@fishrock123](https://github.com/fishrock123))
-* **Colin Ihrig** &lt;cjihrig@gmail.com&gt; ([@cjihrig](https://github.com/cjihrig))
-* **Alexis Campailla** &lt;orangemocha@nodejs.org&gt; ([@orangemocha](https://github.com/orangemocha))
-* **Julien Gilli** &lt;jgilli@nodejs.org&gt; ([@misterdjules](https://github.com/misterdjules))
-* **James M Snell** &lt;jasnell@gmail.com&gt; ([@jasnell](https://github.com/jasnell))
-* **Steven R Loomis** &lt;srloomis@us.ibm.com&gt; ([@srl295](https://github.com/srl295))
-* **Michael Dawson** &lt;michael_dawson@ca.ibm.com&gt; ([@mhdawson](https://github.com/mhdawson))
-* **Shigeki Ohtsu** &lt;ohtsu@iij.ad.jp&gt; ([@shigeki](https://github.com/shigeki))
-* **Brian White** &lt;mscdex@mscdex.net&gt; ([@mscdex](https://github.com/mscdex))
+* [bnoordhuis](https://github.com/bnoordhuis) - **Ben Noordhuis** &lt;info@bnoordhuis.nl&gt;
+* [chrisdickinson](https://github.com/chrisdickinson) - **Chris Dickinson** &lt;christopher.s.dickinson@gmail.com&gt;
+* [cjihrig](https://github.com/cjihrig) - **Colin Ihrig** &lt;cjihrig@gmail.com&gt;
+* [fishrock123](https://github.com/fishrock123) - **Jeremiah Senkpiel** &lt;fishrock123@rocketmail.com&gt;
+* [indutny](https://github.com/indutny) - **Fedor Indutny** &lt;fedor.indutny@gmail.com&gt;
+* [jasnell](https://github.com/jasnell) - **James M Snell** &lt;jasnell@gmail.com&gt;
+* [mhdawson](https://github.com/mhdawson) - **Michael Dawson** &lt;michael_dawson@ca.ibm.com&gt;
+* [misterdjules](https://github.com/misterdjules) - **Julien Gilli** &lt;jgilli@nodejs.org&gt;
+* [mscdex](https://github.com/mscdex) - **Brian White** &lt;mscdex@mscdex.net&gt;
+* [orangemocha](https://github.com/orangemocha) - **Alexis Campailla** &lt;orangemocha@nodejs.org&gt;
+* [piscisaureus](https://github.com/piscisaureus) - **Bert Belder** &lt;bertbelder@gmail.com&gt;
+* [rvagg](https://github.com/rvagg) - **Rod Vagg** &lt;rod@vagg.org&gt;
+* [shigeki](https://github.com/shigeki) - **Shigeki Ohtsu** &lt;ohtsu@iij.ad.jp&gt;
+* [srl295](https://github.com/srl295) - **Steven R Loomis** &lt;srloomis@us.ibm.com&gt;
+* [trevnorris](https://github.com/trevnorris) - **Trevor Norris** &lt;trev.norris@gmail.com&gt;
 
 ### Collaborators
 
-* **Isaac Z. Schlueter** &lt;i@izs.me&gt; ([@isaacs](https://github.com/isaacs))
-* **Mikeal Rogers** &lt;mikeal.rogers@gmail.com&gt; ([@mikeal](https://github.com/mikeal))
-* **Thorsten Lorenz** &lt;thlorenz@gmx.de&gt; ([@thlorenz](https://github.com/thlorenz))
-* **Stephen Belanger** &lt;admin@stephenbelanger.com&gt; ([@qard](https://github.com/qard))
-* **Evan Lucas** &lt;evanlucas@me.com&gt; ([@evanlucas](https://github.com/evanlucas))
-* **Brendan Ashworth** &lt;brendan.ashworth@me.com&gt; ([@brendanashworth](https://github.com/brendanashworth))
-* **Vladimir Kurchatkin** &lt;vladimir.kurchatkin@gmail.com&gt; ([@vkurchatkin](https://github.com/vkurchatkin))
-* **Nikolai Vavilov** &lt;vvnicholas@gmail.com&gt; ([@seishun](https://github.com/seishun))
-* **Nicu Micleușanu** &lt;micnic90@gmail.com&gt; ([@micnic](https://github.com/micnic))
-* **Aleksey Smolenchuk** &lt;lxe@lxe.co&gt; ([@lxe](https://github.com/lxe))
-* **Sam Roberts** &lt;vieuxtech@gmail.com&gt; ([@sam-github](https://github.com/sam-github))
-* **Wyatt Preul** &lt;wpreul@gmail.com&gt; ([@geek](https://github.com/geek))
-* **Christian Tellnes** &lt;christian@tellnes.no&gt; ([@tellnes](https://github.com/tellnes))
-* **Robert Kowalski** &lt;rok@kowalski.gd&gt; ([@robertkowalski](https://github.com/robertkowalski))
-* **Julian Duque** &lt;julianduquej@gmail.com&gt; ([@julianduque](https://github.com/julianduque))
-* **Johan Bergström** &lt;bugs@bergstroem.nu&gt; ([@jbergstroem](https://github.com/jbergstroem))
-* **Roman Reiss** &lt;me@silverwind.io&gt; ([@silverwind](https://github.com/silverwind))
-* **Petka Antonov** &lt;petka_antonov@hotmail.com&gt; ([@petkaantonov](https://github.com/petkaantonov))
-* **Yosuke Furukawa** &lt;yosuke.furukawa@gmail.com&gt; ([@yosuke-furukawa](https://github.com/yosuke-furukawa))
-* **Alex Kocharin** &lt;alex@kocharin.ru&gt; ([@rlidwka](https://github.com/rlidwka))
-* **Christopher Monsanto** &lt;chris@monsan.to&gt; ([@monsanto](https://github.com/monsanto))
-* **Ali Ijaz Sheikh** &lt;ofrobots@google.com&gt; ([@ofrobots](https://github.com/ofrobots))
-* **Oleg Elifantiev** &lt;oleg@elifantiev.ru&gt; ([@Olegas](https://github.com/Olegas))
-* **Domenic Denicola** &lt;d@domenic.me&gt; ([@domenic](https://github.com/domenic))
-* **Rich Trott** &lt;rtrott@gmail.com&gt; ([@Trott](https://github.com/Trott))
-* **Сковорода Никита Андреевич** &lt;chalkerx@gmail.com&gt; ([@ChALkeR](https://github.com/ChALkeR))
-* **Sakthipriyan Vairamani** &lt;thechargingvolcano@gmail.com&gt; ([@thefourtheye](https://github.com/thefourtheye))
-* **Michaël Zasso** &lt;mic.besace@gmail.com&gt; ([@targos](https://github.com/targos))
-* **João Reis** &lt;reis@janeasystems.com&gt; ([@joaocgreis](https://github.com/joaocgreis))
+* [brendanashworth](https://github.com/brendanashworth) - **Brendan Ashworth** &lt;brendan.ashworth@me.com&gt;
+* [ChALkeR](https://github.com/ChALkeR) - **Сковорода Никита Андреевич** &lt;chalkerx@gmail.com&gt;
+* [domenic](https://github.com/domenic) - **Domenic Denicola** &lt;d@domenic.me&gt;
+* [evanlucas](https://github.com/evanlucas) - **Evan Lucas** &lt;evanlucas@me.com&gt;
+* [geek](https://github.com/geek) - **Wyatt Preul** &lt;wpreul@gmail.com&gt;
+* [isaacs](https://github.com/isaacs) - **Isaac Z. Schlueter** &lt;i@izs.me&gt;
+* [jbergstroem](https://github.com/jbergstroem) - **Johan Bergström** &lt;bugs@bergstroem.nu&gt;
+* [joaocgreis](https://github.com/joaocgreis) - **João Reis** &lt;reis@janeasystems.com&gt;
+* [julianduque](https://github.com/julianduque) - **Julian Duque** &lt;julianduquej@gmail.com&gt;
+* [lxe](https://github.com/lxe) - **Aleksey Smolenchuk** &lt;lxe@lxe.co&gt;
+* [micnic](https://github.com/micnic) - **Nicu Micleușanu** &lt;micnic90@gmail.com&gt;
+* [mikeal](https://github.com/mikeal) - **Mikeal Rogers** &lt;mikeal.rogers@gmail.com&gt;
+* [monsanto](https://github.com/monsanto) - **Christopher Monsanto** &lt;chris@monsan.to&gt;
+* [ofrobots](https://github.com/ofrobots) - **Ali Ijaz Sheikh** &lt;ofrobots@google.com&gt;
+* [Olegas](https://github.com/Olegas) - **Oleg Elifantiev** &lt;oleg@elifantiev.ru&gt;
+* [petkaantonov](https://github.com/petkaantonov) - **Petka Antonov** &lt;petka_antonov@hotmail.com&gt;
+* [qard](https://github.com/qard) - **Stephen Belanger** &lt;admin@stephenbelanger.com&gt;
+* [rlidwka](https://github.com/rlidwka) - **Alex Kocharin** &lt;alex@kocharin.ru&gt;
+* [robertkowalski](https://github.com/robertkowalski) - **Robert Kowalski** &lt;rok@kowalski.gd&gt;
+* [sam-github](https://github.com/sam-github) - **Sam Roberts** &lt;vieuxtech@gmail.com&gt;
+* [seishun](https://github.com/seishun) - **Nikolai Vavilov** &lt;vvnicholas@gmail.com&gt;
+* [silverwind](https://github.com/silverwind) - **Roman Reiss** &lt;me@silverwind.io&gt;
+* [targos](https://github.com/targos) - **Michaël Zasso** &lt;mic.besace@gmail.com&gt;
+* [tellnes](https://github.com/tellnes) - **Christian Tellnes** &lt;christian@tellnes.no&gt;
+* [thefourtheye](https://github.com/thefourtheye) - **Sakthipriyan Vairamani** &lt;thechargingvolcano@gmail.com&gt;
+* [thlorenz](https://github.com/thlorenz) - **Thorsten Lorenz** &lt;thlorenz@gmx.de&gt;
+* [Trott](https://github.com/Trott) - **Rich Trott** &lt;rtrott@gmail.com&gt;
+* [vkurchatkin](https://github.com/vkurchatkin) - **Vladimir Kurchatkin** &lt;vladimir.kurchatkin@gmail.com&gt;
+* [yosuke-furukawa](https://github.com/yosuke-furukawa) - **Yosuke Furukawa** &lt;yosuke.furukawa@gmail.com&gt;
 
 Collaborators & TSC members follow the [COLLABORATOR_GUIDE.md](./COLLABORATOR_GUIDE.md) in
-maintaining the io.js project.
+maintaining the Node.js project.
 
 ### Release Team
 
@@ -421,4 +413,3 @@ keys:
 * Julien Gilli &lt;jgilli@fastmail.fm&gt; `114F43EE0176B71C7BC219DD50A3051F888C628D`
 * Timothy J Fontaine &lt;tjfontaine@gmail.com&gt; `7937DFD2AB06298B2293C3187D33FF9D0246406D`
 * Isaac Z. Schlueter &lt;i@izs.me&gt; `93C7E9E91B49E432C2F75674B0A78B0A6C481CF6`
->>>>>>> b6a4c05... doc: reorg release team to separate section

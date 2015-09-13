@@ -58,9 +58,9 @@ createPool();
 
 
 function SlowBuffer(length) {
-  if (length < 0)
+  if (+length != length)
     length = 0;
-  return binding.create(length);
+  return binding.create(+length);
 };
 
 SlowBuffer.prototype.__proto__ = Buffer.prototype;
@@ -350,10 +350,14 @@ function slowToString(encoding, start, end) {
 
 
 Buffer.prototype.toString = function() {
-  const length = this.length | 0;
-  if (arguments.length === 0)
-    return this.utf8Slice(0, length);
-  return slowToString.apply(this, arguments);
+  if (arguments.length === 0) {
+    var result = this.utf8Slice(0, this.length);
+  } else {
+    var result = slowToString.apply(this, arguments);
+  }
+  if (result === undefined)
+    throw new Error('toString failed');
+  return result;
 };
 
 

@@ -237,7 +237,7 @@ testMe.complete('cus', common.mustCall(function(error, data) {
 }));
 
 // Make sure tab completion doesn't crash REPL with half-baked proxy objects.
-// See: https://github.com/nodejs/io.js/issues/2119
+// See: https://github.com/nodejs/node/issues/2119
 putIn.run(['.clear']);
 
 putIn.run([
@@ -265,9 +265,13 @@ var array_elements = [ [
   'ary.valueOf',
   '',
   'ary.concat',
+  'ary.copyWithin',
   'ary.entries',
   'ary.every',
+  'ary.fill',
   'ary.filter',
+  'ary.find',
+  'ary.findIndex',
   'ary.forEach',
   'ary.indexOf',
   'ary.join',
