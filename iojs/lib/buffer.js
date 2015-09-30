@@ -3,6 +3,7 @@
 
 const binding = process.binding('buffer');
 const internalUtil = require('internal/util');
+const bindingObj = {};
 
 exports.Buffer = Buffer;
 exports.SlowBuffer = SlowBuffer;
@@ -14,11 +15,20 @@ Buffer.poolSize = 8 * 1024;
 var poolSize, poolOffset, allocPool;
 
 
+binding.setupBufferJS(Buffer.prototype, bindingObj);
+const flags = bindingObj.flags;
+const kNoZeroFill = 0;
+
+
 function createPool() {
   poolSize = Buffer.poolSize;
-  allocPool = binding.create(poolSize);
+  if (poolSize > 0)
+    flags[kNoZeroFill] = 1;
+  allocPool = new Uint8Array(poolSize);
+  Object.setPrototypeOf(allocPool, Buffer.prototype);
   poolOffset = 0;
 }
+createPool();
 
 
 function alignPool() {
@@ -46,39 +56,48 @@ function Buffer(arg) {
 
   // Unusual.
   return fromObject(arg);
-};
+}
 
 Buffer.prototype.__proto__ = Uint8Array.prototype;
 Buffer.__proto__ = Uint8Array;
 
 
-binding.setupBufferJS(Buffer.prototype);
-// Buffer prototype must be past before creating our first pool.
-createPool();
-
-
 function SlowBuffer(length) {
   if (+length != length)
     length = 0;
-  return binding.create(+length);
-};
+  if (length > 0)
+    flags[kNoZeroFill] = 1;
+  const ui8 = new Uint8Array(+length);
+  Object.setPrototypeOf(ui8, Buffer.prototype);
+  return ui8;
+}
 
 SlowBuffer.prototype.__proto__ = Buffer.prototype;
 SlowBuffer.__proto__ = Buffer;
 
 
 function allocate(size) {
-  if (size === 0)
-    return binding.create(0);
+  if (size === 0) {
+    const ui8 = new Uint8Array(size);
+    Object.setPrototypeOf(ui8, Buffer.prototype);
+    return ui8;
+  }
   if (size < (Buffer.poolSize >>> 1)) {
     if (size > (poolSize - poolOffset))
       createPool();
-    var b = binding.slice(allocPool, poolOffset, poolOffset + size);
+    var b = allocPool.slice(poolOffset, poolOffset + size);
     poolOffset += size;
     alignPool();
     return b;
   } else {
-    return binding.create(size);
+    // Even though this is checked above, the conditional is a safety net and
+    // sanity check to prevent any subsequent typed array allocation from not
+    // being zero filled.
+    if (size > 0)
+      flags[kNoZeroFill] = 1;
+    const ui8 = new Uint8Array(size);
+    Object.setPrototypeOf(ui8, Buffer.prototype);
+    return ui8;
   }
 }
 
@@ -94,7 +113,7 @@ function fromString(string, encoding) {
   if (length > (poolSize - poolOffset))
     createPool();
   var actual = allocPool.write(string, poolOffset, encoding);
-  var b = binding.slice(allocPool, poolOffset, poolOffset + actual);
+  var b = allocPool.slice(poolOffset, poolOffset + actual);
   poolOffset += actual;
   alignPool();
   return b;
@@ -552,30 +571,9 @@ Buffer.prototype.toJSON = function() {
 // TODO(trevnorris): currently works like Array.prototype.slice(), which
 // doesn't follow the new standard for throwing on out of range indexes.
 Buffer.prototype.slice = function slice(start, end) {
-  var len = this.length;
-  start = ~~start;
-  end = end === undefined ? len : ~~end;
-
-  if (start < 0) {
-    start += len;
-    if (start < 0)
-      start = 0;
-  } else if (start > len) {
-    start = len;
-  }
-
-  if (end < 0) {
-    end += len;
-    if (end < 0)
-      end = 0;
-  } else if (end > len) {
-    end = len;
-  }
-
-  if (end < start)
-    end = start;
-
-  return binding.slice(this, start, end);
+  const buffer = this.subarray(start, end);
+  Object.setPrototypeOf(buffer, Buffer.prototype);
+  return buffer;
 };
 
 

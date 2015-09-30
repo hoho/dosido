@@ -68,6 +68,7 @@ using v8::Object;
 using v8::Persistent;
 using v8::String;
 using v8::Uint32;
+using v8::Uint32Array;
 using v8::Uint8Array;
 using v8::Value;
 using v8::WeakCallbackData;
@@ -392,43 +393,6 @@ MaybeLocal<Object> New(Environment* env, char* data, size_t length) {
 }
 
 
-void Create(const FunctionCallbackInfo<Value>& args) {
-  Isolate* isolate = args.GetIsolate();
-  Environment* env = Environment::GetCurrent(args);
-
-  CHECK(args[0]->IsNumber());
-
-  int64_t length = args[0]->IntegerValue();
-
-  if (length < 0 || length > kMaxLength) {
-    return env->ThrowRangeError("invalid Buffer length");
-  }
-
-  void* data;
-  if (length > 0) {
-    data = malloc(length);
-    if (data == nullptr) {
-      return env->ThrowRangeError(
-          "Buffer allocation failed - process out of memory");
-    }
-  } else {
-    data = nullptr;
-  }
-
-  Local<ArrayBuffer> ab =
-      ArrayBuffer::New(isolate,
-                       data,
-                       length,
-                       ArrayBufferCreationMode::kInternalized);
-  Local<Uint8Array> ui = Uint8Array::New(ab, 0, length);
-  Maybe<bool> mb =
-      ui->SetPrototype(env->context(), env->buffer_prototype_object());
-  if (!mb.FromMaybe(false))
-    return env->ThrowError("Unable to set Object prototype");
-  args.GetReturnValue().Set(ui);
-}
-
-
 void CreateFromString(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[0]->IsString());
   CHECK(args[1]->IsString());
@@ -448,29 +412,6 @@ void CreateFromArrayBuffer(const FunctionCallbackInfo<Value>& args) {
     return env->ThrowTypeError("argument is not an ArrayBuffer");
   Local<ArrayBuffer> ab = args[0].As<ArrayBuffer>();
   Local<Uint8Array> ui = Uint8Array::New(ab, 0, ab->ByteLength());
-  Maybe<bool> mb =
-      ui->SetPrototype(env->context(), env->buffer_prototype_object());
-  if (!mb.FromMaybe(false))
-    return env->ThrowError("Unable to set Object prototype");
-  args.GetReturnValue().Set(ui);
-}
-
-
-void Slice(const FunctionCallbackInfo<Value>& args) {
-  CHECK(args[0]->IsUint8Array());
-  CHECK(args[1]->IsNumber());
-  CHECK(args[2]->IsNumber());
-  Environment* env = Environment::GetCurrent(args);
-  Local<Uint8Array> ab_ui = args[0].As<Uint8Array>();
-  Local<ArrayBuffer> ab = ab_ui->Buffer();
-  ArrayBuffer::Contents ab_c = ab->GetContents();
-  size_t offset = ab_ui->ByteOffset();
-  size_t start = args[1]->NumberValue() + offset;
-  size_t end = args[2]->NumberValue() + offset;
-  CHECK_GE(end, start);
-  size_t size = end - start;
-  CHECK_GE(ab_c.ByteLength(), start + size);
-  Local<Uint8Array> ui = Uint8Array::New(ab, start, size);
   Maybe<bool> mb =
       ui->SetPrototype(env->context(), env->buffer_prototype_object());
   if (!mb.FromMaybe(false))
@@ -989,6 +930,19 @@ void SetupBufferJS(const FunctionCallbackInfo<Value>& args) {
   env->SetMethod(proto, "utf8Write", Utf8Write);
 
   env->SetMethod(proto, "copy", Copy);
+
+  CHECK(args[1]->IsObject());
+  Local<Object> bObj = args[1].As<Object>();
+
+  uint32_t* const fields = env->array_buffer_allocator_info()->fields();
+  uint32_t const fields_count =
+      env->array_buffer_allocator_info()->fields_count();
+
+  Local<ArrayBuffer> array_buffer =
+      ArrayBuffer::New(env->isolate(), fields, sizeof(*fields) * fields_count);
+
+  bObj->Set(String::NewFromUtf8(env->isolate(), "flags"),
+            Uint32Array::New(array_buffer, 0, fields_count));
 }
 
 
@@ -998,11 +952,9 @@ void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
 
   env->SetMethod(target, "setupBufferJS", SetupBufferJS);
-  env->SetMethod(target, "create", Create);
   env->SetMethod(target, "createFromString", CreateFromString);
   env->SetMethod(target, "createFromArrayBuffer", CreateFromArrayBuffer);
 
-  env->SetMethod(target, "slice", Slice);
   env->SetMethod(target, "byteLengthUtf8", ByteLengthUtf8);
   env->SetMethod(target, "compare", Compare);
   env->SetMethod(target, "fill", Fill);

@@ -46,7 +46,7 @@ you are listening on both events to fire a function, remember to guard against
 calling your function twice.
 
 See also [`ChildProcess#kill()`](#child_process_child_kill_signal) and
-[`ChildProcess#send()`](#child_process_child_send_message_sendhandle).
+[`ChildProcess#send()`](#child_process_child_send_message_sendhandle_callback).
 
 ### Event:  'exit'
 
@@ -85,8 +85,9 @@ and the `.connected` property is false.
 
 ### Event: 'message'
 
-* `message` {Object} a parsed JSON object or primitive value
-* `sendHandle` {Handle object} a Socket or Server object
+* `message` {Object} a parsed JSON object or primitive value.
+* `sendHandle` {Handle object} a [net.Socket][] or [net.Server][] object, or
+  undefined.
 
 Messages sent by `.send(message, [sendHandle])` are obtained using the
 `message` event.
@@ -365,7 +366,8 @@ callback or returning an EventEmitter).
   * `env` {Object} Environment key-value pairs
   * `stdio` {Array|String} Child's stdio configuration. (See
     [below](#child_process_options_stdio))
-  * `detached` {Boolean} The child will be a process group leader.  (See
+  * `detached` {Boolean} Prepare child to run independently of its parent
+    process. Specific behavior depends on the platform, see
     [below](#child_process_options_detached))
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
@@ -504,9 +506,14 @@ Example:
 
 #### options.detached
 
-If the `detached` option is set, the child process will be made the leader of a
-new process group.  This makes it possible for the child to continue running
-after the parent exits.
+On Windows, this makes it possible for the child to continue running after the
+parent exits. The child will have a new console window (this cannot be
+disabled).
+
+On non-Windows, if the `detached` option is set, the child process will be made
+the leader of a new process group and session. Note that child processes may
+continue running after the parent exits whether they are detached or not.  See
+`setsid(2)` for more information.
 
 By default, the parent will wait for the detached child to exit.  To prevent
 the parent from waiting for a given `child`, use the `child.unref()` method,
@@ -760,3 +767,5 @@ throw.  The `Error` object will contain the entire result from
 [`child_process.spawnSync`](#child_process_child_process_spawnsync_command_args_options)
 
 [EventEmitter]: events.html#events_class_events_eventemitter
+[net.Server]: net.html#net_class_net_server
+[net.Socket]: net.html#net_class_net_socket

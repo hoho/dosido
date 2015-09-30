@@ -402,7 +402,9 @@ static inline const char *errno_string(int errorno) {
 #endif
 
 #ifdef ENOTEMPTY
+# if ENOTEMPTY != EEXIST
   ERRNO_CASE(ENOTEMPTY);
+# endif
 #endif
 
 #ifdef ENOTSOCK
@@ -625,7 +627,9 @@ const char *signo_string(int signo) {
 #endif
 
 #ifdef SIGLOST
+# if SIGLOST != SIGABRT
   SIGNO_CASE(SIGLOST);
+# endif
 #endif
 
 #ifdef SIGPWR
@@ -890,6 +894,14 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
 #endif
 
 
+void* ArrayBufferAllocator::Allocate(size_t size) {
+  if (env_ == nullptr || !env_->array_buffer_allocator_info()->no_zero_fill())
+    return calloc(size, 1);
+  env_->array_buffer_allocator_info()->reset_fill_flag();
+  return malloc(size);
+}
+
+
 void SetupDomainUse(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
@@ -906,7 +918,7 @@ void SetupDomainUse(const FunctionCallbackInfo<Value>& args) {
 
   if (!tick_callback_function->IsFunction()) {
     fprintf(stderr, "process._tickDomainCallback assigned to non-function\n");
-    abort();
+    ABORT();
   }
 
   process_object->Set(env->tick_callback_string(), tick_callback_function);
@@ -1514,7 +1526,7 @@ void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
 
 
 static void Abort(const FunctionCallbackInfo<Value>& args) {
-  abort();
+  ABORT();
 }
 
 
@@ -2087,12 +2099,15 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
     return;
   }
   if (mp->nm_version != NODE_MODULE_VERSION) {
-    uv_dlclose(&lib);
     char errmsg[1024];
     snprintf(errmsg,
              sizeof(errmsg),
              "Module version mismatch. Expected %d, got %d.",
              NODE_MODULE_VERSION, mp->nm_version);
+
+    // NOTE: `mp` is allocated inside of the shared library's memory, calling
+    // `uv_dlclose` will deallocate it
+    uv_dlclose(&lib);
     env->ThrowError(errmsg);
     return;
   }
@@ -2131,14 +2146,14 @@ static void OnFatalError(const char* location, const char* message) {
     fprintf(stderr, "FATAL ERROR: %s\n", message);
   }
   fflush(stderr);
-  abort();
+  ABORT();
 }
 
 
 NO_RETURN void FatalError(const char* location, const char* message) {
   OnFatalError(location, message);
   // to suppress compiler warning
-  abort();
+  ABORT();
 }
 
 
@@ -2177,7 +2192,11 @@ void FatalException(Isolate* isolate,
 
   if (false == caught->BooleanValue()) {
     ReportException(env, error, message);
-    exit(1);
+    if (abort_on_uncaught_exception) {
+      ABORT();
+    } else {
+      exit(1);
+    }
   }
 }
 
@@ -3540,9 +3559,9 @@ inline void PlatformInit() {
     // Anything but EBADF means something is seriously wrong.  We don't
     // have to special-case EINTR, fstat() is not interruptible.
     if (errno != EBADF)
-      abort();
+      ABORT();
     if (fd != open("/dev/null", O_RDWR))
-      abort();
+      ABORT();
   }
 
   CHECK_EQ(err, 0);
@@ -3563,10 +3582,6 @@ inline void PlatformInit() {
 
   RegisterSignalHandler(SIGINT, SignalExit, true);
   RegisterSignalHandler(SIGTERM, SignalExit, true);
-
-  // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
-  // performance penalty of frequent EINTR wakeups when the profiler is running.
-  uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
 
   // Raise the open file descriptor limit.
   struct rlimit lim;
@@ -3632,6 +3647,15 @@ void Init(int* argc,
     }
   }
 
+#ifdef __POSIX__
+  // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
+  // performance penalty of frequent EINTR wakeups when the profiler is running.
+  // Only do this for v8.log profiling, as it breaks v8::CpuProfiler users.
+  if (v8_is_profiling) {
+    uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
+  }
+#endif
+
 #if defined(NODE_HAVE_I18N_SUPPORT)
   if (icu_data_dir == nullptr) {
     // if the parameter isn't given, use the env variable.
@@ -3664,6 +3688,12 @@ void Init(int* argc,
     const char expose_debug_as[] = "--expose_debug_as=v8debug";
     V8::SetFlagsFromString(expose_debug_as, sizeof(expose_debug_as) - 1);
   }
+
+  // Unconditionally force typed arrays to allocate outside the v8 heap. This
+  // is to prevent memory pointers from being moved around that are returned by
+  // Buffer::Data().
+  const char no_typed_array_heap[] = "--typed_array_max_size_in_heap=0";
+  V8::SetFlagsFromString(no_typed_array_heap, sizeof(no_typed_array_heap) - 1);
 
   if (!use_debug_agent) {
     RegisterDebugSignalHandler();
@@ -3867,8 +3897,8 @@ Environment* CreateEnvironment(Isolate* isolate,
 static void StartNodeInstance(void* arg) {
   NodeInstanceData* instance_data = static_cast<NodeInstanceData*>(arg);
   Isolate::CreateParams params;
-  ArrayBufferAllocator array_buffer_allocator;
-  params.array_buffer_allocator = &array_buffer_allocator;
+  ArrayBufferAllocator* array_buffer_allocator = new ArrayBufferAllocator();
+  params.array_buffer_allocator = array_buffer_allocator;
   Isolate* isolate = Isolate::New(params);
   if (track_heap_objects) {
     isolate->GetHeapProfiler()->StartTrackingHeapObjects(true);
@@ -3884,6 +3914,7 @@ static void StartNodeInstance(void* arg) {
     HandleScope handle_scope(isolate);
     Local<Context> context = Context::New(isolate);
     Environment* env = CreateEnvironment(isolate, context, instance_data);
+    array_buffer_allocator->set_env(env);
     Context::Scope context_scope(context);
     if (instance_data->is_main())
       env->set_using_abort_on_uncaught_exc(abort_on_uncaught_exception);
@@ -3930,6 +3961,7 @@ static void StartNodeInstance(void* arg) {
     __lsan_do_leak_check();
 #endif
 
+    array_buffer_allocator->set_env(nullptr);
     env->Dispose();
     env = nullptr;
   }
@@ -3937,6 +3969,7 @@ static void StartNodeInstance(void* arg) {
   CHECK_NE(isolate, nullptr);
   isolate->Dispose();
   isolate = nullptr;
+  delete array_buffer_allocator;
   if (instance_data->is_main())
     node_isolate = nullptr;
 }

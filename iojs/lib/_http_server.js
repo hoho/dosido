@@ -2,7 +2,7 @@
 
 const util = require('util');
 const net = require('net');
-const EventEmitter = require('events').EventEmitter;
+const EventEmitter = require('events');
 const HTTPParser = process.binding('http_parser').HTTPParser;
 const assert = require('assert').ok;
 const common = require('_http_common');
@@ -117,7 +117,8 @@ function onServerResponseClose() {
   // array. That is, in the example below, b still gets called even though
   // it's been removed by a:
   //
-  //   var obj = new events.EventEmitter;
+  //   var EventEmitter = require('events');
+  //   var obj = new EventEmitter();
   //   obj.on('event', a);
   //   obj.on('event', b);
   //   function a() { obj.removeListener('event', b) }
@@ -512,11 +513,13 @@ function connectionListener(socket) {
 exports._connectionListener = connectionListener;
 
 function onSocketResume() {
-  this._handle.readStart();
+  if (this._handle)
+    this._handle.readStart();
 }
 
 function onSocketPause() {
-  this._handle.readStop();
+  if (this._handle)
+    this._handle.readStop();
 }
 
 function socketOnWrap(ev, fn) {
@@ -526,7 +529,7 @@ function socketOnWrap(ev, fn) {
     return res;
   }
 
-  if (ev === 'data' || ev === 'readable')
+  if (this._handle && (ev === 'data' || ev === 'readable'))
     this.parser.unconsume(this._handle._externalStream);
 
   return res;
