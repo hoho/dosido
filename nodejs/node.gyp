@@ -82,7 +82,7 @@
       'variables': {
         'library_files': [
           'lib/_third_party_main.js',
-          '../libiojs/libiojs.js',
+          '../libnodejs/libnodejs.js',
         ]
       },
     }]
@@ -207,13 +207,13 @@
         # No node_main.cc for anything except executable
         [ 'node_target_type!="executable"', {
           'include_dirs': [
-            '../libiojs',
+            '../libnodejs',
           ],
           'sources': [
-            '../libiojs/node.cc',
-            '../libiojs/libiojs.cc',
-            '../libiojs/libiojs.h',
-            '../libiojs/libiojsExports.h',
+            '../libnodejs/node.cc',
+            '../libnodejs/libnodejs.cc',
+            '../libnodejs/libnodejs.h',
+            '../libnodejs/libnodejsExports.h',
           ],
           'sources!': [
             'src/node.cc',

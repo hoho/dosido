@@ -2,7 +2,7 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 
 var testServer = spawn(
-    './iojs/iojs',
+    './nodejs/node',
     ['./t/testserver.js', './t/testrunner.json'],
     {stdio: 'inherit', env: process.env}
 );
