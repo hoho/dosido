@@ -2,11 +2,11 @@
  * Copyright Marat Abdullin (https://github.com/hoho)
  */
 
-#ifndef __LIBIOJS_H__
-#define __LIBIOJS_H__
+#ifndef __LIBNODEJS_H__
+#define __LIBNODEJS_H__
 
 
-#include <libiojsExports.h>
+#include <libnodejsExports.h>
 
 
 typedef enum {
@@ -17,84 +17,84 @@ typedef enum {
     FROM_JS_BEGIN_SUBREQUEST,
     FROM_JS_SUBREQUEST_DONE,
     FROM_JS_LOG
-} iojsFromJSCommandType;
+} nodejsFromJSCommandType;
 
 
 typedef struct {
     char        *filename;
     size_t       len;
     int          index;
-} iojsJS;
+} nodejsJS;
 
 
 typedef struct {
-    iojsJS      *js;
+    nodejsJS      *js;
     size_t       len;
-} iojsJSArray;
+} nodejsJSArray;
 
 
 // Should be the same to ngx_str_t structure.
 typedef struct {
     size_t                  len;
     char                   *data;
-} iojsString;
+} nodejsString;
 
 
-typedef int64_t (*iojsAtomicFetchAdd)(int64_t *value, int64_t add);
-typedef void (*iojsFreeFunc)(void *data);
-typedef void (*iojsLogger)(unsigned level, const char *fmt, ...);
+typedef int64_t (*nodejsAtomicFetchAdd)(int64_t *value, int64_t add);
+typedef void (*nodejsFreeFunc)(void *data);
+typedef void (*nodejsLogger)(unsigned level, const char *fmt, ...);
 
 
-typedef struct _iojsContext iojsContext;
-struct _iojsContext {
-    void                   *r;
-    unsigned                refused:1;
-    size_t                  wait;
-    int64_t                 refCount;
-    iojsAtomicFetchAdd      afa;
-    void                   *_p; // To hold a persistent handle of destroy
-                                // indicator.
-    void                   *jsCallback;
-    void                   *jsSubrequestCallback;
-    iojsContext            *rootCtx;
+typedef struct _nodejsContext nodejsContext;
+struct _nodejsContext {
+    void                     *r;
+    unsigned                  refused:1;
+    size_t                    wait;
+    int64_t                   refCount;
+    nodejsAtomicFetchAdd      afa;
+    void                     *_p; // To hold a persistent handle of destroy
+                                  // indicator.
+    void                     *jsCallback;
+    void                     *jsSubrequestCallback;
+    nodejsContext            *rootCtx;
 };
 
 
 typedef struct {
-    iojsFromJSCommandType   type;
-    iojsContext            *jsCtx;
-    void                   *data;
-    iojsFreeFunc            free;
-    void                   *jsCallback;
-} iojsFromJS;
+    nodejsFromJSCommandType   type;
+    nodejsContext            *jsCtx;
+    void                     *data;
+    nodejsFreeFunc            free;
+    void                     *jsCallback;
+} nodejsFromJS;
 
 
 typedef struct {
-    iojsString     *strings;
-    unsigned long   len;
-    int64_t         statusCode;
-    iojsString      statusMessage;
-} iojsHeaders;
+    nodejsString     *strings;
+    unsigned long     len;
+    int64_t           statusCode;
+    nodejsString      statusMessage;
+} nodejsHeaders;
 
 
 typedef struct {
-    iojsString      url;
-    iojsString      method;
-    iojsString      body;
-    iojsHeaders     headers;
-} iojsSubrequest;
+    nodejsString      url;
+    nodejsString      method;
+    nodejsString      body;
+    nodejsHeaders     headers;
+} nodejsSubrequest;
 
 
 // Should match with the level from ngx_log.h.
-#define IOJS_LOG_STDERR            0
-#define IOJS_LOG_EMERG             1
-#define IOJS_LOG_ALERT             2
-#define IOJS_LOG_CRIT              3
-#define IOJS_LOG_ERR               4
-#define IOJS_LOG_WARN              5
-#define IOJS_LOG_NOTICE            6
-#define IOJS_LOG_INFO              7
-#define IOJS_LOG_DEBUG             8
+#define NODEJS_LOG_STDERR            0
+#define NODEJS_LOG_EMERG             1
+#define NODEJS_LOG_ALERT             2
+#define NODEJS_LOG_CRIT              3
+#define NODEJS_LOG_ERR               4
+#define NODEJS_LOG_WARN              5
+#define NODEJS_LOG_NOTICE            6
+#define NODEJS_LOG_INFO              7
+#define NODEJS_LOG_DEBUG             8
 
 
 #ifdef __cplusplus
@@ -102,35 +102,37 @@ extern "C" {
 #endif
 
 
-LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsStart                (iojsLogger logger,
-                                  iojsJSArray *scripts, int *fd);
+LIBNODEJSPUBFUN int LIBNODEJSCALL
+        nodejsStart                (nodejsLogger logger,
+                                    nodejsJSArray *scripts, int *fd);
 
-LIBIOJSPUBFUN iojsFromJS* LIBIOJSCALL
-        iojsFromJSRecv           (void);
-LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsFromJSFree           (iojsFromJS *cmd);
+LIBNODEJSPUBFUN nodejsFromJS* LIBNODEJSCALL
+        nodejsFromJSRecv           (void);
+LIBNODEJSPUBFUN void LIBNODEJSCALL
+        nodejsFromJSFree           (nodejsFromJS *cmd);
 
-LIBIOJSPUBFUN iojsContext * LIBIOJSCALL
-        iojsContextCreate        (void *r, iojsContext *rootCtx,
-                                  iojsAtomicFetchAdd afa);
-LIBIOJSPUBFUN void LIBIOJSCALL
-        iojsContextAttemptFree   (iojsContext *jsCtx);
+LIBNODEJSPUBFUN nodejsContext * LIBNODEJSCALL
+        nodejsContextCreate        (void *r, nodejsContext *rootCtx,
+                                    nodejsAtomicFetchAdd afa);
+LIBNODEJSPUBFUN void LIBNODEJSCALL
+        nodejsContextAttemptFree   (nodejsContext *jsCtx);
 
-LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsCall                 (int index, iojsContext *jsCtx,
-                                  iojsString *method, iojsString *uri,
-                                  iojsString *httpProtocol,
-                                  iojsString **headers, iojsString **params);
-LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsChunk                (iojsContext *jsCtx, char *data, size_t len,
-                                  unsigned last, unsigned sr);
-LIBIOJSPUBFUN int LIBIOJSCALL
-        iojsSubrequestHeaders    (iojsContext *jsCtx, int status,
-                                  iojsString *statusMsg, iojsString **headers);
+LIBNODEJSPUBFUN int LIBNODEJSCALL
+        nodejsCall                 (int index, nodejsContext *jsCtx,
+                                    nodejsString *method, nodejsString *uri,
+                                    nodejsString *httpProtocol,
+                                    nodejsString **headers,
+                                    nodejsString **params);
+LIBNODEJSPUBFUN int LIBNODEJSCALL
+        nodejsChunk                (nodejsContext *jsCtx, char *data,
+                                    size_t len, unsigned last, unsigned sr);
+LIBNODEJSPUBFUN int LIBNODEJSCALL
+        nodejsSubrequestHeaders    (nodejsContext *jsCtx, int status,
+                                    nodejsString *statusMsg,
+                                    nodejsString **headers);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __LIBIOJS_H__ */
+#endif /* __LIBNODEJS_H__ */

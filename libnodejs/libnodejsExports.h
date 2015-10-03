@@ -7,12 +7,12 @@
  * Author: Igor Zlatkovic <igor@zlatkovic.com>
  */
 
-#ifndef __LIBIOJS_EXPORTS_H__
-#define __LIBIOJS_EXPORTS_H__
+#ifndef __LIBNODEJS_EXPORTS_H__
+#define __LIBNODEJS_EXPORTS_H__
 
 /**
- * LIBIOJSPUBFUN:
- * LIBIOJSPUBFUN, LIBIOJSPUBVAR, LIBIOJSCALL
+ * LIBNODEJSPUBFUN:
+ * LIBNODEJSPUBFUN, LIBNODEJSPUBVAR, LIBNODEJSCALL
  *
  * Macros which declare an exportable function, an exportable variable and
  * the calling convention used for functions.
@@ -24,43 +24,43 @@
  */
 
 /**
- * LIBIOJSPUBFUN:
+ * LIBNODEJSPUBFUN:
  *
  * Macros which declare an exportable function
  */
-#define LIBIOJSPUBFUN
+#define LIBNODEJSPUBFUN
 /**
- * LIBIOJSPUBVAR:
+ * LIBNODEJSPUBVAR:
  *
  * Macros which declare an exportable variable
  */
-#define LIBIOJSPUBVAR extern
+#define LIBNODEJSPUBVAR extern
 /**
- * LIBIOJSCALL:
+ * LIBNODEJSCALL:
  *
  * Macros which declare the called convention for exported functions
  */
-#define LIBIOJSCALL
+#define LIBNODEJSCALL
 
 /** DOC_DISABLE */
 
 /* Windows platform with MS compiler */
 #if defined(_WIN32) && defined(_MSC_VER)
-  #undef LIBIOJSPUBFUN
-  #undef LIBIOJSPUBVAR
-  #undef LIBIOJSCALL
-  #if defined(IN_LIBLIBIOJS) && !defined(LIBLIBIOJS_STATIC)
-    #define LIBIOJSPUBFUN __declspec(dllexport)
-    #define LIBIOJSPUBVAR __declspec(dllexport)
+  #undef LIBNODEJSPUBFUN
+  #undef LIBNODEJSPUBVAR
+  #undef LIBNODEJSCALL
+  #if defined(IN_LIBLIBNODEJS) && !defined(LIBLIBNODEJS_STATIC)
+    #define LIBNODEJSPUBFUN __declspec(dllexport)
+    #define LIBNODEJSPUBVAR __declspec(dllexport)
   #else
-    #define LIBIOJSPUBFUN
-    #if !defined(LIBLIBIOJS_STATIC)
-      #define LIBIOJSPUBVAR __declspec(dllimport) extern
+    #define LIBNODEJSPUBFUN
+    #if !defined(LIBLIBNODEJS_STATIC)
+      #define LIBNODEJSPUBVAR __declspec(dllimport) extern
     #else
-      #define LIBIOJSPUBVAR extern
+      #define LIBNODEJSPUBVAR extern
     #endif
   #endif
-  #define LIBIOJSCALL __cdecl
+  #define LIBNODEJSCALL __cdecl
   #if !defined _REENTRANT
     #define _REENTRANT
   #endif
@@ -68,21 +68,21 @@
 
 /* Windows platform with Borland compiler */
 #if defined(_WIN32) && defined(__BORLANDC__)
-  #undef LIBIOJSPUBFUN
-  #undef LIBIOJSPUBVAR
-  #undef LIBIOJSCALL
-  #if defined(IN_LIBLIBIOJS) && !defined(LIBLIBIOJS_STATIC)
-    #define LIBIOJSPUBFUN __declspec(dllexport)
-    #define LIBIOJSPUBVAR __declspec(dllexport) extern
+  #undef LIBNODEJSPUBFUN
+  #undef LIBNODEJSPUBVAR
+  #undef LIBNODEJSCALL
+  #if defined(IN_LIBLIBNODEJS) && !defined(LIBLIBNODEJS_STATIC)
+    #define LIBNODEJSPUBFUN __declspec(dllexport)
+    #define LIBNODEJSPUBVAR __declspec(dllexport) extern
   #else
-    #define LIBIOJSPUBFUN
-    #if !defined(LIBLIBIOJS_STATIC)
-      #define LIBIOJSPUBVAR __declspec(dllimport) extern
+    #define LIBNODEJSPUBFUN
+    #if !defined(LIBLIBNODEJS_STATIC)
+      #define LIBNODEJSPUBVAR __declspec(dllimport) extern
     #else
-      #define LIBIOJSPUBVAR extern
+      #define LIBNODEJSPUBVAR extern
     #endif
   #endif
-  #define LIBIOJSCALL __cdecl
+  #define LIBNODEJSCALL __cdecl
   #if !defined _REENTRANT
     #define _REENTRANT
   #endif
@@ -90,24 +90,24 @@
 
 /* Windows platform with GNU compiler (Mingw) */
 #if defined(_WIN32) && defined(__MINGW32__)
-  #undef LIBIOJSPUBFUN
-  #undef LIBIOJSPUBVAR
-  #undef LIBIOJSCALL
+  #undef LIBNODEJSPUBFUN
+  #undef LIBNODEJSPUBVAR
+  #undef LIBNODEJSCALL
 /*
-  #if defined(IN_LIBLIBIOJS) && !defined(LIBLIBIOJS_STATIC)
+  #if defined(IN_LIBLIBNODEJS) && !defined(LIBLIBNODEJS_STATIC)
 */
-  #if !defined(LIBLIBIOJS_STATIC)
-    #define LIBIOJSPUBFUN __declspec(dllexport)
-    #define LIBIOJSPUBVAR __declspec(dllexport) extern
+  #if !defined(LIBLIBNODEJS_STATIC)
+    #define LIBNODEJSPUBFUN __declspec(dllexport)
+    #define LIBNODEJSPUBVAR __declspec(dllexport) extern
   #else
-    #define LIBIOJSPUBFUN
-    #if !defined(LIBLIBIOJS_STATIC)
-      #define LIBIOJSPUBVAR __declspec(dllimport) extern
+    #define LIBNODEJSPUBFUN
+    #if !defined(LIBLIBNODEJS_STATIC)
+      #define LIBNODEJSPUBVAR __declspec(dllimport) extern
     #else
-      #define LIBIOJSPUBVAR extern
+      #define LIBNODEJSPUBVAR extern
     #endif
   #endif
-  #define LIBIOJSCALL __cdecl
+  #define LIBNODEJSCALL __cdecl
   #if !defined _REENTRANT
     #define _REENTRANT
   #endif
@@ -115,26 +115,26 @@
 
 /* Cygwin platform, GNU compiler */
 #if defined(_WIN32) && defined(__CYGWIN__)
-  #undef LIBIOJSPUBFUN
-  #undef LIBIOJSPUBVAR
-  #undef LIBIOJSCALL
-  #if defined(IN_LIBLIBIOJS) && !defined(LIBLIBIOJS_STATIC)
-    #define LIBIOJSPUBFUN __declspec(dllexport)
-    #define LIBIOJSPUBVAR __declspec(dllexport)
+  #undef LIBNODEJSPUBFUN
+  #undef LIBNODEJSPUBVAR
+  #undef LIBNODEJSCALL
+  #if defined(IN_LIBLIBNODEJS) && !defined(LIBLIBNODEJS_STATIC)
+    #define LIBNODEJSPUBFUN __declspec(dllexport)
+    #define LIBNODEJSPUBVAR __declspec(dllexport)
   #else
-    #define LIBIOJSPUBFUN
-    #if !defined(LIBLIBIOJS_STATIC)
-      #define LIBIOJSPUBVAR __declspec(dllimport) extern
+    #define LIBNODEJSPUBFUN
+    #if !defined(LIBLIBNODEJS_STATIC)
+      #define LIBNODEJSPUBVAR __declspec(dllimport) extern
     #else
-      #define LIBIOJSPUBVAR
+      #define LIBNODEJSPUBVAR
     #endif
   #endif
-  #define LIBIOJSCALL __cdecl
+  #define LIBNODEJSCALL __cdecl
 #endif
 
 /* Compatibility */
-#if !defined(LIBLIBIOJS_PUBLIC)
-#define LIBLIBIOJS_PUBLIC LIBIOJSPUBVAR
+#if !defined(LIBLIBNODEJS_PUBLIC)
+#define LIBLIBNODEJS_PUBLIC LIBNODEJSPUBVAR
 #endif
 
-#endif /* __LIBIOJS_EXPORTS_H__ */
+#endif /* __LIBNODEJS_EXPORTS_H__ */

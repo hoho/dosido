@@ -1,5 +1,5 @@
 #include "node.h"
-#include "libiojsInternals.h"
+#include "libnodejsInternals.h"
 #include "node_buffer.h"
 #include "node_constants.h"
 #include "node_file.h"
@@ -86,7 +86,7 @@ extern char **environ;
 // XXX: Temporarily redefine fprintf to avoid replacing it all over.
 // TODO: Try to fix it in io.js by adding a customizable logger method.
 #define LOG_BUFFER_LEN 1024 * 16
-static iojsLogger iojsLoggerFunc = NULL;
+static nodejsLogger nodejsLoggerFunc = NULL;
 static int logfprintf(FILE *stream, const char *fmt, ...)
 {
   va_list  args;
@@ -96,12 +96,12 @@ static int logfprintf(FILE *stream, const char *fmt, ...)
   va_start (args, fmt);
   sz = vsnprintf(buffer, LOG_BUFFER_LEN, fmt, args);
 
-  if (iojsLoggerFunc != NULL) {
+  if (nodejsLoggerFunc != NULL) {
     if (sz > 0 && sz < LOG_BUFFER_LEN && buffer[sz - 1] == '\n') {
       // nginx logger will add its own line break.
       buffer[sz - 1] = 0;
     }
-    iojsLoggerFunc(IOJS_LOG_ERR, buffer);
+    nodejsLoggerFunc(NODEJS_LOG_ERR, buffer);
   } else {
     fputs(buffer, stream);
   }
@@ -110,8 +110,8 @@ static int logfprintf(FILE *stream, const char *fmt, ...)
   return sz;
 }
 #define fprintf logfprintf
-void iojsInitLogger(iojsLogger logger) {
-  iojsLoggerFunc = logger;
+void nodejsInitLogger(nodejsLogger logger) {
+  nodejsLoggerFunc = logger;
 }
 
 
@@ -3960,7 +3960,7 @@ static void StartNodeInstance(void* arg) {
 
     env->set_trace_sync_io(trace_sync_io);
 
-    if (iojsLoadScripts(env, ExecuteString, ReportException))
+    if (nodejsLoadScripts(env, ExecuteString, ReportException))
       goto done;
 
     // Enable debugger
@@ -3988,7 +3988,7 @@ static void StartNodeInstance(void* arg) {
     }
 
 done:
-    iojsUnloadScripts();
+    nodejsUnloadScripts();
 
     env->set_trace_sync_io(false);
 

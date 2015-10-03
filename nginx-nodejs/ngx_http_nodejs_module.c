@@ -8,7 +8,7 @@
 #include <ngx_string.h>
 #include <ngx_array.h>
 
-#include <libiojs.h>
+#include <libnodejs.h>
 #include <string.h>
 
 #define DDEBUG 1
@@ -18,15 +18,15 @@
 typedef struct {
     ngx_str_t                  name;
     ngx_http_complex_value_t   value;
-} ngx_http_iojs_param_t;
+} ngx_http_nodejs_param_t;
 
 
 typedef struct {
     ngx_str_t                  js;
     int                        js_index;
-    ngx_array_t               *params;       /* ngx_http_iojs_param_t */
+    ngx_array_t               *params;       /* ngx_http_nodejs_param_t */
     ngx_str_t                  root;
-} ngx_http_iojs_loc_conf_t;
+} ngx_http_nodejs_loc_conf_t;
 
 
 static ngx_log_t                *jsLogger = NULL;
@@ -36,34 +36,34 @@ static ngx_str_t                 jsArgs = ngx_null_string;
 static ngx_array_t               jsLocations;
 
 
-static ngx_int_t   ngx_http_iojs_init          (ngx_cycle_t *cycle);
-static void        ngx_http_iojs_free          (ngx_cycle_t *cycle);
-static ngx_int_t   ngx_http_iojs_preconf       (ngx_conf_t *cf);
-static ngx_int_t   ngx_http_iojs_postconf      (ngx_conf_t *cf);
+static ngx_int_t   ngx_http_nodejs_init          (ngx_cycle_t *cycle);
+static void        ngx_http_nodejs_free          (ngx_cycle_t *cycle);
+static ngx_int_t   ngx_http_nodejs_preconf       (ngx_conf_t *cf);
+static ngx_int_t   ngx_http_nodejs_postconf      (ngx_conf_t *cf);
 
-static char       *ngx_http_iojs               (ngx_conf_t *cf,
-                                                ngx_command_t *cmd, void *conf);
-static char       *ngx_http_iojs_param         (ngx_conf_t *cf,
-                                                ngx_command_t *cmd, void *conf);
-static char       *ngx_http_iojs_root          (ngx_conf_t *cf,
-                                                ngx_command_t *cmd, void *conf);
-static char       *ngx_http_iojs_args          (ngx_conf_t *cf,
-                                                ngx_command_t *cmd, void *conf);
+static char       *ngx_http_nodejs               (ngx_conf_t *cf,
+                                                  ngx_command_t *cmd, void *conf);
+static char       *ngx_http_nodejs_param         (ngx_conf_t *cf,
+                                                  ngx_command_t *cmd, void *conf);
+static char       *ngx_http_nodejs_root          (ngx_conf_t *cf,
+                                                  ngx_command_t *cmd, void *conf);
+static char       *ngx_http_nodejs_args          (ngx_conf_t *cf,
+                                                  ngx_command_t *cmd, void *conf);
 
-static void       *ngx_http_iojs_create_conf   (ngx_conf_t *cf);
-static char       *ngx_http_iojs_merge_conf    (ngx_conf_t *cf, void *parent,
-                                                void *child);
+static void       *ngx_http_nodejs_create_conf   (ngx_conf_t *cf);
+static char       *ngx_http_nodejs_merge_conf    (ngx_conf_t *cf, void *parent,
+                                                  void *child);
 
 
 ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 
-static ngx_command_t ngx_http_iojs_commands[] = {
+static ngx_command_t ngx_http_nodejs_commands[] = {
     { ngx_string("js_param"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF
                          | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE2,
-      ngx_http_iojs_param,
+      ngx_http_nodejs_param,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -71,21 +71,21 @@ static ngx_command_t ngx_http_iojs_commands[] = {
     { ngx_string("js_root"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF
                          | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE1,
-      ngx_http_iojs_root,
+      ngx_http_nodejs_root,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
 
     { ngx_string("js_args"),
       NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
-      ngx_http_iojs_args,
+      ngx_http_nodejs_args,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       NULL },
 
     { ngx_string("js_pass"),
       NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE1,
-      ngx_http_iojs,
+      ngx_http_nodejs,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -93,9 +93,9 @@ static ngx_command_t ngx_http_iojs_commands[] = {
 };
 
 
-ngx_http_module_t ngx_http_iojs_module_ctx = {
-    ngx_http_iojs_preconf,            /*  preconfiguration */
-    ngx_http_iojs_postconf,           /*  postconfiguration */
+ngx_http_module_t ngx_http_nodejs_module_ctx = {
+    ngx_http_nodejs_preconf,          /*  preconfiguration */
+    ngx_http_nodejs_postconf,         /*  postconfiguration */
 
     NULL,                             /*  create main configuration */
     NULL,                             /*  init main configuration */
@@ -103,30 +103,30 @@ ngx_http_module_t ngx_http_iojs_module_ctx = {
     NULL,                             /*  create server configuration */
     NULL,                             /*  merge server configuration */
 
-    ngx_http_iojs_create_conf,        /*  create location configuration */
-    ngx_http_iojs_merge_conf          /*  merge location configuration */
+    ngx_http_nodejs_create_conf,      /*  create location configuration */
+    ngx_http_nodejs_merge_conf        /*  merge location configuration */
 };
 
 
-ngx_module_t ngx_http_iojs_module = {
+ngx_module_t ngx_http_nodejs_module = {
     NGX_MODULE_V1,
-    &ngx_http_iojs_module_ctx,  /*  module context */
-    ngx_http_iojs_commands,     /*  module directives */
-    NGX_HTTP_MODULE,            /*  module type */
-    NULL,                       /*  init master */
-    NULL,                       /*  init module */
-    ngx_http_iojs_init,         /*  init process */
-    NULL,                       /*  init thread */
-    NULL,                       /*  exit thread */
-    ngx_http_iojs_free,         /*  exit process */
-    NULL,                       /*  exit master */
+    &ngx_http_nodejs_module_ctx,  /*  module context */
+    ngx_http_nodejs_commands,     /*  module directives */
+    NGX_HTTP_MODULE,              /*  module type */
+    NULL,                         /*  init master */
+    NULL,                         /*  init module */
+    ngx_http_nodejs_init,         /*  init process */
+    NULL,                         /*  init thread */
+    NULL,                         /*  exit thread */
+    ngx_http_nodejs_free,         /*  exit process */
+    NULL,                         /*  exit master */
     NGX_MODULE_V1_PADDING
 };
 
 
-typedef struct ngx_http_iojs_ctx_s ngx_http_iojs_ctx_t;
-struct ngx_http_iojs_ctx_s {
-    iojsContext          *js_ctx;
+typedef struct ngx_http_nodejs_ctx_s ngx_http_nodejs_ctx_t;
+struct ngx_http_nodejs_ctx_s {
+    nodejsContext        *js_ctx;
     unsigned              skip_filter:1;
     unsigned              headers_sent:1;
     unsigned              refused:1;
@@ -140,7 +140,7 @@ static int64_t ngx_atomic_fetch_add_wrap(int64_t *value, int64_t add)
 
 
 static void
-ngx_http_iojs_log(unsigned level, const char *fmt, ...)
+ngx_http_nodejs_log(unsigned level, const char *fmt, ...)
 {
     va_list  args;
 
@@ -153,25 +153,25 @@ ngx_http_iojs_log(unsigned level, const char *fmt, ...)
 
 
 static void
-ngx_http_iojs_cleanup_context(void *data)
+ngx_http_nodejs_cleanup_context(void *data)
 {
     dd("context cleanup (%p)", data);
-    iojsContextAttemptFree((iojsContext *)data);
+    nodejsContextAttemptFree((nodejsContext *)data);
 }
 
 
-ngx_inline static ngx_http_iojs_ctx_t *
-ngx_http_iojs_create_ctx(ngx_http_request_t *r)
+ngx_inline static ngx_http_nodejs_ctx_t *
+ngx_http_nodejs_create_ctx(ngx_http_request_t *r)
 {
-    ngx_http_iojs_ctx_t       *ctx;
-    ngx_http_iojs_ctx_t       *main_ctx;
-    iojsContext               *js_ctx;
-    ngx_pool_cleanup_t        *cln;
+    ngx_http_nodejs_ctx_t       *ctx;
+    ngx_http_nodejs_ctx_t       *main_ctx;
+    nodejsContext               *js_ctx;
+    ngx_pool_cleanup_t          *cln;
 
-    main_ctx = ngx_http_get_module_ctx(r->main, ngx_http_iojs_module);
+    main_ctx = ngx_http_get_module_ctx(r->main, ngx_http_nodejs_module);
 
     // ngx_pcalloc() does ngx_memzero() too.
-    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_iojs_ctx_t));
+    ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_nodejs_ctx_t));
 
     if (ctx == NULL) {
         return NULL;
@@ -184,12 +184,12 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
     dd("context creation");
 
-    js_ctx = iojsContextCreate(r,
-                               main_ctx == NULL ? NULL : main_ctx->js_ctx,
-                               ngx_atomic_fetch_add_wrap);
+    js_ctx = nodejsContextCreate(r,
+                                 main_ctx == NULL ? NULL : main_ctx->js_ctx,
+                                 ngx_atomic_fetch_add_wrap);
     if (js_ctx == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "Failed to create iojs context");
+                      "Failed to create nodejs context");
         return NULL;
     }
 
@@ -197,12 +197,12 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
     ctx->js_ctx = js_ctx;
 
-    cln->handler = ngx_http_iojs_cleanup_context;
+    cln->handler = ngx_http_nodejs_cleanup_context;
     cln->data = js_ctx;
 
     if (main_ctx == NULL) {
         // This would be the new root js context, store it in the main request.
-        ngx_http_set_ctx(r->main, ctx, ngx_http_iojs_module);
+        ngx_http_set_ctx(r->main, ctx, ngx_http_nodejs_module);
     }
 
     return ctx;
@@ -210,15 +210,15 @@ ngx_http_iojs_create_ctx(ngx_http_request_t *r)
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
+ngx_http_nodejs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
                          unsigned last)
 {
-    ngx_buf_t                      *b;
-    ngx_chain_t                     out;
-    ngx_int_t                       rc;
-    ngx_http_iojs_ctx_t            *ctx;
-    ngx_http_postponed_request_t   *pr;
-    ngx_http_request_t             *cr;
+    ngx_buf_t                        *b;
+    ngx_chain_t                       out;
+    ngx_int_t                         rc;
+    ngx_http_nodejs_ctx_t            *ctx;
+    ngx_http_postponed_request_t     *pr;
+    ngx_http_request_t               *cr;
 
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t) + len);
     if (b == NULL) {
@@ -245,7 +245,7 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
     dd("Sending response chunk (len: %zd, last: %d)", len, last);
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_nodejs_module);
 
     if (ctx == NULL || ctx->skip_filter ||
         (r->postponed == NULL && r->connection->data == r))
@@ -276,13 +276,13 @@ ngx_http_iojs_send_chunk(ngx_http_request_t *r, char *data, size_t len,
 
 
 static void
-ngx_http_iojs_read_request_body(ngx_http_request_t *r)
+ngx_http_nodejs_read_request_body(ngx_http_request_t *r)
 {
-    ngx_http_iojs_ctx_t  *ctx;
-    ngx_chain_t          *cl;
-    ngx_int_t             rc;
+    ngx_http_nodejs_ctx_t    *ctx;
+    ngx_chain_t              *cl;
+    ngx_int_t                 rc;
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_nodejs_module);
     if (ctx == NULL) {
         ngx_http_finalize_request(r, NGX_ERROR);
         return;
@@ -291,16 +291,16 @@ ngx_http_iojs_read_request_body(ngx_http_request_t *r)
     dd("Read request body (r: %p)", r);
 
     if (r->request_body == NULL || r->request_body->bufs == NULL) {
-        rc = iojsChunk(ctx->js_ctx, NULL, 0, 1, 0);
+        rc = nodejsChunk(ctx->js_ctx, NULL, 0, 1, 0);
         if (rc)
             goto error;
     } else {
         for (cl = r->request_body->bufs; cl; cl = cl->next) {
-            rc = iojsChunk(ctx->js_ctx,
-                           (char *)cl->buf->pos,
-                           cl->buf->last - cl->buf->pos,
-                           cl->buf->last_buf,
-                           0);
+            rc = nodejsChunk(ctx->js_ctx,
+                             (char *)cl->buf->pos,
+                             cl->buf->last - cl->buf->pos,
+                             cl->buf->last_buf,
+                             0);
             if (rc)
                 goto error;
 
@@ -317,7 +317,8 @@ error:
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_set_response_meta(ngx_http_request_t *r, iojsHeaders *headers)
+ngx_http_nodejs_set_response_meta(ngx_http_request_t *r,
+                                  nodejsHeaders *headers)
 {
     r->headers_out.status = (ngx_uint_t)headers->statusCode;
 
@@ -332,7 +333,7 @@ ngx_http_iojs_set_response_meta(ngx_http_request_t *r, iojsHeaders *headers)
 
 
 ngx_inline static ngx_table_elt_t *
-ngx_http_iojs_find_header(ngx_list_t *list, ngx_str_t *key)
+ngx_http_nodejs_find_header(ngx_list_t *list, ngx_str_t *key)
 {
     ngx_table_elt_t             *h;
     ngx_list_part_t             *part;
@@ -367,16 +368,16 @@ ngx_http_iojs_find_header(ngx_list_t *list, ngx_str_t *key)
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
-                           iojsHeaders *headers)
+ngx_http_nodejs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
+                             nodejsHeaders *headers)
 {
     size_t            len = headers->len;
-    iojsString       *arr = headers->strings;
+    nodejsString     *arr = headers->strings;
     size_t            i;
     ngx_table_elt_t  *h;
 
     for (i = 0; i < len; i += 2) {
-        h = ngx_http_iojs_find_header(list, (ngx_str_t *)&arr[i]);
+        h = ngx_http_nodejs_find_header(list, (ngx_str_t *)&arr[i]);
 
         if (h == NULL) {
             h = ngx_list_push(list);
@@ -399,9 +400,9 @@ ngx_http_iojs_push_headers(ngx_pool_t *pool, ngx_list_t *list,
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
-                                      iojsHeaders *headers,
-                                      off_t len)
+ngx_http_nodejs_init_subrequest_headers(ngx_http_request_t *sr,
+                                        nodejsHeaders *headers,
+                                        off_t len)
 {
     memset(&sr->headers_in, 0, sizeof(ngx_http_headers_in_t));
 
@@ -413,22 +414,24 @@ ngx_http_iojs_init_subrequest_headers(ngx_http_request_t *sr,
         return NGX_ERROR;
     }
 
-    return ngx_http_iojs_push_headers(sr->pool,
-                                      &sr->headers_in.headers,
-                                      headers);
+    return ngx_http_nodejs_push_headers(sr->pool,
+                                        &sr->headers_in.headers,
+                                        headers);
 }
 
 
 static ngx_int_t
-ngx_http_iojs_subrequest_done(ngx_http_request_t *sr, void *data, ngx_int_t rc)
+ngx_http_nodejs_subrequest_done(ngx_http_request_t *sr,
+                                void *data, ngx_int_t rc)
 {
-    dd("post subrequest %ld (%p, %.*s)", rc, sr, (int)sr->uri.len, sr->uri.data);
+    dd("post subrequest %ld (%p, %.*s)",
+       rc, sr, (int)sr->uri.len, sr->uri.data);
 
     if (sr != sr->connection->data)
         sr->connection->data = sr;
 
     if (rc == NGX_OK) {
-        if (iojsChunk(((ngx_http_iojs_ctx_t *)data)->js_ctx, NULL, 0, 1, 1))
+        if (nodejsChunk(((ngx_http_nodejs_ctx_t *)data)->js_ctx, NULL, 0, 1, 1))
             return NGX_ERROR;
     }
 
@@ -437,10 +440,10 @@ ngx_http_iojs_subrequest_done(ngx_http_request_t *sr, void *data, ngx_int_t rc)
 
 
 static ngx_int_t
-ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
+ngx_http_nodejs_subrequest(ngx_http_request_t *r, nodejsFromJS *cmd)
 {
-    iojsSubrequest                 *data;
-    ngx_http_iojs_ctx_t            *sr_ctx;
+    nodejsSubrequest               *data;
+    ngx_http_nodejs_ctx_t          *sr_ctx;
     ngx_http_request_t             *sr;
     ngx_http_post_subrequest_t     *psr;
     ngx_http_request_body_t        *rb;
@@ -452,7 +455,7 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
     ngx_str_t                       sr_body;
     ngx_http_postponed_request_t   *pr;
 
-    data = (iojsSubrequest *)cmd->data;
+    data = (nodejsSubrequest *)cmd->data;
     if (data == NULL) {
         return NGX_ERROR;
     }
@@ -462,7 +465,7 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
         return NGX_ERROR;
     }
 
-    psr->handler = ngx_http_iojs_subrequest_done;
+    psr->handler = ngx_http_nodejs_subrequest_done;
 
     sr_uri.len = data->url.len;
     sr_uri.data = ngx_pstrdup(r->pool, (ngx_str_t *)&data->url);
@@ -519,20 +522,20 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
 
     sr->method = NGX_HTTP_GET;
 
-    if (ngx_http_iojs_init_subrequest_headers(sr,
-                                              &data->headers,
-                                              sr_body.len) == NGX_ERROR)
+    if (ngx_http_nodejs_init_subrequest_headers(sr,
+                                                &data->headers,
+                                                sr_body.len) == NGX_ERROR)
     {
         return NGX_ERROR;
     }
 
-    sr_ctx = ngx_http_iojs_create_ctx(sr);
+    sr_ctx = ngx_http_nodejs_create_ctx(sr);
 
     if (sr_ctx == NULL) {
         return NGX_ERROR;
     }
 
-    ngx_http_set_ctx(sr, sr_ctx, ngx_http_iojs_module);
+    ngx_http_set_ctx(sr, sr_ctx, ngx_http_nodejs_module);
 
     psr->data = sr_ctx;
 
@@ -577,16 +580,16 @@ ngx_http_iojs_subrequest(ngx_http_request_t *r, iojsFromJS *cmd)
 
 
 static void
-ngx_http_iojs_receive(ngx_event_t *ev)
+ngx_http_nodejs_receive(ngx_event_t *ev)
 {
     // Something is available to read.
-    iojsFromJS *cmd;
+    nodejsFromJS   *cmd;
 
-    cmd = iojsFromJSRecv();
+    cmd = nodejsFromJSRecv();
     if (cmd != NULL) {
-        ngx_int_t            rc;
-        iojsContext         *js_ctx = cmd->jsCtx;
-        ngx_http_request_t  *r = js_ctx == NULL ?
+        ngx_int_t              rc;
+        nodejsContext         *js_ctx = cmd->jsCtx;
+        ngx_http_request_t    *r = js_ctx == NULL ?
                 NULL
                 :
                 (ngx_http_request_t *)js_ctx->r;
@@ -606,7 +609,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     break;
 
                 rc = ngx_http_read_client_request_body(
-                    r, ngx_http_iojs_read_request_body
+                    r, ngx_http_nodejs_read_request_body
                 );
 
                 if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
@@ -622,12 +625,12 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 dd("Sending response headers");
 
-                rc = ngx_http_iojs_set_response_meta(r, cmd->data);
+                rc = ngx_http_nodejs_set_response_meta(r, cmd->data);
 
                 if (rc == NGX_OK) {
-                    rc = ngx_http_iojs_push_headers(r->pool,
-                                                    &r->headers_out.headers,
-                                                    cmd->data);
+                    rc = ngx_http_nodejs_push_headers(r->pool,
+                                                      &r->headers_out.headers,
+                                                      cmd->data);
                 }
 
                 if (rc != NGX_OK || (ngx_http_send_header(r) != NGX_OK)) {
@@ -642,11 +645,11 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                     break;
 
                 if (cmd->data) {
-                    iojsString  *s = (iojsString *)cmd->data;
-                    ngx_http_iojs_send_chunk(r, s->data, s->len, 0);
+                    nodejsString  *s = (nodejsString *)cmd->data;
+                    ngx_http_nodejs_send_chunk(r, s->data, s->len, 0);
                 } else {
                     // Got end of the response mark.
-                    // This one is for r->main->count++ in ngx_http_iojs_handler.
+                    // This one is for r->main->count++ in ngx_http_nodejs_handler.
                     r->main->count--;
 
                     js_ctx->wait--;
@@ -654,14 +657,14 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                     if (r != r->main && js_ctx->wait == 0) {
                         // Finalize the request.
-                        ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                        ngx_http_nodejs_send_chunk(r, NULL, 0, 1);
                         r->connection->data = r;
                         ngx_http_finalize_request(r, NGX_OK);
                     }
 
                     if (r->main->count == 1 && js_ctx->rootCtx->wait == 0) {
                         // No subrequests left, finalize the main request.
-                        ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
+                        ngx_http_nodejs_send_chunk(r->main, NULL, 0, 1);
                         ngx_http_finalize_request(r->main, NGX_DONE);
                     }
                 }
@@ -672,7 +675,7 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 if (js_ctx == NULL || js_ctx->wait == 0)
                     break;
 
-                if (ngx_http_iojs_subrequest(r, cmd) == NGX_ERROR) {
+                if (ngx_http_nodejs_subrequest(r, cmd) == NGX_ERROR) {
                     ngx_http_finalize_request(r, NGX_ERROR);
                     return;
                 }
@@ -691,14 +694,14 @@ ngx_http_iojs_receive(ngx_event_t *ev)
 
                 if (r != r->main && js_ctx->wait == 0) {
                     // Finalize the request.
-                    ngx_http_iojs_send_chunk(r, NULL, 0, 1);
+                    ngx_http_nodejs_send_chunk(r, NULL, 0, 1);
                     r->connection->data = r;
                     ngx_http_finalize_request(r, NGX_OK);
                 }
 
                 if (r->main->count == 1 && js_ctx->rootCtx->wait == 0) {
                     // No subrequests left, finalize the main request.
-                    ngx_http_iojs_send_chunk(r->main, NULL, 0, 1);
+                    ngx_http_nodejs_send_chunk(r->main, NULL, 0, 1);
                     ngx_http_finalize_request(r->main, NGX_DONE);
                 }
 
@@ -708,32 +711,32 @@ ngx_http_iojs_receive(ngx_event_t *ev)
                 break;
         }
 
-        iojsFromJSFree(cmd);
+        nodejsFromJSFree(cmd);
     }
 }
 
 
 static ngx_int_t
-ngx_http_iojs_init(ngx_cycle_t *cycle)
+ngx_http_nodejs_init(ngx_cycle_t *cycle)
 {
     dd("start");
 
-    ngx_uint_t                 i;
-    ngx_http_iojs_loc_conf_t **pxlcf = jsLocations.elts;
-    ngx_http_iojs_loc_conf_t  *xlcf;
-    ngx_str_t                 *filename;
-    iojsJS                    *scripts;
-    iojsJS                    *script;
+    ngx_uint_t                   i;
+    ngx_http_nodejs_loc_conf_t **pxlcf = jsLocations.elts;
+    ngx_http_nodejs_loc_conf_t  *xlcf;
+    ngx_str_t                   *filename;
+    nodejsJS                    *scripts;
+    nodejsJS                    *script;
     int                       fd = -1;
     int                       rc;
 
     if (jsLocations.nelts <= 0) {
-        dd("no scripts, do not start iojs");
+        dd("no scripts, do not start nodejs");
         return NGX_OK;
     }
 
-    scripts = (iojsJS *)ngx_palloc(cycle->pool,
-                                   sizeof(iojsJS) * jsLocations.nelts);
+    scripts = (nodejsJS *)ngx_palloc(cycle->pool,
+                                     sizeof(nodejsJS) * jsLocations.nelts);
     if (scripts == NULL) {
         return NGX_ERROR;
     }
@@ -762,18 +765,18 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
         script->index = i;
     }
 
-    iojsJSArray s;
+    nodejsJSArray s;
     s.js = scripts;
     s.len = jsLocations.nelts;
     jsLogger = cycle->log;
-    rc = iojsStart(ngx_http_iojs_log, &s, &fd);
+    rc = nodejsStart(ngx_http_nodejs_log, &s, &fd);
 
     ngx_array_destroy(&jsLocations);
     ngx_pfree(cycle->pool, scripts);
 
     if (rc) {
         ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
-                      "Failed to start iojs (%d)", rc);
+                      "Failed to start nodejs (%d)", rc);
         return NGX_ERROR;
     }
 
@@ -789,7 +792,7 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
     jsPipe.write = jsPipe.read = &jsPipeEv;
 
     jsPipeEv.data = &jsPipe;
-    jsPipeEv.handler = ngx_http_iojs_receive;
+    jsPipeEv.handler = ngx_http_nodejs_receive;
     jsPipeEv.log = cycle->log;
     jsPipeEv.index = NGX_INVALID_INDEX;
 
@@ -801,32 +804,32 @@ ngx_http_iojs_init(ngx_cycle_t *cycle)
 
 
 static void
-ngx_http_iojs_free(ngx_cycle_t *cycle)
+ngx_http_nodejs_free(ngx_cycle_t *cycle)
 {
     dd("stop");
     jsLogger = NULL;
-    //iojsFree();
+    //nodejsFree();
 }
 
 
 static ngx_int_t
-ngx_http_iojs_preconf(ngx_conf_t *cf)
+ngx_http_nodejs_preconf(ngx_conf_t *cf)
 {
     dd("preconfiguration");
     return ngx_array_init(&jsLocations, cf->pool, 1,
-                          sizeof(ngx_http_iojs_loc_conf_t*));
+                          sizeof(ngx_http_nodejs_loc_conf_t*));
 }
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_process_headers(ngx_http_request_t *r, ngx_http_iojs_ctx_t *ctx)
+ngx_http_nodejs_process_headers(ngx_http_request_t *r, ngx_http_nodejs_ctx_t *ctx)
 {
     return NGX_OK;
 }
 
 
 ngx_inline static ngx_int_t
-ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned out,
+ngx_http_nodejs_aggregate_headers(ngx_http_request_t *r, unsigned out,
                                 ngx_str_t ***ret)
 {
     ngx_uint_t                 len;
@@ -886,14 +889,14 @@ ngx_http_iojs_aggregate_headers(ngx_http_request_t *r, unsigned out,
 
 
 static ngx_int_t
-ngx_http_iojs_header_filter(ngx_http_request_t *r)
+ngx_http_nodejs_header_filter(ngx_http_request_t *r)
 {
-    ngx_http_iojs_ctx_t         *ctx;
+    ngx_http_nodejs_ctx_t       *ctx;
     ngx_str_t                  **headers;
     ngx_int_t                    rc;
     ngx_http_request_t          *mr;
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_nodejs_module);
 
     // Temporary dirty hack to force ngx_http_headers_filter() to run for a
     // subrequest.
@@ -906,12 +909,12 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
     if (ctx != NULL && !ctx->skip_filter) {
         dd("header filter (%p, %.*s)", r, (int)r->uri.len, r->uri.data);
 
-        if (ngx_http_iojs_aggregate_headers(r, 1, &headers) != NGX_OK)
+        if (ngx_http_nodejs_aggregate_headers(r, 1, &headers) != NGX_OK)
             return NGX_ERROR;
 
-        if (iojsSubrequestHeaders(ctx->js_ctx, r->headers_out.status,
-                                  (iojsString *)&r->headers_out.status_line,
-                                  (iojsString **)headers))
+        if (nodejsSubrequestHeaders(ctx->js_ctx, r->headers_out.status,
+                                    (nodejsString *)&r->headers_out.status_line,
+                                    (nodejsString **)headers))
             return NGX_ERROR;
     }
 
@@ -920,26 +923,26 @@ ngx_http_iojs_header_filter(ngx_http_request_t *r)
 
 
 static ngx_int_t
-ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+ngx_http_nodejs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
-    ngx_http_iojs_ctx_t  *ctx;
-    ngx_chain_t          *cl;
-    ngx_int_t             rc;
+    ngx_http_nodejs_ctx_t  *ctx;
+    ngx_chain_t            *cl;
+    ngx_int_t               rc;
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_nodejs_module);
 
     if (ctx == NULL || ctx->skip_filter) {
         return ngx_http_next_body_filter(r, in);
     }
 
-    // It's a subrequest response body. Eating it up and passing to iojs.
+    // It's a subrequest response body. Eating it up and passing to nodejs.
     for (cl = in; cl; cl = cl->next) {
         if (!ctx->refused && cl->buf->pos != NULL) {
-            rc = iojsChunk(ctx->js_ctx,
-                           (char *)cl->buf->pos,
-                           cl->buf->last - cl->buf->pos,
-                           0,
-                           1);
+            rc = nodejsChunk(ctx->js_ctx,
+                             (char *)cl->buf->pos,
+                             cl->buf->last - cl->buf->pos,
+                             0,
+                             1);
             if (rc)
                 return NGX_ERROR;
         }
@@ -953,59 +956,59 @@ ngx_http_iojs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 
 static ngx_int_t
-ngx_http_iojs_postconf(ngx_conf_t *cf)
+ngx_http_nodejs_postconf(ngx_conf_t *cf)
 {
     dd("postconfiguration");
 
     ngx_http_next_header_filter = ngx_http_top_header_filter;
-    ngx_http_top_header_filter = ngx_http_iojs_header_filter;
+    ngx_http_top_header_filter = ngx_http_nodejs_header_filter;
 
     ngx_http_next_body_filter = ngx_http_top_body_filter;
-    ngx_http_top_body_filter = ngx_http_iojs_body_filter;
+    ngx_http_top_body_filter = ngx_http_nodejs_body_filter;
 
     return NGX_OK;
 }
 
 
 static void
-ngx_http_iojs_cleanup_request(void *data)
+ngx_http_nodejs_cleanup_request(void *data)
 {
     dd("request cleanup");
 }
 
 
 static ngx_int_t
-ngx_http_iojs_handler(ngx_http_request_t *r) {
-    ngx_http_iojs_ctx_t       *ctx;
-    ngx_http_iojs_loc_conf_t  *conf;
-    ngx_pool_cleanup_t        *cln;
-    ngx_int_t                  rc;
-    ngx_http_iojs_param_t     *params;
-    ngx_uint_t                 len;
-    ngx_uint_t                 i;
-    ngx_uint_t                 j;
-    ngx_str_t                 *param;
-    ngx_str_t                **iojs_params;
-    ngx_str_t                **iojs_headers;
+ngx_http_nodejs_handler(ngx_http_request_t *r) {
+    ngx_http_nodejs_ctx_t       *ctx;
+    ngx_http_nodejs_loc_conf_t  *conf;
+    ngx_pool_cleanup_t          *cln;
+    ngx_int_t                    rc;
+    ngx_http_nodejs_param_t     *params;
+    ngx_uint_t                   len;
+    ngx_uint_t                   i;
+    ngx_uint_t                   j;
+    ngx_str_t                   *param;
+    ngx_str_t                  **nodejs_params;
+    ngx_str_t                  **nodejs_headers;
 
     dd("begin (r: %p, main: %p)", r, r->main);
 
-    conf = ngx_http_get_module_loc_conf(r, ngx_http_iojs_module);
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_nodejs_module);
     if (conf == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    ctx = ngx_http_get_module_ctx(r, ngx_http_iojs_module);
+    ctx = ngx_http_get_module_ctx(r, ngx_http_nodejs_module);
 
     if (ctx == NULL) {
-        ctx = ngx_http_iojs_create_ctx(r);
+        ctx = ngx_http_nodejs_create_ctx(r);
         if (ctx == NULL) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
         ctx->skip_filter = 1;
 
-        ngx_http_set_ctx(r, ctx, ngx_http_iojs_module);
+        ngx_http_set_ctx(r, ctx, ngx_http_nodejs_module);
     } else {
         ctx->skip_filter = 0;
     }
@@ -1015,15 +1018,15 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     if (len > 0) {
         // Allocate memory for a NULL-terminated list of pointers to names
         // and values and for the values.
-        iojs_params = ngx_palloc(r->pool,
-                                 sizeof(ngx_str_t *) * (len * 2 + 1) +
-                                 sizeof(ngx_str_t) * len);
+        nodejs_params = ngx_palloc(r->pool,
+                                   sizeof(ngx_str_t *) * (len * 2 + 1) +
+                                   sizeof(ngx_str_t) * len);
 
-        if (iojs_params == NULL)
+        if (nodejs_params == NULL)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
         params = conf->params->elts;
-        param = (ngx_str_t *)&iojs_params[len * 2 + 1];
+        param = (ngx_str_t *)&nodejs_params[len * 2 + 1];
         j = 0;
 
         for (i = 0; i < len; i++) {
@@ -1034,19 +1037,19 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
             if (param->len > 0 && param->data[param->len - 1] == 0)
                 param->len--;
 
-            iojs_params[j++] = &params[i].name;
-            iojs_params[j++] = param;
+            nodejs_params[j++] = &params[i].name;
+            nodejs_params[j++] = param;
 
             param = (ngx_str_t *)(((char *)param) + sizeof(ngx_str_t));
         }
 
         // NULL-terminate.
-        iojs_params[j] = NULL;
+        nodejs_params[j] = NULL;
     } else {
-        iojs_params = NULL;
+        nodejs_params = NULL;
     }
 
-    if (ngx_http_iojs_aggregate_headers(r, 0, &iojs_headers) != NGX_OK)
+    if (ngx_http_nodejs_aggregate_headers(r, 0, &nodejs_headers) != NGX_OK)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
 
     r->headers_out.status = NGX_HTTP_OK;
@@ -1056,10 +1059,10 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    cln->handler = ngx_http_iojs_cleanup_request;
+    cln->handler = ngx_http_nodejs_cleanup_request;
     cln->data = ctx;
 
-    rc = ngx_http_iojs_process_headers(r, ctx);
+    rc = ngx_http_nodejs_process_headers(r, ctx);
     if (rc == NGX_ERROR) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
@@ -1068,12 +1071,12 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
     ctx->js_ctx->wait++;
     ctx->js_ctx->rootCtx->wait++;
 
-    rc = iojsCall(conf->js_index, ctx->js_ctx,
-                  (iojsString *)&r->method_name,
-                  (iojsString *)&r->unparsed_uri,
-                  (iojsString *)&r->http_protocol,
-                  (iojsString **)iojs_headers,
-                  (iojsString **)iojs_params);
+    rc = nodejsCall(conf->js_index, ctx->js_ctx,
+                    (nodejsString *)&r->method_name,
+                    (nodejsString *)&r->unparsed_uri,
+                    (nodejsString *)&r->http_protocol,
+                    (nodejsString **)nodejs_headers,
+                    (nodejsString **)nodejs_params);
     if (rc) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
@@ -1083,16 +1086,16 @@ ngx_http_iojs_handler(ngx_http_request_t *r) {
 
 
 static char *
-ngx_http_iojs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
-    ngx_http_iojs_loc_conf_t  *xlcf = conf;
-    ngx_http_core_loc_conf_t  *clcf;
-    ngx_str_t                 *value;
-    ngx_http_iojs_loc_conf_t **pxlcf;
+ngx_http_nodejs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    ngx_http_nodejs_loc_conf_t    *xlcf = conf;
+    ngx_http_core_loc_conf_t      *clcf;
+    ngx_str_t                     *value;
+    ngx_http_nodejs_loc_conf_t   **pxlcf;
 
     value = cf->args->elts;
 
     if (xlcf->js.data) {
-        ngx_conf_log_error(NGX_LOG_ERR, cf, 0, "Duplicate iojs instruction");
+        ngx_conf_log_error(NGX_LOG_ERR, cf, 0, "Duplicate nodejs instruction");
         return NGX_CONF_ERROR;
     }
 
@@ -1101,7 +1104,7 @@ ngx_http_iojs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         return NGX_CONF_ERROR;
     }
 
-    clcf->handler = ngx_http_iojs_handler;
+    clcf->handler = ngx_http_nodejs_handler;
 
     xlcf->js.data = ngx_pstrdup(cf->pool, &value[1]);
     xlcf->js.len = (&value[1])->len;
@@ -1122,19 +1125,19 @@ ngx_http_iojs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
 
 
 static char *
-ngx_http_iojs_param(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_nodejs_param(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_iojs_loc_conf_t          *xlcf = conf;
+    ngx_http_nodejs_loc_conf_t          *xlcf = conf;
 
-    ngx_http_iojs_param_t             *param;
-    ngx_http_compile_complex_value_t   ccv;
-    ngx_str_t                         *value;
+    ngx_http_nodejs_param_t             *param;
+    ngx_http_compile_complex_value_t     ccv;
+    ngx_str_t                           *value;
 
     value = cf->args->elts;
 
     if (xlcf->params == NULL) {
         xlcf->params = ngx_array_create(cf->pool, 2,
-                                        sizeof(ngx_http_iojs_param_t));
+                                        sizeof(ngx_http_nodejs_param_t));
         if (xlcf->params == NULL) {
             return NGX_CONF_ERROR;
         }
@@ -1168,11 +1171,11 @@ ngx_http_iojs_param(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
 static void *
-ngx_http_iojs_create_conf(ngx_conf_t *cf)
+ngx_http_nodejs_create_conf(ngx_conf_t *cf)
 {
-    ngx_http_iojs_loc_conf_t  *conf;
+    ngx_http_nodejs_loc_conf_t  *conf;
 
-    conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_iojs_loc_conf_t));
+    conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_nodejs_loc_conf_t));
     if (conf == NULL) {
         return NULL;
     }
@@ -1182,13 +1185,13 @@ ngx_http_iojs_create_conf(ngx_conf_t *cf)
 
 
 static char *
-ngx_http_iojs_merge_conf(ngx_conf_t *cf, void *parent, void *child)
+ngx_http_nodejs_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 {
-    ngx_http_iojs_loc_conf_t  *prev = parent;
-    ngx_http_iojs_loc_conf_t  *conf = child;
-    ngx_http_iojs_param_t     *prevparams, *params, *param;
-    ngx_uint_t                 i, j;
-    int                        add;
+    ngx_http_nodejs_loc_conf_t  *prev = parent;
+    ngx_http_nodejs_loc_conf_t  *conf = child;
+    ngx_http_nodejs_param_t     *prevparams, *params, *param;
+    ngx_uint_t                   i, j;
+    int                          add;
 
     if (conf->root.len == 0) {
         conf->root.data = prev->root.data;
@@ -1231,9 +1234,9 @@ ngx_http_iojs_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
 
 static char *
-ngx_http_iojs_root(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_nodejs_root(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_iojs_loc_conf_t          *xlcf = conf;
+    ngx_http_nodejs_loc_conf_t        *xlcf = conf;
     ngx_str_t                         *value;
 
     value = cf->args->elts;
@@ -1253,7 +1256,7 @@ ngx_http_iojs_root(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
 static char *
-ngx_http_iojs_args(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_nodejs_args(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_str_t                         *value;
 

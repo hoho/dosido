@@ -1,10 +1,10 @@
 # dosido
 
-io.js and nginx melt down.
+node.js and nginx melt down.
 
 ## Description
 
-dosido is a conjunction of io.js and nginx in one single binary.
+dosido is a conjunction of node.js and nginx in one single binary.
 
 In a nginx config you describe a location and tell what JavaScript file to
 use for this location. This JavaScript file exports a function. This function
@@ -20,11 +20,11 @@ Two main reasons for the project:
 
 ### Simplicity
 
-To build a service with io.js (node.js) we need to solve some common problems:
+To build a service with node.js we need to solve some common problems:
 
-+ Need of something to start an restart io.js (node.js) processes.
++ Need of something to start an restart node.js processes.
 + Need of something to accept connections on port 80 (443) and to pass these
-  connections to io.js (node.js) processes.
+  connections to node.js processes.
 + Need of something to serve static files.
 + Need of something for routing.
 

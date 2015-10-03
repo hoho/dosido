@@ -1,17 +1,17 @@
 .PHONY: build
-build: libiojs configure nginx
+build: libnodejs configure nginx
 
 
-.PHONY: iojs
-iojs:
-	cd iojs && ./configure
-	$(MAKE) -C iojs
+.PHONY: nodejs
+nodejs:
+	cd nodejs && ./configure
+	$(MAKE) -C nodejs
 
 
-.PHONY: libiojs
-libiojs:
-	cd iojs && ./configure --enable-static
-	$(MAKE) -C iojs
+.PHONY: libnodejs
+libnodejs:
+	cd nodejs && ./configure --enable-static
+	$(MAKE) -C nodejs
 
 
 .PHONY: configure
@@ -29,17 +29,17 @@ configure:
 		--http-fastcgi-temp-path=/var/cache/dosido/fastcgi_temp \
 		--http-uwsgi-temp-path=/var/cache/dosido/uwsgi_temp \
 		--http-scgi-temp-path=/var/cache/dosido/scgi_temp \
-		--add-module=../nginx-iojs \
+		--add-module=../nginx-nodejs \
 		--with-http_realip_module \
 		--with-http_gzip_static_module \
 		--with-http_secure_link_module \
 		--with-http_stub_status_module \
 		--with-http_ssl_module \
 		--with-ipv6 \
-		--with-openssl=../iojs/deps/openssl \
+		--with-openssl=../nodejs/deps/openssl \
 		--with-pcre=../deps/pcre \
-		--with-zlib=../iojs/deps/zlib \
-		--with-cc-opt=-I../libiojs
+		--with-zlib=../nodejs/deps/zlib \
+		--with-cc-opt=-I../libnodejs
 
 
 .PHONY: nginx
@@ -50,7 +50,7 @@ nginx:
 .PHONY: clean
 clean:
 	git checkout deps
-	$(MAKE) -C iojs clean
+	$(MAKE) -C nodejs clean
 	$(MAKE) -C nginx clean
 
 
@@ -66,19 +66,19 @@ nginx-dirs:
 
 .PHONY: install
 install: nginx-dirs
-	$(MAKE) -C iojs install
+	$(MAKE) -C nodejs install
 	$(MAKE) -C nginx install
 
 
 .PHONY: prepare-test
-prepare-test: iojs
+prepare-test: nodejs
 
 
 .PHONY: test
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
-	./iojs/node t/testrunner.js
+	./nodejs/node t/testrunner.js
 
 
 # Remove linked nginx binary and make a new one
@@ -86,4 +86,4 @@ test:
 delete-nginx-binary:
 	rm -f nginx/objs/nginx
 .PHONY: relink
-relink: libiojs delete-nginx-binary nginx
+relink: libnodejs delete-nginx-binary nginx

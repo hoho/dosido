@@ -1,30 +1,30 @@
-ngx_addon_name=ngx_http_iojs_module
+ngx_addon_name=ngx_http_nodejs_module
 
 FLAVOUR=`python -c 'from os import path; import sys; \
-        sys.path.insert(0, path.join("..", "iojs", "tools", "gyp", "pylib")); \
+        sys.path.insert(0, path.join("..", "nodejs", "tools", "gyp", "pylib")); \
         from gyp.common import GetFlavor; \
         print GetFlavor({})'`
 
 if [ $FLAVOUR = "win" ]; then
     FORCE_SYMBOLS=`python -c 'import subprocess; import re; \
-                  symbols = subprocess.Popen("dumpbin /all ../iojs/Release/lib/node.lib", stdout=subprocess.PIPE).stdout.read(); \
+                  symbols = subprocess.Popen("dumpbin /all ../nodejs/Release/lib/node.lib", stdout=subprocess.PIPE).stdout.read(); \
                   print " ".join(map(lambda s: re.sub(r".*?(_+register_[^\s]+).*", r"/include:\1", s), filter(lambda s: s.find("_register_") >= 0, symbols.split("\n"))))'`
 
-    IOJS_LIBS="/link \
+    NODEJS_LIBS="/link \
 		psapi.lib \
 		iphlpapi.lib \
 		winmm.lib \
 		userenv.lib \
-		../iojs/Release/lib/node.lib \
-		../iojs/Release/lib/libuv.lib \
-		../iojs/Release/lib/cares.lib \
-		../iojs/Release/lib/openssl.lib \
-		../iojs/Release/lib/http_parser.lib \
-		../iojs/Release/lib/zlib.lib \
-		../iojs/build/Release/lib/v8_libplatform.lib \
-		../iojs/build/Release/lib/v8_base*.lib \
-		../iojs/build/Release/lib/v8_libbase.lib \
-		../iojs/build/Release/lib/v8_nosnapshot.lib \
+		../nodejs/Release/lib/node.lib \
+		../nodejs/Release/lib/libuv.lib \
+		../nodejs/Release/lib/cares.lib \
+		../nodejs/Release/lib/openssl.lib \
+		../nodejs/Release/lib/http_parser.lib \
+		../nodejs/Release/lib/zlib.lib \
+		../nodejs/build/Release/lib/v8_libplatform.lib \
+		../nodejs/build/Release/lib/v8_base*.lib \
+		../nodejs/build/Release/lib/v8_libbase.lib \
+		../nodejs/build/Release/lib/v8_nosnapshot.lib \
 		$FORCE_SYMBOLS"
 else
     if [ $FLAVOUR = "mac" ]; then
@@ -37,20 +37,20 @@ else
         LIBSTD_VERSION=""
     fi
 
-    IOJS_LIBS="$FORCE_LOAD_BEGIN../iojs/out/Release/libnode.a $FORCE_LOAD_END\
-		../iojs/out/Release/libuv.a \
-		../iojs/out/Release/libcares.a \
-		$FORCE_LOAD_BEGIN../iojs/out/Release/libopenssl.a $FORCE_LOAD_END\
-		../iojs/out/Release/libzlib.a \
-		../iojs/out/Release/libhttp_parser.a \
-		../iojs/out/Release/libv8_libplatform.a \
-		$FORCE_LOAD_BEGIN../iojs/out/Release/libv8_base.a $FORCE_LOAD_END\
-		../iojs/out/Release/libv8_libbase.a \
-		../iojs/out/Release/libv8_nosnapshot.a \
+    NODEJS_LIBS="$FORCE_LOAD_BEGIN../nodejs/out/Release/libnode.a $FORCE_LOAD_END\
+		../nodejs/out/Release/libuv.a \
+		../nodejs/out/Release/libcares.a \
+		$FORCE_LOAD_BEGIN../nodejs/out/Release/libopenssl.a $FORCE_LOAD_END\
+		../nodejs/out/Release/libzlib.a \
+		../nodejs/out/Release/libhttp_parser.a \
+		../nodejs/out/Release/libv8_libplatform.a \
+		$FORCE_LOAD_BEGIN../nodejs/out/Release/libv8_base.a $FORCE_LOAD_END\
+		../nodejs/out/Release/libv8_libbase.a \
+		../nodejs/out/Release/libv8_nosnapshot.a \
 		-lstdc++$LIBSTD_VERSION -lm -ldl"
 fi
 
-CORE_LIBS="$CORE_LIBS $IOJS_LIBS"
+CORE_LIBS="$CORE_LIBS $NODEJS_LIBS"
 
-HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_iojs_module"
-NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_iojs_module.c"
+HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_nodejs_module"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_nodejs_module.c"

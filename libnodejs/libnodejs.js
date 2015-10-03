@@ -35,14 +35,14 @@ process.on('SIGINT', function() {
     var Writable = stream.Writable;
     var util = require('util');
 
-    //  Codes to come from this script (should match iojsByJSCommandType).
+    //  Codes to come from this script (should match nodejsByJSCommandType).
     var BY_JS_INIT_DESTRUCTOR = 1,
         BY_JS_READ_REQUEST_BODY = 2,
         BY_JS_RESPONSE_HEADERS = 3,
         BY_JS_RESPONSE_BODY = 4,
         BY_JS_BEGIN_SUBREQUEST = 5,
         BY_JS_SUBREQUEST_DONE = 6,
-    //  Codes to come from nginx (should match iojsToJSCallbackCommandType).
+    //  Codes to come from nginx (should match nodejsToJSCallbackCommandType).
         TO_JS_CALLBACK_PUSH_CHUNK = 7,
         TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
         TO_JS_CALLBACK_REQUEST_ERROR = 9,
@@ -145,7 +145,7 @@ process.on('SIGINT', function() {
             var i = new Request(meta, requestHeaders, callback, payload);
             var o = new Response(callback, payload);
 
-            // To free iojsContext when this thing is garbage collected and
+            // To free nodejsContext when this thing is garbage collected and
             // to pass a from-nginx-to-js callback.
             var destroy = callback(BY_JS_INIT_DESTRUCTOR, payload, function(what, arg) {
                 switch (what) {

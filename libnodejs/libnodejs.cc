@@ -2,14 +2,14 @@
 #include "env-inl.h"
 #include "node_natives.h"
 
-#include "libiojsInternals.h"
+#include "libnodejsInternals.h"
 #include <fcntl.h>
 
 #ifdef _WIN32
 
 #define PIPE_FD_TYPE SOCKET
 
-inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
+inline int nodejsPipe(PIPE_FD_TYPE pipefd[2])
 {
     int                       err;
     PIPE_FD_TYPE              listenSocket;
@@ -50,15 +50,15 @@ inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
 
     return 0;
 }
-inline ssize_t iojsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
+inline ssize_t nodejsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
 {
     return send(fd, (const char *)buf, count, 0);
 }
-inline ssize_t iojsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
+inline ssize_t nodejsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
 {
     return recv(fd, (char *)buf, count, 0);
 }
-inline int iojsClose(PIPE_FD_TYPE fd)
+inline int nodejsClose(PIPE_FD_TYPE fd)
 {
     return closesocket(fd);
 }
@@ -71,7 +71,7 @@ inline int iojsClose(PIPE_FD_TYPE fd)
 #include <sys/types.h>
 #include <sys/ioctl.h>
 
-inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
+inline int nodejsPipe(PIPE_FD_TYPE pipefd[2])
 {
     int err = pipe(pipefd);
     if (err) return err;
@@ -88,15 +88,15 @@ inline int iojsPipe(PIPE_FD_TYPE pipefd[2])
 
     return err;
 }
-inline ssize_t iojsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
+inline ssize_t nodejsWrite(PIPE_FD_TYPE fd, const void *buf, size_t count)
 {
     return write(fd, buf, count);
 }
-inline ssize_t iojsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
+inline ssize_t nodejsRead(PIPE_FD_TYPE fd, void *buf, size_t count)
 {
     return read(fd, buf, count);
 }
-inline int iojsClose(PIPE_FD_TYPE fd)
+inline int nodejsClose(PIPE_FD_TYPE fd)
 {
     return close(fd);
 }
@@ -105,7 +105,7 @@ inline int iojsClose(PIPE_FD_TYPE fd)
 
 
 using node::Environment;
-using node::libiojs_libiojs_native;
+using node::libnodejs_libnodejs_native;
 using node::OneByteString;
 using node::Utf8Value;
 
@@ -123,33 +123,33 @@ using v8::TryCatch;
 using v8::Value;
 
 
-static PIPE_FD_TYPE                   iojsIncomingPipeFd[2] = {-1, -1};
-static PIPE_FD_TYPE                   iojsOutgoingPipeFd[2] = {-1, -1};
-static uv_barrier_t                   iojsStartBlocker;
-static uv_thread_t                    iojsThreadId;
-static uv_poll_t                      iojsCommandPoll;
+static PIPE_FD_TYPE                   nodejsIncomingPipeFd[2] = {-1, -1};
+static PIPE_FD_TYPE                   nodejsOutgoingPipeFd[2] = {-1, -1};
+static uv_barrier_t                   nodejsStartBlocker;
+static uv_thread_t                    nodejsThreadId;
+static uv_poll_t                      nodejsCommandPoll;
 
-static iojsJSArray                    iojsScripts;
-static int                            iojsError;
+static nodejsJSArray                  nodejsScripts;
+static int                            nodejsError;
 
-static v8::Persistent<v8::Array>      iojsLoadedScripts;
+static v8::Persistent<v8::Array>      nodejsLoadedScripts;
 
-static iojsLogger                     iojsLoggerFunc = NULL;
+static nodejsLogger                   nodejsLoggerFunc = NULL;
 
 // To call from nginx thread.
 static inline void
-iojsToJSSend(iojsToJS *cmd)
+nodejsToJSSend(nodejsToJS *cmd)
 {
     ssize_t sent = 0;
     ssize_t sz;
     while (sent < (ssize_t)sizeof(cmd)) {
-        sz = iojsWrite(iojsIncomingPipeFd[1],
-                       reinterpret_cast<char *>(&cmd) + sent,
-                       sizeof(cmd) - sent);
+        sz = nodejsWrite(nodejsIncomingPipeFd[1],
+                         reinterpret_cast<char *>(&cmd) + sent,
+                         sizeof(cmd) - sent);
 
         if (sz < 0) {
-            iojsLoggerFunc(IOJS_LOG_ALERT,
-                           "iojsToJSSend fatal error: %d\n", errno);
+            nodejsLoggerFunc(NODEJS_LOG_ALERT,
+                             "nodejsToJSSend fatal error: %d\n", errno);
             abort();
         }
 
@@ -158,28 +158,30 @@ iojsToJSSend(iojsToJS *cmd)
 }
 
 
-// To call from iojs thread.
-static ssize_t    iojsCurToJSRecvLen = 0;
-static iojsToJS  *iojsCurToJSRecvCmd;
-static inline iojsToJS*
-iojsToJSRecv(void)
+// To call from nodejs thread.
+static ssize_t      nodejsCurToJSRecvLen = 0;
+static nodejsToJS  *nodejsCurToJSRecvCmd;
+static inline nodejsToJS*
+nodejsToJSRecv(void)
 {
-    ssize_t sz = iojsRead(
-            iojsIncomingPipeFd[0],
-            reinterpret_cast<char *>(&iojsCurToJSRecvCmd) + iojsCurToJSRecvLen,
-            sizeof(iojsToJS *) - iojsCurToJSRecvLen
+    ssize_t sz = nodejsRead(
+            nodejsIncomingPipeFd[0],
+            reinterpret_cast<char *>(&nodejsCurToJSRecvCmd) +
+                    nodejsCurToJSRecvLen,
+            sizeof(nodejsToJS *) - nodejsCurToJSRecvLen
     );
 
     if (sz < 0) {
-        iojsLoggerFunc(IOJS_LOG_ALERT, "iojsToJSRecv fatal error: %d\n", errno);
+        nodejsLoggerFunc(NODEJS_LOG_ALERT,
+                         "nodejsToJSRecv fatal error: %d\n", errno);
         abort();
     }
 
     if (sz > 0) {
-        iojsCurToJSRecvLen += sz;
-        if (iojsCurToJSRecvLen == sizeof(iojsToJS *)) {
-            iojsCurToJSRecvLen = 0;
-            return iojsCurToJSRecvCmd;
+        nodejsCurToJSRecvLen += sz;
+        if (nodejsCurToJSRecvLen == sizeof(nodejsToJS *)) {
+            nodejsCurToJSRecvLen = 0;
+            return nodejsCurToJSRecvCmd;
         }
     }
 
@@ -187,20 +189,20 @@ iojsToJSRecv(void)
 }
 
 
-// To call from iojs thread.
+// To call from nodejs thread.
 static inline void
-iojsFromJSSend(iojsFromJS *cmd)
+nodejsFromJSSend(nodejsFromJS *cmd)
 {
     ssize_t sent = 0;
     ssize_t sz;
     while (sent < (ssize_t)sizeof(cmd)) {
-        sz = iojsWrite(iojsOutgoingPipeFd[1],
-                       reinterpret_cast<char *>(&cmd) + sent,
-                       sizeof(cmd) - sent);
+        sz = nodejsWrite(nodejsOutgoingPipeFd[1],
+                         reinterpret_cast<char *>(&cmd) + sent,
+                         sizeof(cmd) - sent);
 
         if (sz < 0) {
-            iojsLoggerFunc(IOJS_LOG_ALERT,
-                           "iojsFromJSSend fatal error: %d\n", errno);
+            nodejsLoggerFunc(NODEJS_LOG_ALERT,
+                             "nodejsFromJSSend fatal error: %d\n", errno);
             abort();
         }
 
@@ -210,28 +212,29 @@ iojsFromJSSend(iojsFromJS *cmd)
 
 
 // To call from nginx thread.
-static ssize_t      iojsCurFromJSRecvLen = 0;
-static iojsFromJS  *iojsCurFromJSRecvCmd;
-iojsFromJS*
-iojsFromJSRecv(void)
+static ssize_t        nodejsCurFromJSRecvLen = 0;
+static nodejsFromJS  *nodejsCurFromJSRecvCmd;
+nodejsFromJS*
+nodejsFromJSRecv(void)
 {
-    ssize_t sz = iojsRead(
-            iojsOutgoingPipeFd[0],
-            reinterpret_cast<char *>(&iojsCurFromJSRecvCmd) + iojsCurFromJSRecvLen,
-            sizeof(iojsFromJS *) - iojsCurFromJSRecvLen
+    ssize_t sz = nodejsRead(
+            nodejsOutgoingPipeFd[0],
+            reinterpret_cast<char *>(&nodejsCurFromJSRecvCmd) +
+                    nodejsCurFromJSRecvLen,
+            sizeof(nodejsFromJS *) - nodejsCurFromJSRecvLen
     );
 
     if (sz < 0) {
-        iojsLoggerFunc(IOJS_LOG_ALERT,
-                       "iojsFromJSRecv fatal error: %d\n", errno);
+        nodejsLoggerFunc(NODEJS_LOG_ALERT,
+                         "nodejsFromJSRecv fatal error: %d\n", errno);
         abort();
     }
 
     if (sz > 0) {
-        iojsCurFromJSRecvLen += sz;
-        if (iojsCurFromJSRecvLen == sizeof(iojsFromJS *)) {
-            iojsCurFromJSRecvLen = 0;
-            return iojsCurFromJSRecvCmd;
+        nodejsCurFromJSRecvLen += sz;
+        if (nodejsCurFromJSRecvLen == sizeof(nodejsFromJS *)) {
+            nodejsCurFromJSRecvLen = 0;
+            return nodejsCurFromJSRecvCmd;
         }
     }
 
@@ -239,9 +242,9 @@ iojsFromJSRecv(void)
 }
 
 
-// To call from iojs thread.
+// To call from nodejs thread.
 static inline void
-iojsToJSFree(iojsToJS *cmd)
+nodejsToJSFree(nodejsToJS *cmd)
 {
     free(cmd);
 }
@@ -249,148 +252,148 @@ iojsToJSFree(iojsToJS *cmd)
 
 // To call from nginx thread.
 static inline void
-iojsFreeCallback(void *cb)
+nodejsFreeCallback(void *cb)
 {
-    iojsFreeCallbackCmd  *cmd;
+    nodejsFreeCallbackCmd  *cmd;
 
-    cmd = reinterpret_cast<iojsFreeCallbackCmd *>(
-            malloc(sizeof(iojsFreeCallbackCmd))
+    cmd = reinterpret_cast<nodejsFreeCallbackCmd *>(
+            malloc(sizeof(nodejsFreeCallbackCmd))
     );
-    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+    NODEJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_FREE_CALLBACK;
     cmd->cb = cb;
 
-    iojsToJSSend(cmd);
+    nodejsToJSSend(cmd);
 }
 
 
 // To call from nginx thread.
 void
-iojsFromJSFree(iojsFromJS *cmd)
+nodejsFromJSFree(nodejsFromJS *cmd)
 {
     if (cmd->free != NULL)
         cmd->free(cmd->data);
 
     if (cmd->jsCallback)
-        iojsFreeCallback(cmd->jsCallback);
+        nodejsFreeCallback(cmd->jsCallback);
 
     free(cmd);
 }
 
 
 static inline int
-iojsStartPolling(Environment *env, uv_poll_cb cb)
+nodejsStartPolling(Environment *env, uv_poll_cb cb)
 {
     int ret;
 
     ret = uv_poll_init_socket(env->event_loop(),
-                              &iojsCommandPoll, iojsIncomingPipeFd[0]);
+                              &nodejsCommandPoll, nodejsIncomingPipeFd[0]);
     if (ret)
         return ret;
 
-    iojsCommandPoll.data = env;
-    ret = uv_poll_start(&iojsCommandPoll, UV_READABLE, cb);
+    nodejsCommandPoll.data = env;
+    ret = uv_poll_start(&nodejsCommandPoll, UV_READABLE, cb);
 
     return ret;
 }
 
 
 static inline void
-iojsStopPolling(void)
+nodejsStopPolling(void)
 {
-    uv_poll_stop(&iojsCommandPoll);
+    uv_poll_stop(&nodejsCommandPoll);
 }
 
 
 static inline void
-iojsClosePipes(void)
+nodejsClosePipes(void)
 {
-    iojsLoggerFunc(IOJS_LOG_INFO, "Closing io.js pipes");
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Closing nodejs pipes");
 
-    iojsClose(iojsIncomingPipeFd[0]);
-    iojsClose(iojsIncomingPipeFd[1]);
-    iojsClose(iojsOutgoingPipeFd[0]);
-    iojsClose(iojsOutgoingPipeFd[1]);
+    nodejsClose(nodejsIncomingPipeFd[0]);
+    nodejsClose(nodejsIncomingPipeFd[1]);
+    nodejsClose(nodejsOutgoingPipeFd[0]);
+    nodejsClose(nodejsOutgoingPipeFd[1]);
 }
 
 
 static inline int
-iojsOpenPipes(void)
+nodejsOpenPipes(void)
 {
     int err;
 
-    iojsLoggerFunc(IOJS_LOG_INFO, "Opening io.js pipes");
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Opening nodejs pipes");
 
-    err = iojsPipe(iojsIncomingPipeFd);
+    err = nodejsPipe(nodejsIncomingPipeFd);
     if (err) goto error;
 
-    err = iojsPipe(iojsOutgoingPipeFd);
+    err = nodejsPipe(nodejsOutgoingPipeFd);
     if (err) goto error;
 
-    iojsLoggerFunc(IOJS_LOG_INFO, "Opened io.js pipes");
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Opened nodejs pipes");
 
     return 0;
 
 error:
-    iojsLoggerFunc(IOJS_LOG_CRIT, "Failed to open io.js pipes (%d)", err);
-    iojsClosePipes();
+    nodejsLoggerFunc(NODEJS_LOG_CRIT, "Failed to open nodejs pipes (%d)", err);
+    nodejsClosePipes();
     return err;
 }
 
 
 static void
-iojsRunnerThread(void *arg)
+nodejsRunnerThread(void *arg)
 {
     int argc = 1;
     char *argv[1] = {(char *)"dosido"};
-    iojsLoggerFunc(IOJS_LOG_INFO, "Starting io.js");
-    iojsInitLogger(iojsLoggerFunc);
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Starting nodejs");
+    nodejsInitLogger(nodejsLoggerFunc);
     node::Start(argc, argv);
-    iojsLoggerFunc(IOJS_LOG_INFO, "Done io.js");
-    iojsClosePipes();
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Done nodejs");
+    nodejsClosePipes();
 }
 
 
 int
-iojsStart(iojsLogger logger, iojsJSArray *scripts, int *fd)
+nodejsStart(nodejsLogger logger, nodejsJSArray *scripts, int *fd)
 {
     int err;
 
-    iojsLoggerFunc = logger;
-    iojsError = -1;
+    nodejsLoggerFunc = logger;
+    nodejsError = -1;
 
-    err = iojsOpenPipes();
+    err = nodejsOpenPipes();
     if (err)
         goto error;
 
-    uv_barrier_init(&iojsStartBlocker, 2);
+    uv_barrier_init(&nodejsStartBlocker, 2);
 
-    memcpy(&iojsScripts, scripts, sizeof(iojsScripts));
+    memcpy(&nodejsScripts, scripts, sizeof(nodejsScripts));
 
-    iojsLoggerFunc(IOJS_LOG_INFO, "Starting io.js runner thread");
+    nodejsLoggerFunc(NODEJS_LOG_INFO, "Starting nodejs runner thread");
 
-    uv_thread_create(&iojsThreadId, iojsRunnerThread, NULL);
+    uv_thread_create(&nodejsThreadId, nodejsRunnerThread, NULL);
 
-    if (uv_barrier_wait(&iojsStartBlocker) > 0)
-        uv_barrier_destroy(&iojsStartBlocker);
+    if (uv_barrier_wait(&nodejsStartBlocker) > 0)
+        uv_barrier_destroy(&nodejsStartBlocker);
 
-    memset(&iojsScripts, 0, sizeof(iojsScripts));
+    memset(&nodejsScripts, 0, sizeof(nodejsScripts));
 
-    *fd = iojsOutgoingPipeFd[0];
+    *fd = nodejsOutgoingPipeFd[0];
 
-    return iojsError;
+    return nodejsError;
 
 error:
-    iojsClosePipes();
+    nodejsClosePipes();
     return err;
 }
 
 
 static void
-iojsDestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
+nodejsDestroyWeakCallback(const v8::WeakCallbackData<Object, nodejsContext>& data)
 {
-    iojsContext *jsCtx = data.GetParameter();
+    nodejsContext *jsCtx = data.GetParameter();
 
     Persistent<Object> *destroy = static_cast<Persistent<Object> *>(jsCtx->_p);
     destroy->ClearWeak();
@@ -398,12 +401,12 @@ iojsDestroyWeakCallback(const v8::WeakCallbackData<Object, iojsContext>& data)
     delete destroy;
     jsCtx->_p = destroy = nullptr;
 
-    iojsContextAttemptFree(jsCtx);
+    nodejsContextAttemptFree(jsCtx);
 }
 
 
 static inline void
-iojsFreePersistentFunction(void *fn)
+nodejsFreePersistentFunction(void *fn)
 {
     CHECK(fn != NULL);
     Persistent<Function> *f = static_cast<Persistent<Function> *>(fn);
@@ -413,8 +416,8 @@ iojsFreePersistentFunction(void *fn)
 
 
 static void
-iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
-                   iojsContext *jsCtx, void *cmd)
+nodejsCallJSCallback(Environment *env, nodejsToJSCallbackCommandType what,
+                     nodejsContext *jsCtx, void *cmd)
 {
     HandleScope scope(env->isolate());
 
@@ -425,7 +428,7 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 
     switch (what) {
         case TO_JS_CALLBACK_PUSH_CHUNK:
-            isSubrequest = reinterpret_cast<iojsChunkCmd *>(cmd)->sr;
+            isSubrequest = reinterpret_cast<nodejsChunkCmd *>(cmd)->sr;
             break;
 
         case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
@@ -458,7 +461,7 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
     switch (what) {
         case TO_JS_CALLBACK_PUSH_CHUNK:
             {
-                iojsChunkCmd *c = reinterpret_cast<iojsChunkCmd *>(cmd);
+                nodejsChunkCmd *c = reinterpret_cast<nodejsChunkCmd *>(cmd);
 
                 if (c->chunk.len > 0) {
                     args[1] = String::NewFromUtf8(env->isolate(),
@@ -478,12 +481,12 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 
         case TO_JS_CALLBACK_SUBREQUEST_HEADERS:
             {
-                Local<Object>              h = Object::New(env->isolate());
-                Local<Object>              meta = Object::New(env->isolate());
-                int                        i;
-                iojsSubrequestHeadersCmd  *shcmd = \
-                        reinterpret_cast<iojsSubrequestHeadersCmd *>(cmd);
-                iojsString               **headers = shcmd->headers;
+                Local<Object>                h = Object::New(env->isolate());
+                Local<Object>                meta = Object::New(env->isolate());
+                int                          i;
+                nodejsSubrequestHeadersCmd  *shcmd = \
+                        reinterpret_cast<nodejsSubrequestHeadersCmd *>(cmd);
+                nodejsString               **headers = shcmd->headers;
 
                 if (headers != NULL) {
                     for (i = 0; headers[i] != NULL; i += 2) {
@@ -522,8 +525,8 @@ iojsCallJSCallback(Environment *env, iojsToJSCallbackCommandType what,
 
 
 static inline int
-iojsAggregateHeaders(Environment *env, Local<Object> headers,
-                     std::vector<std::pair<std::string, std::string>> *ret)
+nodejsAggregateHeaders(Environment *env, Local<Object> headers,
+                       std::vector<std::pair<std::string, std::string>> *ret)
 {
     int sz = 0;
 
@@ -552,7 +555,7 @@ iojsAggregateHeaders(Environment *env, Local<Object> headers,
                 std::string(*_val, valLen)
         ));
 
-        sz += sizeof(iojsString) + sizeof(iojsString) + keyLen + valLen;
+        sz += sizeof(nodejsString) + sizeof(nodejsString) + keyLen + valLen;
     }
 
     return sz;
@@ -560,16 +563,16 @@ iojsAggregateHeaders(Environment *env, Local<Object> headers,
 
 
 static inline void
-iojsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
-                         char *allocated, iojsHeaders *ret)
+nodejsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
+                           char *allocated, nodejsHeaders *ret)
 {
     if (h->size()) {
         std::vector<std::pair<std::string, std::string>>::reverse_iterator it;
-        uint32_t        i;
-        size_t          sz;
-        iojsString     *harr = reinterpret_cast<iojsString *>(allocated);
+        uint32_t          i;
+        size_t            sz;
+        nodejsString     *harr = reinterpret_cast<nodejsString *>(allocated);
 
-        allocated += sizeof(iojsString) * h->size() * 2;
+        allocated += sizeof(nodejsString) * h->size() * 2;
         ret->strings = harr;
         ret->len = h->size() * 2;
 
@@ -596,15 +599,15 @@ iojsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
 
 
 static void
-iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
+nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 {
     Environment *env = Environment::GetCurrent(args.GetIsolate());
 
     HandleScope scope(env->isolate());
 
-    int64_t _type = args[0]->IntegerValue();
-    iojsContext *jsCtx =
-            static_cast<iojsContext *>(args[1].As<v8::External>()->Value());
+    int64_t         _type = args[0]->IntegerValue();
+    nodejsContext   *jsCtx =
+            static_cast<nodejsContext *>(args[1].As<v8::External>()->Value());
 
     if (_type == 0) {
         // Destroy indicator. When JavaScript is finished, this object will be
@@ -612,7 +615,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         Local<Object> tmp = Object::New(env->isolate());
         Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
 
-        destroy->SetWeak(jsCtx, iojsDestroyWeakCallback);
+        destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback);
         destroy->MarkIndependent();
 
         jsCtx->_p = destroy;
@@ -621,13 +624,13 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         return;
     }
 
-    iojsByJSCommandType type;
+    nodejsByJSCommandType type;
     Local<Value> arg = args[2];
     bool isstr;
     Local<String> strval;
 
     size_t sz = 0;
-    type = static_cast<iojsByJSCommandType>(_type);
+    type = static_cast<nodejsByJSCommandType>(_type);
 
     switch (type) {
         case BY_JS_INIT_DESTRUCTOR:
@@ -635,15 +638,15 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         case BY_JS_RESPONSE_HEADERS:
         case BY_JS_BEGIN_SUBREQUEST:
         case BY_JS_SUBREQUEST_DONE:
-            sz = sizeof(iojsFromJS);
+            sz = sizeof(nodejsFromJS);
             break;
 
         case BY_JS_RESPONSE_BODY:
-            sz = sizeof(iojsFromJS);
+            sz = sizeof(nodejsFromJS);
             isstr = arg->IsString();
             if (isstr) {
                 strval = arg.As<String>();
-                sz += sizeof(iojsString) + strval->Utf8Length();
+                sz += sizeof(nodejsString) + strval->Utf8Length();
             }
             break;
     }
@@ -651,9 +654,9 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
     if (sz == 0)
         return;
 
-    iojsFromJS *cmd = reinterpret_cast<iojsFromJS *>(malloc(sz));
-    IOJS_CHECK_OUT_OF_MEMORY(cmd);
-    memset(cmd, 0, sizeof(iojsFromJS));
+    nodejsFromJS *cmd = reinterpret_cast<nodejsFromJS *>(malloc(sz));
+    NODEJS_CHECK_OUT_OF_MEMORY(cmd);
+    memset(cmd, 0, sizeof(nodejsFromJS));
 
     cmd->jsCtx = jsCtx;
 
@@ -677,24 +680,25 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         case BY_JS_RESPONSE_HEADERS:
             cmd->type = FROM_JS_RESPONSE_HEADERS;
             {
-                Local<Object> meta = arg->ToObject();
-                Local<Integer> status = meta->Get(0)->ToInteger(); // statusCode.
-                Local<String> msg = meta->Get(1)->ToString(); // statusMessage.
-                Local<Object> headers = args[3]->ToObject(); // headers.
-                int msgLen = msg->Utf8Length();
+                Local<Object>    meta = arg->ToObject();
+                Local<Integer>   status = meta->Get(0)->ToInteger(); // statusCode.
+                Local<String>    msg = meta-> Get(1)->ToString(); // statusMessage.
+                Local<Object>    headers = args[3]->ToObject(); // headers.
+                int              msgLen = msg->Utf8Length();
                 std::vector<std::pair<std::string, std::string>> h;
 
-                sz = iojsAggregateHeaders(env, headers, &h) +
-                     sizeof(iojsHeaders) + msgLen;
+                sz = nodejsAggregateHeaders(env, headers, &h) +
+                     sizeof(nodejsHeaders) + msgLen;
 
-                iojsHeaders *ret = reinterpret_cast<iojsHeaders *>(malloc(sz));
-                IOJS_CHECK_OUT_OF_MEMORY(ret);
+                nodejsHeaders   *ret =
+                        reinterpret_cast<nodejsHeaders *>(malloc(sz));
+                NODEJS_CHECK_OUT_OF_MEMORY(ret);
                 cmd->data = ret;
                 cmd->free = free;
 
-                iojsHeadersToStringArray(&h,
-                                         reinterpret_cast<char *>(&ret[1]),
-                                         ret);
+                nodejsHeadersToStringArray(&h,
+                                           reinterpret_cast<char *>(&ret[1]),
+                                           ret);
                 ret->statusCode = status->IntegerValue();
                 ret->statusMessage.len = msgLen;
                 if (msgLen) {
@@ -711,9 +715,9 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
             if (isstr) {
                 cmd->data = &cmd[1];
-                iojsString *s = reinterpret_cast<iojsString *>(cmd->data);
+                nodejsString *s = reinterpret_cast<nodejsString *>(cmd->data);
                 s->len = strval->Utf8Length();
-                s->data = reinterpret_cast<char *>(&cmd[1]) + sizeof(iojsString);
+                s->data = reinterpret_cast<char *>(&cmd[1]) + sizeof(nodejsString);
                 Utf8Value chunk(env->isolate(), strval);
                 memcpy(s->data, *chunk, s->len);
             } else {
@@ -747,11 +751,11 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
                 std::vector<std::pair<std::string, std::string>> h;
 
-                sz = iojsAggregateHeaders(env, headers, &h) +
-                     urlLen + methodLen + bodyLen + sizeof(iojsSubrequest);
+                sz = nodejsAggregateHeaders(env, headers, &h) +
+                     urlLen + methodLen + bodyLen + sizeof(nodejsSubrequest);
 
-                iojsSubrequest *sr = reinterpret_cast<iojsSubrequest *>(malloc(sz));
-                IOJS_CHECK_OUT_OF_MEMORY(sr);
+                nodejsSubrequest *sr = reinterpret_cast<nodejsSubrequest *>(malloc(sz));
+                NODEJS_CHECK_OUT_OF_MEMORY(sr);
                 cmd->data = sr;
                 cmd->free = free;
 
@@ -797,7 +801,7 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                     sr->body.len = 0;
                 }
 
-                iojsHeadersToStringArray(&h, ptr, &sr->headers);
+                nodejsHeadersToStringArray(&h, ptr, &sr->headers);
             }
             break;
 
@@ -807,33 +811,34 @@ iojsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
         default:
             // This should never happen.
-            iojsFromJSFree(cmd);
+            nodejsFromJSFree(cmd);
             return;
     }
 
-    iojsFromJSSend(cmd);
+    nodejsFromJSSend(cmd);
 }
 
 
 static inline void
-iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
+nodejsCallLoadedScript(Environment *env, nodejsCallCmd *cmd)
 {
-    iojsString **headers = cmd->headers;
-    iojsString **params = cmd->params;
+    nodejsString        **headers = cmd->headers;
+    nodejsString        **params = cmd->params;
 
     HandleScope handle_scope(env->isolate());
 
-    Local<Array> scripts = Local<Array>::New(env->isolate(), iojsLoadedScripts);
+    Local<Array>          scripts = Local<Array>::New(env->isolate(),
+                                                      nodejsLoadedScripts);
 
-    Local<Object> meta = Object::New(env->isolate());
-    Local<Object> h = Object::New(env->isolate());
-    Local<Object> p = Object::New(env->isolate());
+    Local<Object>         meta = Object::New(env->isolate());
+    Local<Object>         h = Object::New(env->isolate());
+    Local<Object>         p = Object::New(env->isolate());
 
-    Local<Function> callback = \
-            env->NewFunctionTemplate(iojsCallLoadedScriptCallback)->GetFunction();
-    Local<v8::External> payload = v8::External::New(env->isolate(), cmd->jsCtx);
+    Local<Function>       callback = \
+            env->NewFunctionTemplate(nodejsCallLoadedScriptCallback)->GetFunction();
+    Local<v8::External>   payload = v8::External::New(env->isolate(), cmd->jsCtx);
 
-    Local<Value> args[5] = {meta, h, p, callback, payload};
+    Local<Value>          args[5] = {meta, h, p, callback, payload};
 
     meta->Set(0, String::NewFromUtf8(env->isolate(),
               cmd->method.data,
@@ -885,11 +890,11 @@ iojsCallLoadedScript(Environment *env, iojsCallCmd *cmd)
 
 
 void
-iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
+nodejsRunIncomingTask(uv_poll_t *handle, int status, int events)
 {
-    iojsToJS *cmd;
+    nodejsToJS *cmd;
 
-    cmd = iojsToJSRecv();
+    cmd = nodejsToJSRecv();
 
     if (cmd != NULL) {
         Environment *env = reinterpret_cast<Environment *>(handle->data);
@@ -897,11 +902,14 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
 
         switch (cmd->type) {
             case TO_JS_CALL_LOADED_SCRIPT:
-                iojsCallLoadedScript(env, reinterpret_cast<iojsCallCmd *>(cmd));
+                nodejsCallLoadedScript(
+                        env,
+                        reinterpret_cast<nodejsCallCmd *>(cmd)
+                );
                 break;
 
             case TO_JS_PUSH_CHUNK:
-                iojsCallJSCallback(
+                nodejsCallJSCallback(
                         env,
                         TO_JS_CALLBACK_PUSH_CHUNK,
                         cmd->jsCtx,
@@ -916,7 +924,7 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 break;
 
             case TO_JS_SUBREQUEST_HEADERS:
-                iojsCallJSCallback(
+                nodejsCallJSCallback(
                         env,
                         TO_JS_CALLBACK_SUBREQUEST_HEADERS,
                         cmd->jsCtx,
@@ -925,20 +933,20 @@ iojsRunIncomingTask(uv_poll_t *handle, int status, int events)
                 break;
 
             case TO_JS_FREE_CALLBACK:
-                iojsFreePersistentFunction(
-                        reinterpret_cast<iojsFreeCallbackCmd *>(cmd)->cb
+                nodejsFreePersistentFunction(
+                        reinterpret_cast<nodejsFreeCallbackCmd *>(cmd)->cb
                 );
                 break;
         }
 
-        iojsToJSFree(cmd);
+        nodejsToJSFree(cmd);
     }
 }
 
 
 int
-iojsLoadScripts(Environment *env,
-                ExecuteStringFunc execute, ReportExceptionFunc report)
+nodejsLoadScripts(Environment *env,
+                  ExecuteStringFunc execute, ReportExceptionFunc report)
 {
     int ret = 0;
 
@@ -952,11 +960,11 @@ iojsLoadScripts(Environment *env,
     env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
 
     Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(),
-                                                      "libiojs.js");
+                                                      "libnodejs.js");
     Local<Value> f_value = execute(
         env,
-        OneByteString(env->isolate(), libiojs_libiojs_native,
-                                      sizeof(libiojs_libiojs_native) - 1),
+        OneByteString(env->isolate(), libnodejs_libnodejs_native,
+                                      sizeof(libnodejs_libnodejs_native) - 1),
         script_name
     );
 
@@ -966,23 +974,23 @@ iojsLoadScripts(Environment *env,
     }
 
     CHECK(f_value->IsFunction());
-    Local<Function> f = f_value.As<Function>();
+    Local<Function>   f = f_value.As<Function>();
 
-    Local<String> require_name = FIXED_ONE_BYTE_STRING(env->isolate(),
+    Local<String>     require_name = FIXED_ONE_BYTE_STRING(env->isolate(),
                                                        "_require");
-    Local<Value> require_value = env->process_object()->Get(require_name);
+    Local<Value>      require_value = env->process_object()->Get(require_name);
     CHECK(require_value->IsFunction());
     // Remove temporary `process._require` set up by _third_party_main.js.
     env->process_object()->Delete(require_name);
-    Local<Function> require = require_value.As<Function>();
+    Local<Function>   require = require_value.As<Function>();
 
-    Local<Array> scripts = Array::New(env->isolate(), iojsScripts.len);
+    Local<Array>      scripts = Array::New(env->isolate(), nodejsScripts.len);
 
-    size_t   i;
-    iojsJS  *script;
+    size_t            i;
+    nodejsJS         *script;
 
-    for (i = 0; i < iojsScripts.len; i++) {
-        script = &iojsScripts.js[i];
+    for (i = 0; i < nodejsScripts.len; i++) {
+        script = &nodejsScripts.js[i];
         scripts->Set(script->index,
                      OneByteString(env->isolate(),
                                    script->filename, script->len));
@@ -999,40 +1007,40 @@ iojsLoadScripts(Environment *env,
     }
 
     CHECK(f_value->IsArray());
-    iojsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
+    nodejsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
 
-    ret = iojsStartPolling(env, iojsRunIncomingTask);
+    ret = nodejsStartPolling(env, nodejsRunIncomingTask);
 
 done:
-    iojsError = ret;
+    nodejsError = ret;
 
-    if (uv_barrier_wait(&iojsStartBlocker) > 0)
-        uv_barrier_destroy(&iojsStartBlocker);
+    if (uv_barrier_wait(&nodejsStartBlocker) > 0)
+        uv_barrier_destroy(&nodejsStartBlocker);
 
     return ret;
 }
 
 
 void
-iojsUnloadScripts(void)
+nodejsUnloadScripts(void)
 {
-    iojsStopPolling();
+    nodejsStopPolling();
 
-    if (!iojsLoadedScripts.IsEmpty())
-        iojsLoadedScripts.Reset();
+    if (!nodejsLoadedScripts.IsEmpty())
+        nodejsLoadedScripts.Reset();
 }
 
 
-iojsContext*
-iojsContextCreate(void *r, iojsContext *rootCtx, iojsAtomicFetchAdd afa)
+nodejsContext*
+nodejsContextCreate(void *r, nodejsContext *rootCtx, nodejsAtomicFetchAdd afa)
 {
-    iojsContext  *ret;
+    nodejsContext  *ret;
 
-    ret = reinterpret_cast<iojsContext *>(malloc(sizeof(iojsContext)));
+    ret = reinterpret_cast<nodejsContext *>(malloc(sizeof(nodejsContext)));
     if (ret == NULL)
         return ret;
 
-    memset(ret, 0, sizeof(iojsContext));
+    memset(ret, 0, sizeof(nodejsContext));
 
     ret->refCount = 1;
     ret->r = r;
@@ -1044,7 +1052,7 @@ iojsContextCreate(void *r, iojsContext *rootCtx, iojsAtomicFetchAdd afa)
 
 
 void
-iojsContextAttemptFree(iojsContext *jsCtx)
+nodejsContextAttemptFree(nodejsContext *jsCtx)
 {
     if (jsCtx == NULL)
         return;
@@ -1053,21 +1061,21 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
     if (refs <= 0) {
         if (jsCtx->jsCallback || jsCtx->jsSubrequestCallback) {
-            if (iojsThreadId == uv_thread_self()) {
-                // It is safe to free the callback from iojs thread,
+            if (nodejsThreadId == uv_thread_self()) {
+                // It is safe to free the callback from nodejs thread,
                 // this will mostly be the case, because nginx request is
                 // usually completed and finalized before V8 garbage collects
                 // request's data.
                 if (jsCtx->jsCallback)
-                    iojsFreePersistentFunction(jsCtx->jsCallback);
+                    nodejsFreePersistentFunction(jsCtx->jsCallback);
                 if (jsCtx->jsSubrequestCallback)
-                    iojsFreePersistentFunction(jsCtx->jsSubrequestCallback);
+                    nodejsFreePersistentFunction(jsCtx->jsSubrequestCallback);
             } else {
-                // Otherwise, we need to send free command to iojs.
+                // Otherwise, we need to send free command to nodejs.
                 if (jsCtx->jsCallback)
-                    iojsFreeCallback(jsCtx->jsCallback);
+                    nodejsFreeCallback(jsCtx->jsCallback);
                 if (jsCtx->jsSubrequestCallback)
-                    iojsFreeCallback(jsCtx->jsSubrequestCallback);
+                    nodejsFreeCallback(jsCtx->jsSubrequestCallback);
             }
         }
         free(jsCtx);
@@ -1076,17 +1084,18 @@ iojsContextAttemptFree(iojsContext *jsCtx)
 
 
 int
-iojsCall(int index, iojsContext *jsCtx, iojsString *method, iojsString *uri,
-         iojsString *httpProtocol, iojsString **headers, iojsString **params)
+nodejsCall(int index, nodejsContext *jsCtx, nodejsString *method,
+           nodejsString *uri, nodejsString *httpProtocol,
+           nodejsString **headers, nodejsString **params)
 {
     jsCtx->afa(&jsCtx->refCount, 1);
 
-    iojsCallCmd  *cmd;
+    nodejsCallCmd  *cmd;
 
-    cmd = reinterpret_cast<iojsCallCmd *>(malloc(
-            sizeof(iojsCallCmd) + method->len + uri->len + httpProtocol->len
+    cmd = reinterpret_cast<nodejsCallCmd *>(malloc(
+            sizeof(nodejsCallCmd) + method->len + uri->len + httpProtocol->len
     ));
-    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+    NODEJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_CALL_LOADED_SCRIPT;
     cmd->index = index;
@@ -1107,20 +1116,21 @@ iojsCall(int index, iojsContext *jsCtx, iojsString *method, iojsString *uri,
     cmd->headers = headers;
     cmd->params = params;
 
-    iojsToJSSend(cmd);
+    nodejsToJSSend(cmd);
 
     return 0;
 }
 
 
 int
-iojsChunk(iojsContext *jsCtx, char *data, size_t len,
-          unsigned last, unsigned sr)
+nodejsChunk(nodejsContext *jsCtx, char *data, size_t len,
+            unsigned last, unsigned sr)
 {
-    iojsChunkCmd *cmd;
+    nodejsChunkCmd *cmd;
 
-    cmd = reinterpret_cast<iojsChunkCmd *>(malloc(sizeof(iojsChunkCmd) + len));
-    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+    cmd = reinterpret_cast<nodejsChunkCmd *>(malloc(sizeof(nodejsChunkCmd) +
+                                                    len));
+    NODEJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_PUSH_CHUNK;
     cmd->jsCtx = jsCtx;
@@ -1130,34 +1140,34 @@ iojsChunk(iojsContext *jsCtx, char *data, size_t len,
     cmd->sr = sr;
     memcpy(cmd->chunk.data, data, len);
 
-    iojsToJSSend(cmd);
+    nodejsToJSSend(cmd);
 
     return 0;
 }
 
 
 int
-iojsSubrequestHeaders(iojsContext *jsCtx, int status, iojsString *statusMsg,
-                      iojsString **headers)
+nodejsSubrequestHeaders(nodejsContext *jsCtx, int status,
+                        nodejsString *statusMsg, nodejsString **headers)
 {
-    iojsSubrequestHeadersCmd *cmd;
+    nodejsSubrequestHeadersCmd *cmd;
 
-    cmd = reinterpret_cast<iojsSubrequestHeadersCmd *>(
-            malloc(sizeof(iojsSubrequestHeadersCmd) +
-                   sizeof(iojsString) + statusMsg->len)
+    cmd = reinterpret_cast<nodejsSubrequestHeadersCmd *>(
+            malloc(sizeof(nodejsSubrequestHeadersCmd) +
+                   sizeof(nodejsString) + statusMsg->len)
     );
-    IOJS_CHECK_OUT_OF_MEMORY(cmd);
+    NODEJS_CHECK_OUT_OF_MEMORY(cmd);
 
     cmd->type = TO_JS_SUBREQUEST_HEADERS;
     cmd->jsCtx = jsCtx;
     cmd->status = status;
-    cmd->statusMessage = reinterpret_cast<iojsString *>(&cmd[1]);
+    cmd->statusMessage = reinterpret_cast<nodejsString *>(&cmd[1]);
     cmd->statusMessage->data = reinterpret_cast<char *>(&cmd->statusMessage[1]);
     cmd->statusMessage->len = statusMsg->len;
     memcpy(cmd->statusMessage->data, statusMsg->data, statusMsg->len);
     cmd->headers = headers;
 
-    iojsToJSSend(cmd);
+    nodejsToJSSend(cmd);
 
     return 0;
 }

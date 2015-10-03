@@ -2,13 +2,13 @@
  * Copyright Marat Abdullin (https://github.com/hoho)
  */
 
-#ifndef __LIBIOJSINTERNALS_H__
-#define __LIBIOJSINTERNALS_H__
+#ifndef __LIBNODEJSINTERNALS_H__
+#define __LIBNODEJSINTERNALS_H__
 
 #include "node.h"
 #include "v8.h"
 #include "uv.h"
-#include "libiojs.h"
+#include "libnodejs.h"
 
 #include <string>
 #include <vector>
@@ -21,7 +21,7 @@ typedef enum {
     TO_JS_RESPONSE_ERROR,
     TO_JS_SUBREQUEST_HEADERS,
     TO_JS_FREE_CALLBACK
-} iojsToJSCommandType;
+} nodejsToJSCommandType;
 
 
 typedef enum {
@@ -31,7 +31,7 @@ typedef enum {
     BY_JS_RESPONSE_BODY      = 4,
     BY_JS_BEGIN_SUBREQUEST   = 5,
     BY_JS_SUBREQUEST_DONE    = 6
-} iojsByJSCommandType;
+} nodejsByJSCommandType;
 
 
 typedef enum {
@@ -39,7 +39,7 @@ typedef enum {
     TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
     TO_JS_CALLBACK_REQUEST_ERROR      = 9,
     TO_JS_CALLBACK_RESPONSE_ERROR     = 10
-} iojsToJSCallbackCommandType;
+} nodejsToJSCallbackCommandType;
 
 
 typedef enum {
@@ -48,49 +48,49 @@ typedef enum {
     SR_HEADERS  = 4,
     SR_BODY     = 5,
     SR_CALLBACK = 6
-} iojsSrArgument;
+} nodejsSrArgument;
 
 
-#define IOJS_CHECK_OUT_OF_MEMORY(ptr)                                        \
+#define NODEJS_CHECK_OUT_OF_MEMORY(ptr)                                        \
     if (ptr == NULL) {                                                       \
         fprintf(stderr, "Out of memory\n");                                  \
         abort();                                                             \
     }
 
 
-typedef struct _iojsToJS {
-    iojsToJSCommandType   type;
-    iojsContext  *jsCtx;
-} iojsToJS;
+typedef struct _nodejsToJS {
+    nodejsToJSCommandType   type;
+    nodejsContext  *jsCtx;
+} nodejsToJS;
 
 
-typedef struct _iojsCallCmd : _iojsToJS {
-    int           index;
-    iojsString    method;
-    iojsString    uri;
-    iojsString    httpProtocol;
-    iojsString  **headers;
-    iojsString  **params;
-} iojsCallCmd;
+typedef struct _nodejsCallCmd : _nodejsToJS {
+    int             index;
+    nodejsString    method;
+    nodejsString    uri;
+    nodejsString    httpProtocol;
+    nodejsString  **headers;
+    nodejsString  **params;
+} nodejsCallCmd;
 
 
-typedef struct iojsChunkCmd : _iojsToJS {
-    iojsString    chunk;
-    unsigned      last:1;
-    unsigned      sr:1;
-} iojsChunkCmd;
+typedef struct nodejsChunkCmd : _nodejsToJS {
+    nodejsString    chunk;
+    unsigned        last:1;
+    unsigned        sr:1;
+} nodejsChunkCmd;
 
 
-typedef struct iojsSubrequestHeadersCmd : _iojsToJS {
-    int           status;
-    iojsString   *statusMessage;
-    iojsString  **headers;
-} iojsSubrequestHeadersCmd;
+typedef struct nodejsSubrequestHeadersCmd : _nodejsToJS {
+    int             status;
+    nodejsString   *statusMessage;
+    nodejsString  **headers;
+} nodejsSubrequestHeadersCmd;
 
 
-typedef struct _iojsFreeCallbackCmd : _iojsToJS {
+typedef struct _nodejsFreeCallbackCmd : _nodejsToJS {
     void  *cb;
-} iojsFreeCallbackCmd;
+} nodejsFreeCallbackCmd;
 
 
 typedef v8::Local<v8::Value> (*ExecuteStringFunc)(node::Environment* env,
@@ -101,13 +101,13 @@ typedef void (*ReportExceptionFunc)(node::Environment* env,
 
 
 int
-        iojsLoadScripts(node::Environment *env,
-                        ExecuteStringFunc execute, ReportExceptionFunc report);
+        nodejsLoadScripts(node::Environment *env,
+                          ExecuteStringFunc execute, ReportExceptionFunc report);
 void
-        iojsUnloadScripts(void);
+        nodejsUnloadScripts(void);
 
 void
-        iojsInitLogger(iojsLogger logger);
+        nodejsInitLogger(nodejsLogger logger);
 
 
-#endif /* __LIBIOJSINTERNALS_H__ */
+#endif /* __LIBNODEJSINTERNALS_H__ */
