@@ -46,9 +46,17 @@ utcDate._onTimeout = function() {
 function OutgoingMessage() {
   Stream.call(this);
 
+  // Queue that holds all currently pending data, until the response will be
+  // assigned to the socket (until it will its turn in the HTTP pipeline).
   this.output = [];
   this.outputEncodings = [];
   this.outputCallbacks = [];
+
+  // `outputSize` is an approximate measure of how much data is queued on this
+  // response. `_onPendingData` will be invoked to update similar global
+  // per-connection counter. That counter will be used to pause/unpause the
+  // TCP socket and HTTP Parser and thus handle the backpressure.
+  this.outputSize = 0;
 
   this.writable = true;
 
@@ -71,6 +79,8 @@ function OutgoingMessage() {
   this._header = null;
   this._headers = null;
   this._headerNames = {};
+
+  this._onPendingData = null;
 }
 util.inherits(OutgoingMessage, Stream);
 
@@ -120,6 +130,9 @@ OutgoingMessage.prototype._send = function(data, encoding, callback) {
       this.output.unshift(this._header);
       this.outputEncodings.unshift('binary');
       this.outputCallbacks.unshift(null);
+      this.outputSize += this._header.length;
+      if (this._onPendingData !== null)
+        this._onPendingData(this._header.length);
     }
     this._headerSent = true;
   }
@@ -133,12 +146,6 @@ OutgoingMessage.prototype._writeRaw = function(data, encoding, callback) {
     encoding = null;
   }
 
-  if (data.length === 0) {
-    if (typeof callback === 'function')
-      process.nextTick(callback);
-    return true;
-  }
-
   var connection = this.connection;
   if (connection &&
       connection._httpMessage === this &&
@@ -150,14 +157,23 @@ OutgoingMessage.prototype._writeRaw = function(data, encoding, callback) {
       var output = this.output;
       var outputEncodings = this.outputEncodings;
       var outputCallbacks = this.outputCallbacks;
+      connection.cork();
       for (var i = 0; i < outputLength; i++) {
         connection.write(output[i], outputEncodings[i],
                          outputCallbacks[i]);
       }
+      connection.uncork();
 
       this.output = [];
       this.outputEncodings = [];
       this.outputCallbacks = [];
+      if (this._onPendingData !== null)
+        this._onPendingData(-this.outputSize);
+      this.outputSize = 0;
+    } else if (data.length === 0) {
+      if (typeof callback === 'function')
+        process.nextTick(callback);
+      return true;
     }
 
     // Directly write to socket.
@@ -177,6 +193,9 @@ OutgoingMessage.prototype._buffer = function(data, encoding, callback) {
   this.output.push(data);
   this.outputEncodings.push(encoding);
   this.outputCallbacks.push(callback);
+  this.outputSize += data.length;
+  if (this._onPendingData !== null)
+    this._onPendingData(data.length);
   return false;
 };
 
@@ -620,10 +639,12 @@ OutgoingMessage.prototype._flush = function() {
       var output = this.output;
       var outputEncodings = this.outputEncodings;
       var outputCallbacks = this.outputCallbacks;
+      socket.cork();
       for (var i = 0; i < outputLength; i++) {
         ret = socket.write(output[i], outputEncodings[i],
                            outputCallbacks[i]);
       }
+      socket.uncork();
 
       this.output = [];
       this.outputEncodings = [];

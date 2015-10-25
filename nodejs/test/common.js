@@ -1,3 +1,4 @@
+/* eslint-disable required-modules */
 'use strict';
 var path = require('path');
 var fs = require('fs');
@@ -30,7 +31,7 @@ function rimrafSync(p) {
     if (e.code === 'ENOENT')
       return;
     if (e.code === 'EPERM')
-      return rmdirSync(p, er);
+      return rmdirSync(p, e);
     if (e.code !== 'EISDIR')
       throw e;
     rmdirSync(p, e);

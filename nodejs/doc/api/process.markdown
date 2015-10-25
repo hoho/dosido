@@ -648,6 +648,7 @@ Will print something like:
       zlib: '1.2.8',
       ares: '1.10.0-DEV',
       modules: '43',
+      icu: '55.1',
       openssl: '1.0.1k' }
 
 ## process.config
@@ -688,6 +689,11 @@ for the source tarball and headers-only tarball.
 
 * `name`: a string with a value that will always be `"node"` for Node.js. For
   legacy io.js releases, this will be `"io.js"`.
+* `lts`: a string with a value indicating the _codename_ of the LTS (Long-term
+  Support) line the current release is part of. This property only exists for
+  LTS releases and is `undefined` for all other release types, including stable
+  releases. Current valid values are:
+  - `"Argon"` for the v4.x LTS line beginning with v4.2.0.
 * `sourceUrl`: a complete URL pointing to a _.tar.gz_ file containing the
   source of the current release.
 * `headersUrl`: a complete URL pointing to a _.tar.gz_ file containing only

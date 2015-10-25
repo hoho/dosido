@@ -7,7 +7,10 @@
 
 {
   'variables': {
-    'icu_src_derb': [ '../../deps/icu/source/tools/genrb/derb.c' ],
+    'icu_src_derb': [
+      '../../deps/icu/source/tools/genrb/derb.c',
+      '../../deps/icu/source/tools/genrb/derb.cpp'
+    ],
   },
   'includes': [ '../../icu_config.gypi' ],
   'targets': [
@@ -396,6 +399,7 @@
           '../../deps/icu/source/common/ushape.cpp',
           '../../deps/icu/source/common/usprep.cpp',
           '../../deps/icu/source/common/uts46.cpp',
+          '../../deps/icu/source/common/uidna.cpp',
         ]}],
         [ 'OS == "solaris"', { 'defines': [
           '_XOPEN_SOURCE_EXTENDED=0',
