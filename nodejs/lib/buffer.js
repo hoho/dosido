@@ -203,7 +203,6 @@ Buffer.isEncoding = function(encoding) {
       case 'ucs-2':
       case 'utf16le':
       case 'utf-16le':
-      case 'raw':
         return true;
 
       default:
@@ -269,9 +268,6 @@ function byteLength(string, encoding) {
     switch (encoding) {
       case 'ascii':
       case 'binary':
-      // Deprecated
-      case 'raw':
-      case 'raws':
         return len;
 
       case 'utf8':
@@ -836,8 +832,10 @@ Buffer.prototype.writeUIntLE = function(value, offset, byteLength, noAssert) {
   value = +value;
   offset = offset >>> 0;
   byteLength = byteLength >>> 0;
-  if (!noAssert)
-    checkInt(this, value, offset, byteLength, Math.pow(2, 8 * byteLength), 0);
+  if (!noAssert) {
+    const maxBytes = Math.pow(2, 8 * byteLength) - 1;
+    checkInt(this, value, offset, byteLength, maxBytes, 0);
+  }
 
   var mul = 1;
   var i = 0;
@@ -853,8 +851,10 @@ Buffer.prototype.writeUIntBE = function(value, offset, byteLength, noAssert) {
   value = +value;
   offset = offset >>> 0;
   byteLength = byteLength >>> 0;
-  if (!noAssert)
-    checkInt(this, value, offset, byteLength, Math.pow(2, 8 * byteLength), 0);
+  if (!noAssert) {
+    const maxBytes = Math.pow(2, 8 * byteLength) - 1;
+    checkInt(this, value, offset, byteLength, maxBytes, 0);
+  }
 
   var i = byteLength - 1;
   var mul = 1;

@@ -266,9 +266,10 @@ argument: `null` on success, or an `Error` object on failure.
 `child.send()` emits an `'error'` event if no callback was given and the message
 cannot be sent, for example because the child process has already exited.
 
-Returns `true` under normal circumstances or `false` when the backlog of
+`child.send()` returns `false` if the channel has closed or when the backlog of
 unsent messages exceeds a threshold that makes it unwise to send more.
-Use the callback mechanism to implement flow control.
+Otherwise, it returns `true`. Use the callback mechanism to implement flow
+control.
 
 #### Example: sending server object
 
@@ -535,9 +536,10 @@ file:
      child.unref();
 
 When using the `detached` option to start a long-running process, the process
-will not stay running in the background unless it is provided with a `stdio`
-configuration that is not connected to the parent.  If the parent's `stdio` is
-inherited, the child will remain attached to the controlling terminal.
+will not stay running in the background after the parent exits unless it is
+provided with a `stdio` configuration that is not connected to the parent.
+If the parent's `stdio` is inherited, the child will remain attached to the
+controlling terminal.
 
 See also: [`child_process.exec()`](#child_process_child_process_exec_command_options_callback) and [`child_process.fork()`](#child_process_child_process_fork_modulepath_args_options)
 
@@ -715,6 +717,10 @@ process has exited.
     - `stderr` by default will be output to the parent process' stderr unless
       `stdio` is specified
   * `env` {Object} Environment key-value pairs
+  * `shell` {String} Shell to execute the command with
+    (Default: '/bin/sh' on UNIX, 'cmd.exe' on Windows,  The shell should
+     understand the `-c` switch on UNIX or `/s /c` on Windows. On Windows,
+     command line parsing should be compatible with `cmd.exe`.)
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
   * `timeout` {Number} In milliseconds the maximum amount of time the process is allowed to run. (Default: undefined)

@@ -22,6 +22,9 @@ function ClientRequest(options, cb) {
 
   if (typeof options === 'string') {
     options = url.parse(options);
+    if (!options.hostname) {
+      throw new Error('Unable to determine the domain name');
+    }
   } else {
     options = util._extend({}, options);
   }
@@ -67,6 +70,9 @@ function ClientRequest(options, cb) {
   self.socketPath = options.socketPath;
 
   var method = self.method = (options.method || 'GET').toUpperCase();
+  if (!common._checkIsHttpToken(method)) {
+    throw new TypeError('Method must be a valid HTTP token');
+  }
   self.path = options.path || '/';
   if (cb) {
     self.once('response', cb);

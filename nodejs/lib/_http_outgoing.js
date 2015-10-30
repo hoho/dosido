@@ -89,8 +89,12 @@ exports.OutgoingMessage = OutgoingMessage;
 
 
 OutgoingMessage.prototype.setTimeout = function(msecs, callback) {
-  if (callback)
+
+  if (callback) {
+    if (typeof callback !== 'function')
+      throw new TypeError('callback must be a function');
     this.on('timeout', callback);
+  }
 
   if (!this.socket) {
     this.once('socket', function(socket) {
@@ -131,7 +135,7 @@ OutgoingMessage.prototype._send = function(data, encoding, callback) {
       this.outputEncodings.unshift('binary');
       this.outputCallbacks.unshift(null);
       this.outputSize += this._header.length;
-      if (this._onPendingData !== null)
+      if (typeof this._onPendingData === 'function')
         this._onPendingData(this._header.length);
     }
     this._headerSent = true;
@@ -154,22 +158,7 @@ OutgoingMessage.prototype._writeRaw = function(data, encoding, callback) {
     // There might be pending data in the this.output buffer.
     var outputLength = this.output.length;
     if (outputLength > 0) {
-      var output = this.output;
-      var outputEncodings = this.outputEncodings;
-      var outputCallbacks = this.outputCallbacks;
-      connection.cork();
-      for (var i = 0; i < outputLength; i++) {
-        connection.write(output[i], outputEncodings[i],
-                         outputCallbacks[i]);
-      }
-      connection.uncork();
-
-      this.output = [];
-      this.outputEncodings = [];
-      this.outputCallbacks = [];
-      if (this._onPendingData !== null)
-        this._onPendingData(-this.outputSize);
-      this.outputSize = 0;
+      this._flushOutput(connection);
     } else if (data.length === 0) {
       if (typeof callback === 'function')
         process.nextTick(callback);
@@ -194,7 +183,7 @@ OutgoingMessage.prototype._buffer = function(data, encoding, callback) {
   this.outputEncodings.push(encoding);
   this.outputCallbacks.push(callback);
   this.outputSize += data.length;
-  if (this._onPendingData !== null)
+  if (typeof this._onPendingData === 'function')
     this._onPendingData(data.length);
   return false;
 };
@@ -314,6 +303,10 @@ OutgoingMessage.prototype._storeHeader = function(firstLine, headers) {
 };
 
 function storeHeader(self, state, field, value) {
+  if (!common._checkIsHttpToken(field)) {
+    throw new TypeError(
+      'Header name must be a valid HTTP Token ["' + field + '"]');
+  }
   value = escapeHeaderValue(value);
   state.messageHeader += field + ': ' + value + CRLF;
 
@@ -342,6 +335,9 @@ function storeHeader(self, state, field, value) {
 
 
 OutgoingMessage.prototype.setHeader = function(name, value) {
+  if (!common._checkIsHttpToken(name))
+    throw new TypeError(
+      'Header name must be a valid HTTP Token ["' + name + '"]');
   if (typeof name !== 'string')
     throw new TypeError('`name` should be a string in setHeader(name, value).');
   if (value === undefined)
@@ -517,7 +513,10 @@ OutgoingMessage.prototype.addTrailers = function(headers) {
       field = key;
       value = headers[key];
     }
-
+    if (!common._checkIsHttpToken(field)) {
+      throw new TypeError(
+        'Trailer name must be a valid HTTP Token ["' + field + '"]');
+    }
     this._trailer += field + ': ' + escapeHeaderValue(value) + CRLF;
   }
 };
@@ -630,26 +629,11 @@ OutgoingMessage.prototype._finish = function() {
 // to attempt to flush any pending messages out to the socket.
 OutgoingMessage.prototype._flush = function() {
   var socket = this.socket;
-  var outputLength, ret;
+  var ret;
 
   if (socket && socket.writable) {
     // There might be remaining data in this.output; write it out
-    outputLength = this.output.length;
-    if (outputLength > 0) {
-      var output = this.output;
-      var outputEncodings = this.outputEncodings;
-      var outputCallbacks = this.outputCallbacks;
-      socket.cork();
-      for (var i = 0; i < outputLength; i++) {
-        ret = socket.write(output[i], outputEncodings[i],
-                           outputCallbacks[i]);
-      }
-      socket.uncork();
-
-      this.output = [];
-      this.outputEncodings = [];
-      this.outputCallbacks = [];
-    }
+    ret = this._flushOutput(socket);
 
     if (this.finished) {
       // This is a queue to the server or client to bring in the next this.
@@ -659,6 +643,32 @@ OutgoingMessage.prototype._flush = function() {
       this.emit('drain');
     }
   }
+};
+
+OutgoingMessage.prototype._flushOutput = function _flushOutput(socket) {
+  var ret;
+  var outputLength = this.output.length;
+  if (outputLength <= 0)
+    return ret;
+
+  var output = this.output;
+  var outputEncodings = this.outputEncodings;
+  var outputCallbacks = this.outputCallbacks;
+  socket.cork();
+  for (var i = 0; i < outputLength; i++) {
+    ret = socket.write(output[i], outputEncodings[i],
+                       outputCallbacks[i]);
+  }
+  socket.uncork();
+
+  this.output = [];
+  this.outputEncodings = [];
+  this.outputCallbacks = [];
+  if (typeof this._onPendingData === 'function')
+    this._onPendingData(-this.outputSize);
+  this.outputSize = 0;
+
+  return ret;
 };
 
 

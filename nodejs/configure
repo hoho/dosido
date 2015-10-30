@@ -90,7 +90,8 @@ parser.add_option("--link-module",
     action="append",
     dest="linked_module",
     help="Path to a JS file to be bundled in the binary as a builtin."
-         "This module will be referenced by basename without extension."
+         "This module will be referenced by path without extension."
+         "e.g. /root/x/y.js will be referenced via require('root/x/y')."
          "Can be used multiple times")
 
 parser.add_option("--openssl-no-asm",
@@ -673,6 +674,10 @@ def configure_node(o):
     configure_arm(o)
   elif target_arch in ('mips', 'mipsel'):
     configure_mips(o)
+
+  if flavor == 'aix':
+    o['variables']['node_core_target_name'] = 'node_base'
+    o['variables']['node_target_type'] = 'static_library'
 
   if flavor in ('solaris', 'mac', 'linux', 'freebsd'):
     use_dtrace = not options.without_dtrace

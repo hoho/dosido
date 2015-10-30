@@ -517,7 +517,7 @@ function formatCollectionIterator(ctx, value, recurseTimes, visibleKeys, keys) {
   var nextRecurseTimes = recurseTimes === null ? null : recurseTimes - 1;
   var vals = mirror.preview();
   var output = [];
-  for (let o of vals) {
+  for (const o of vals) {
     output.push(formatValue(ctx, o, nextRecurseTimes));
   }
   return output;
@@ -761,14 +761,7 @@ exports.inherits = function(ctor, superCtor) {
                         'have a prototype.');
 
   ctor.super_ = superCtor;
-  ctor.prototype = Object.create(superCtor.prototype, {
-    constructor: {
-      value: ctor,
-      enumerable: false,
-      writable: true,
-      configurable: true
-    }
-  });
+  Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
 };
 
 exports._extend = function(origin, add) {
@@ -789,13 +782,6 @@ function hasOwnProperty(obj, prop) {
 
 
 // Deprecated old stuff.
-
-exports.p = internalUtil.deprecate(function() {
-  for (var i = 0, len = arguments.length; i < len; ++i) {
-    console.error(exports.inspect(arguments[i]));
-  }
-}, 'util.p is deprecated. Use console.error instead.');
-
 
 exports.exec = internalUtil.deprecate(function() {
   return require('child_process').exec.apply(this, arguments);
