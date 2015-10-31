@@ -4,7 +4,7 @@ build: libnodejs configure nginx
 
 .PHONY: nodejs
 nodejs:
-	cd nodejs && ./configure
+	cd nodejs && GYP_DEFINES="node_target_type=executable" ./configure
 	$(MAKE) -C nodejs
 
 
@@ -78,7 +78,7 @@ prepare-test: nodejs
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
-	./nodejs/node t/testrunner.js
+	./nodejs/out/Release/node t/testrunner.js
 
 
 # Remove linked nginx binary and make a new one

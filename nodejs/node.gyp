@@ -78,18 +78,15 @@
       'lib/internal/util.js',
       'lib/internal/streams/lazy_transform.js',
     ],
-  },
-
-  'conditions': [
-    [ 'node_target_type!="executable"', {
-      'variables': {
+    'conditions': [
+      [ 'node_target_type!="executable"', {
         'library_files': [
           'lib/_third_party_main.js',
           '../libnodejs/libnodejs.js',
         ]
-      },
-    }]
-  ],
+      }]
+    ],
+  },
 
   'targets': [
     {
