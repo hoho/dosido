@@ -35,7 +35,7 @@ bash auto/configure --with-cc=cl --builddir=objs ^
 		--with-openssl=../nodejs/deps/openssl ^
 		--with-pcre=../deps/pcre ^
 		--with-zlib=../nodejs/deps/zlib ^
-		--with-cc-opt="-I../libnodejs -DFD_SETSIZE=1024 -D_WINSOCK_DEPRECATED_NO_WARNINGS /wd4307"
+		--with-cc-opt="-I../libnodejs -DFD_SETSIZE=1024 /wd4307"
 cd ..
 if /i "%1"=="configure" goto exit
 
