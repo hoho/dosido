@@ -159,9 +159,9 @@ function stylizeNoColor(str, styleType) {
 
 
 function arrayToHash(array) {
-  var hash = {};
+  var hash = Object.create(null);
 
-  array.forEach(function(val, idx) {
+  array.forEach(function(val) {
     hash[val] = true;
   });
 
@@ -575,13 +575,9 @@ function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
       }
       if (str.indexOf('\n') > -1) {
         if (array) {
-          str = str.split('\n').map(function(line) {
-            return '  ' + line;
-          }).join('\n').substr(2);
+          str = str.replace(/\n/g, '\n  ');
         } else {
-          str = '\n' + str.split('\n').map(function(line) {
-            return '   ' + line;
-          }).join('\n');
+          str = str.replace(/(^|\n)/g, '\n   ');
         }
       }
     } else {

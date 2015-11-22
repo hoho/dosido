@@ -14,6 +14,21 @@ const Timer = process.binding('timer_wrap').Timer;
 const tls_wrap = process.binding('tls_wrap');
 const TCP = process.binding('tcp_wrap').TCP;
 const Pipe = process.binding('pipe_wrap').Pipe;
+const defaultSessionIdContext = getDefaultSessionIdContext();
+
+function getDefaultSessionIdContext() {
+  var defaultText = process.argv.join(' ');
+  /* SSL_MAX_SID_CTX_LENGTH is 128 bits */
+  if (process.config.variables.openssl_fips) {
+    return crypto.createHash('sha1')
+      .update(defaultText)
+      .digest('hex').slice(0, 32);
+  } else {
+    return crypto.createHash('md5')
+      .update(defaultText)
+      .digest('hex');
+  }
+}
 
 function onhandshakestart() {
   debug('onhandshakestart');
@@ -893,9 +908,7 @@ Server.prototype.setOptions = function(options) {
   if (options.sessionIdContext) {
     this.sessionIdContext = options.sessionIdContext;
   } else {
-    this.sessionIdContext = crypto.createHash('md5')
-                                  .update(process.argv.join(' '))
-                                  .digest('hex');
+    this.sessionIdContext = defaultSessionIdContext;
   }
 };
 
@@ -974,7 +987,7 @@ exports.connect = function(/* [port, host], options, cb */) {
   assert(typeof options.minDHSize === 'number',
          'options.minDHSize is not a number: ' + options.minDHSize);
   assert(options.minDHSize > 0,
-         'options.minDHSize is not a posivie number: ' +
+         'options.minDHSize is not a positive number: ' +
          options.minDHSize);
 
   var hostname = options.servername ||

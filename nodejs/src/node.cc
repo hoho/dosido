@@ -176,6 +176,7 @@ static void PrintErrorString(const char* format, ...) {
       stderr_handle == nullptr ||
       uv_guess_handle(_fileno(stderr)) != UV_TTY) {
     vfprintf(stderr, format, ap);
+    va_end(ap);
     return;
   }
 
@@ -3747,6 +3748,7 @@ void Init(int* argc,
   uv_async_init(uv_default_loop(),
                 &dispatch_debug_messages_async,
                 DispatchDebugMessagesAsyncCallback);
+  uv_unref(reinterpret_cast<uv_handle_t*>(&dispatch_debug_messages_async));
 
 #if defined(NODE_V8_OPTIONS)
   // Should come before the call to V8::SetFlagsFromCommandLine()
@@ -4054,11 +4056,8 @@ static void StartNodeInstance(void* arg) {
     env->set_trace_sync_io(trace_sync_io);
 
     // Enable debugger
-    if (instance_data->use_debug_agent()) {
+    if (instance_data->use_debug_agent())
       EnableDebug(env);
-    } else {
-      uv_unref(reinterpret_cast<uv_handle_t*>(&dispatch_debug_messages_async));
-    }
 
     {
       SealHandleScope seal(isolate);

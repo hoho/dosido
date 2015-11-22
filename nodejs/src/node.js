@@ -106,6 +106,8 @@
           var source = fs.readFileSync(filename, 'utf-8');
           // remove shebang and BOM
           source = internalModule.stripBOM(source.replace(/^\#\!.*/, ''));
+          // wrap it
+          source = Module.wrap(source);
           // compile the script, this will throw if it fails
           new vm.Script(source, {filename: filename, displayErrors: true});
           process.exit(0);
@@ -724,7 +726,7 @@
       // not-reading state.
       if (stdin._handle && stdin._handle.readStop) {
         stdin._handle.reading = false;
-        stdin.push('');
+        stdin._readableState.reading = false;
         stdin._handle.readStop();
       }
 
@@ -733,7 +735,7 @@
       stdin.on('pause', function() {
         if (!stdin._handle)
           return;
-        stdin.push('');
+        stdin._readableState.reading = false;
         stdin._handle.reading = false;
         stdin._handle.readStop();
       });

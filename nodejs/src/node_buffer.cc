@@ -362,6 +362,11 @@ MaybeLocal<Object> New(Environment* env,
   }
 
   Local<ArrayBuffer> ab = ArrayBuffer::New(env->isolate(), data, length);
+  // `Neuter()`ing is required here to prevent materialization of the backing
+  // store in v8. `nullptr` buffers are not writable, so this is semantically
+  // correct.
+  if (data == nullptr)
+    ab->Neuter();
   Local<Uint8Array> ui = Uint8Array::New(ab, 0, length);
   Maybe<bool> mb =
       ui->SetPrototype(env->context(), env->buffer_prototype_object());
@@ -730,7 +735,9 @@ uint32_t WriteFloatGeneric(const FunctionCallbackInfo<Value>& args) {
 
   T val = args[1]->NumberValue();
   uint32_t offset = args[2]->Uint32Value();
-  CHECK_LE(offset + sizeof(T), ts_obj_length);
+  size_t memcpy_num = sizeof(T);
+  if (offset + sizeof(T) > ts_obj_length)
+    memcpy_num = ts_obj_length - offset;
 
   union NoAlias {
     T val;
@@ -741,8 +748,8 @@ uint32_t WriteFloatGeneric(const FunctionCallbackInfo<Value>& args) {
   char* ptr = static_cast<char*>(ts_obj_data) + offset;
   if (endianness != GetEndianness())
     Swizzle(na.bytes, sizeof(na.bytes));
-  memcpy(ptr, na.bytes, sizeof(na.bytes));
-  return offset + sizeof(na.bytes);
+  memcpy(ptr, na.bytes, memcpy_num);
+  return offset + memcpy_num;
 }
 
 

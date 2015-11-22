@@ -12,14 +12,12 @@ test-tls-ticket-cluster           : PASS,FLAKY
 [$system==linux]
 test-cluster-worker-forced-exit   : PASS,FLAKY
 test-http-client-timeout-event    : PASS,FLAKY
-test-tls-no-sslv3                 : PASS,FLAKY
 test-child-process-buffering      : PASS,FLAKY
 test-child-process-exit-code      : PASS,FLAKY
 
 [$system==macos]
 
 [$system==solaris] # Also applies to SmartOS
-test-debug-signal-cluster         : PASS,FLAKY
 
 [$system==freebsd]
 test-net-socket-local-address     : PASS,FLAKY
