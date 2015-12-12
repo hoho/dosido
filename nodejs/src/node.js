@@ -71,6 +71,9 @@
       var d = NativeModule.require('_debug_agent');
       d.start();
 
+    } else if (process.profProcess) {
+      NativeModule.require('internal/v8_prof_processor');
+
     } else {
       // There is user code to be run
 
@@ -144,7 +147,7 @@
         // If -i or --interactive were passed, or stdin is a TTY.
         if (process._forceRepl || NativeModule.require('tty').isatty(0)) {
           // REPL
-          var cliRepl = Module.requireRepl();
+          var cliRepl = NativeModule.require('internal/repl');
           cliRepl.createInternalRepl(process.env, function(err, repl) {
             if (err) {
               throw err;
@@ -356,20 +359,20 @@
           // callback invocation with small numbers of arguments to avoid the
           // performance hit associated with using `fn.apply()`
           if (args === undefined) {
-            doNTCallback0(callback);
+            nextTickCallbackWith0Args(callback);
           } else {
             switch (args.length) {
               case 1:
-                doNTCallback1(callback, args[0]);
+                nextTickCallbackWith1Arg(callback, args[0]);
                 break;
               case 2:
-                doNTCallback2(callback, args[0], args[1]);
+                nextTickCallbackWith2Args(callback, args[0], args[1]);
                 break;
               case 3:
-                doNTCallback3(callback, args[0], args[1], args[2]);
+                nextTickCallbackWith3Args(callback, args[0], args[1], args[2]);
                 break;
               default:
-                doNTCallbackMany(callback, args);
+                nextTickCallbackWithManyArgs(callback, args);
             }
           }
           if (1e4 < tickInfo[kIndex])
@@ -397,20 +400,20 @@
           // callback invocation with small numbers of arguments to avoid the
           // performance hit associated with using `fn.apply()`
           if (args === undefined) {
-            doNTCallback0(callback);
+            nextTickCallbackWith0Args(callback);
           } else {
             switch (args.length) {
               case 1:
-                doNTCallback1(callback, args[0]);
+                nextTickCallbackWith1Arg(callback, args[0]);
                 break;
               case 2:
-                doNTCallback2(callback, args[0], args[1]);
+                nextTickCallbackWith2Args(callback, args[0], args[1]);
                 break;
               case 3:
-                doNTCallback3(callback, args[0], args[1], args[2]);
+                nextTickCallbackWith3Args(callback, args[0], args[1], args[2]);
                 break;
               default:
-                doNTCallbackMany(callback, args);
+                nextTickCallbackWithManyArgs(callback, args);
             }
           }
           if (1e4 < tickInfo[kIndex])
@@ -424,7 +427,7 @@
       } while (tickInfo[kLength] !== 0);
     }
 
-    function doNTCallback0(callback) {
+    function nextTickCallbackWith0Args(callback) {
       var threw = true;
       try {
         callback();
@@ -435,7 +438,7 @@
       }
     }
 
-    function doNTCallback1(callback, arg1) {
+    function nextTickCallbackWith1Arg(callback, arg1) {
       var threw = true;
       try {
         callback(arg1);
@@ -446,7 +449,7 @@
       }
     }
 
-    function doNTCallback2(callback, arg1, arg2) {
+    function nextTickCallbackWith2Args(callback, arg1, arg2) {
       var threw = true;
       try {
         callback(arg1, arg2);
@@ -457,7 +460,7 @@
       }
     }
 
-    function doNTCallback3(callback, arg1, arg2, arg3) {
+    function nextTickCallbackWith3Args(callback, arg1, arg2, arg3) {
       var threw = true;
       try {
         callback(arg1, arg2, arg3);
@@ -468,7 +471,7 @@
       }
     }
 
-    function doNTCallbackMany(callback, args) {
+    function nextTickCallbackWithManyArgs(callback, args) {
       var threw = true;
       try {
         callback.apply(null, args);
@@ -953,7 +956,7 @@
   };
 
   NativeModule.wrapper = [
-    '(function (exports, require, module, __filename, __dirname) { ',
+    '(function (exports, require, module, __filename, __dirname) {\n',
     '\n});'
   ];
 

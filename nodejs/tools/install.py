@@ -10,6 +10,7 @@ except ImportError:
 import os
 import re
 import shutil
+import stat
 import sys
 
 # set at init time

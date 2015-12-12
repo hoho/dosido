@@ -84,7 +84,21 @@ parser.add_option("--fully-static",
     action="store_true",
     dest="fully_static",
     help="Generate an executable without external dynamic libraries. This "
-         "will not work on OSX when using default compilation environment")
+         "will not work on OSX when using the default compilation environment")
+
+parser.add_option("--partly-static",
+    action="store_true",
+    dest="partly_static",
+    help="Generate an executable with libgcc and libstdc++ libraries. This "
+         "will not work on OSX when using the default compilation environment")
+
+parser.add_option("--enable-vtune-profiling",
+    action="store_true",
+    dest="enable_vtune_profiling",
+    help="Enable profiling support for Intel Vtune profiler to profile"
+         "JavaScript code executed in nodejs. This feature is only available "
+         "for ia32, x32 or x64 platform.")
+
 
 parser.add_option("--link-module",
     action="append",
@@ -679,6 +693,15 @@ def configure_node(o):
     o['variables']['node_core_target_name'] = 'node_base'
     o['variables']['node_target_type'] = 'static_library'
 
+  if target_arch in ('x86', 'x64', 'ia32', 'x32'):
+    o['variables']['node_enable_v8_vtunejit'] = b(options.enable_vtune_profiling)
+  elif options.enable_vtune_profiling:
+    raise Exception(
+       'vtune profiler for JavaScript is only supported on x86, x32 or x64 '
+       'platform.')
+  else:
+    o['variables']['node_enable_v8_vtunejit'] = 'false'
+
   if flavor in ('solaris', 'mac', 'linux', 'freebsd'):
     use_dtrace = not options.without_dtrace
     # Don't enable by default on linux and freebsd
@@ -777,7 +800,7 @@ def configure_v8(o):
   o['variables']['v8_no_strict_aliasing'] = 1  # Work around compiler bugs.
   o['variables']['v8_optimized_debug'] = 0  # Compile with -O0 in debug builds.
   o['variables']['v8_random_seed'] = 0  # Use a random seed for hash tables.
-  o['variables']['v8_use_snapshot'] = 0 if options.without_snapshot else 1
+  o['variables']['v8_use_snapshot'] = 'false' if options.without_snapshot else 'true'
 
 def configure_openssl(o):
   o['variables']['node_use_openssl'] = b(not options.without_ssl)
@@ -787,7 +810,7 @@ def configure_openssl(o):
     o['variables']['openssl_fips'] = options.openssl_fips
     fips_dir = os.path.join(root_dir, 'deps', 'openssl', 'fips')
     fips_ld = os.path.abspath(os.path.join(fips_dir, 'fipsld'))
-    o['make_global_settings'] = [
+    o['make_fips_settings'] = [
       ['LINK', fips_ld + ' <(openssl_fips)/bin/fipsld'],
     ]
   else:
@@ -799,12 +822,19 @@ def configure_openssl(o):
   configure_library('openssl', o)
 
 
-def configure_fullystatic(o):
-  if options.fully_static:
-    o['libraries'] += ['-static']
+def configure_static(o):
+  if options.fully_static or options.partly_static:
     if flavor == 'mac':
       print("Generation of static executable will not work on OSX "
-            "when using default compilation environment")
+            "when using the default compilation environment")
+      return
+
+    if options.fully_static:
+      o['libraries'] += ['-static']
+    elif options.partly_static:
+      o['libraries'] += ['-static-libgcc', '-static-libstdc++']
+      if options.enable_asan:
+        o['libraries'] += ['-static-libasan']
 
 
 def configure_winsdk(o):
@@ -1102,12 +1132,21 @@ configure_v8(output)
 configure_openssl(output)
 configure_winsdk(output)
 configure_intl(output)
-configure_fullystatic(output)
+configure_static(output)
 
 # variables should be a root level element,
 # move everything else to target_defaults
 variables = output['variables']
 del output['variables']
+
+# make_global_settings for special FIPS linking
+# should not be used to compile modules in node-gyp
+config_fips = { 'make_global_settings' : [] }
+if 'make_fips_settings' in output:
+  config_fips['make_global_settings'] = output['make_fips_settings']
+  del output['make_fips_settings']
+  write('config_fips.gypi', do_not_edit +
+        pprint.pformat(config_fips, indent=2) + '\n')
 
 # make_global_settings should be a root level element too
 if 'make_global_settings' in output:

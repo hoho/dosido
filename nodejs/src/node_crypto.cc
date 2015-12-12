@@ -124,6 +124,13 @@ struct ClearErrorOnReturn {
   ~ClearErrorOnReturn() { ERR_clear_error(); }
 };
 
+// Pop errors from OpenSSL's error stack that were added
+// between when this was constructed and destructed.
+struct MarkPopErrorOnReturn {
+  MarkPopErrorOnReturn() { ERR_set_mark(); }
+  ~MarkPopErrorOnReturn() { ERR_pop_to_mark(); }
+};
+
 static uv_mutex_t* locks;
 
 const char* const root_certs[] = {
@@ -446,26 +453,6 @@ static BIO* LoadBIO(Environment* env, Local<Value> v) {
 }
 
 
-// Takes a string or buffer and loads it into an X509
-// Caller responsible for X509_free-ing the returned object.
-static X509* LoadX509(Environment* env, Local<Value> v) {
-  HandleScope scope(env->isolate());
-
-  BIO *bio = LoadBIO(env, v);
-  if (!bio)
-    return nullptr;
-
-  X509 * x509 = PEM_read_bio_X509(bio, nullptr, CryptoPemCallback, nullptr);
-  if (!x509) {
-    BIO_free_all(bio);
-    return nullptr;
-  }
-
-  BIO_free_all(bio);
-  return x509;
-}
-
-
 void SecureContext::SetKey(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
@@ -661,16 +648,19 @@ void SecureContext::AddCACert(const FunctionCallbackInfo<Value>& args) {
     newCAStore = true;
   }
 
-  X509* x509 = LoadX509(env, args[0]);
-  if (!x509)
-    return;
+  unsigned cert_count = 0;
+  if (BIO* bio = LoadBIO(env, args[0])) {
+    while (X509* x509 =  // NOLINT(whitespace/if-one-line)
+        PEM_read_bio_X509(bio, nullptr, CryptoPemCallback, nullptr)) {
+      X509_STORE_add_cert(sc->ca_store_, x509);
+      SSL_CTX_add_client_CA(sc->ctx_, x509);
+      X509_free(x509);
+      cert_count += 1;
+    }
+    BIO_free_all(bio);
+  }
 
-  X509_STORE_add_cert(sc->ca_store_, x509);
-  SSL_CTX_add_client_CA(sc->ctx_, x509);
-
-  X509_free(x509);
-
-  if (newCAStore) {
+  if (cert_count > 0 && newCAStore) {
     SSL_CTX_set_cert_store(sc->ctx_, sc->ca_store_);
   }
 }
@@ -3054,6 +3044,11 @@ void CipherBase::Init(const char* cipher_type,
                       int key_buf_len) {
   HandleScope scope(env()->isolate());
 
+#ifdef NODE_FIPS_MODE
+  return env()->ThrowError(
+    "crypto.createCipher() is not supported in FIPS mode.");
+#endif  // NODE_FIPS_MODE
+
   CHECK_EQ(cipher_, nullptr);
   cipher_ = EVP_get_cipherbyname(cipher_type);
   if (cipher_ == nullptr) {
@@ -4651,8 +4646,6 @@ void ECDH::GenerateKeys(const FunctionCallbackInfo<Value>& args) {
 
   if (!EC_KEY_generate_key(ecdh->key_))
     return env->ThrowError("Failed to generate EC_KEY");
-
-  ecdh->generated_ = true;
 }
 
 
@@ -4692,6 +4685,9 @@ void ECDH::ComputeSecret(const FunctionCallbackInfo<Value>& args) {
 
   ECDH* ecdh = Unwrap<ECDH>(args.Holder());
 
+  if (!ecdh->IsKeyPairValid())
+    return env->ThrowError("Invalid key pair");
+
   EC_POINT* pub = ecdh->BufferToPoint(Buffer::Data(args[0]),
                                       Buffer::Length(args[0]));
   if (pub == nullptr)
@@ -4722,9 +4718,6 @@ void ECDH::GetPublicKey(const FunctionCallbackInfo<Value>& args) {
   CHECK_EQ(args.Length(), 1);
 
   ECDH* ecdh = Unwrap<ECDH>(args.Holder());
-
-  if (!ecdh->generated_)
-    return env->ThrowError("You should generate ECDH keys first");
 
   const EC_POINT* pub = EC_KEY_get0_public_key(ecdh->key_);
   if (pub == nullptr)
@@ -4757,9 +4750,6 @@ void ECDH::GetPrivateKey(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
   ECDH* ecdh = Unwrap<ECDH>(args.Holder());
-
-  if (!ecdh->generated_)
-    return env->ThrowError("You should generate ECDH keys first");
 
   const BIGNUM* b = EC_KEY_get0_private_key(ecdh->key_);
   if (b == nullptr)
@@ -4794,12 +4784,42 @@ void ECDH::SetPrivateKey(const FunctionCallbackInfo<Value>& args) {
   if (priv == nullptr)
     return env->ThrowError("Failed to convert Buffer to BN");
 
+  if (!ecdh->IsKeyValidForCurve(priv)) {
+    BN_free(priv);
+    return env->ThrowError("Private key is not valid for specified curve.");
+  }
+
   int result = EC_KEY_set_private_key(ecdh->key_, priv);
   BN_free(priv);
 
   if (!result) {
     return env->ThrowError("Failed to convert BN to a private key");
   }
+
+  // To avoid inconsistency, clear the current public key in-case computing
+  // the new one fails for some reason.
+  EC_KEY_set_public_key(ecdh->key_, nullptr);
+
+  MarkPopErrorOnReturn mark_pop_error_on_return;
+  (void) &mark_pop_error_on_return;  // Silence compiler warning.
+
+  const BIGNUM* priv_key = EC_KEY_get0_private_key(ecdh->key_);
+  CHECK_NE(priv_key, nullptr);
+
+  EC_POINT* pub = EC_POINT_new(ecdh->group_);
+  CHECK_NE(pub, nullptr);
+
+  if (!EC_POINT_mul(ecdh->group_, pub, priv_key, nullptr, nullptr, nullptr)) {
+    EC_POINT_free(pub);
+    return env->ThrowError("Failed to generate ECDH public key");
+  }
+
+  if (!EC_KEY_set_public_key(ecdh->key_, pub)) {
+    EC_POINT_free(pub);
+    return env->ThrowError("Failed to set generated public key");
+  }
+
+  EC_POINT_free(pub);
 }
 
 
@@ -4813,12 +4833,36 @@ void ECDH::SetPublicKey(const FunctionCallbackInfo<Value>& args) {
   EC_POINT* pub = ecdh->BufferToPoint(Buffer::Data(args[0].As<Object>()),
                                       Buffer::Length(args[0].As<Object>()));
   if (pub == nullptr)
-    return;
+    return env->ThrowError("Failed to convert Buffer to EC_POINT");
 
   int r = EC_KEY_set_public_key(ecdh->key_, pub);
   EC_POINT_free(pub);
   if (!r)
-    return env->ThrowError("Failed to convert BN to a private key");
+    return env->ThrowError("Failed to set EC_POINT as the public key");
+}
+
+
+bool ECDH::IsKeyValidForCurve(const BIGNUM* private_key) {
+  ASSERT_NE(group_, nullptr);
+  CHECK_NE(private_key, nullptr);
+  // Private keys must be in the range [1, n-1].
+  // Ref: Section 3.2.1 - http://www.secg.org/sec1-v2.pdf
+  if (BN_cmp(private_key, BN_value_one()) < 0) {
+    return false;
+  }
+  BIGNUM* order = BN_new();
+  CHECK_NE(order, nullptr);
+  bool result = EC_GROUP_get_order(group_, order, nullptr) &&
+                BN_cmp(private_key, order) < 0;
+  BN_free(order);
+  return result;
+}
+
+
+bool ECDH::IsKeyPairValid() {
+  MarkPopErrorOnReturn mark_pop_error_on_return;
+  (void) &mark_pop_error_on_return;  // Silence compiler warning.
+  return 1 == EC_KEY_check_key(key_);
 }
 
 

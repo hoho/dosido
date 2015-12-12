@@ -12,6 +12,7 @@
     'node_use_openssl%': 'true',
     'node_shared_openssl%': 'false',
     'node_v8_options%': '',
+    'node_enable_v8_vtunejit%': 'false',
     'node_target_type%': 'executable',
     'node_core_target_name%': 'node',
     'library_files': [
@@ -77,7 +78,20 @@
       'lib/internal/repl.js',
       'lib/internal/socket_list.js',
       'lib/internal/util.js',
+      'lib/internal/v8_prof_polyfill.js',
+      'lib/internal/v8_prof_processor.js',
       'lib/internal/streams/lazy_transform.js',
+      'deps/v8/tools/splaytree.js',
+      'deps/v8/tools/codemap.js',
+      'deps/v8/tools/consarray.js',
+      'deps/v8/tools/csvparser.js',
+      'deps/v8/tools/profile.js',
+      'deps/v8/tools/profile_view.js',
+      'deps/v8/tools/logreader.js',
+      'deps/v8/tools/tickprocessor.js',
+      'deps/v8/tools/SourceMap.js',
+      'deps/v8/tools/tickprocessor-driver.js',
+      'deps/v8/tools/mac-nm',
     ],
     'conditions': [
       [ 'node_target_type!="executable"', {
@@ -238,6 +252,13 @@
             [ 'icu_small=="true"', {
               'defines': [ 'NODE_HAVE_SMALL_ICU=1' ],
           }]],
+        }],
+        [ 'node_enable_v8_vtunejit=="true" and (target_arch=="x64" or \
+           target_arch=="ia32" or target_arch=="x32")', {
+          'defines': [ 'NODE_ENABLE_VTUNE_PROFILING' ],
+          'dependencies': [
+            'deps/v8/src/third_party/vtune/v8vtune.gyp:v8_vtune'
+          ],
         }],
         [ 'node_use_openssl=="true"', {
           'defines': [ 'HAVE_OPENSSL=1' ],

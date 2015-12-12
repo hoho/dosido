@@ -117,6 +117,11 @@ function error_test() {
       expect: prompt_multiline },
     { client: client_unix, send: '+ ".2"}`',
       expect: `'io.js 1.0.2'\n${prompt_unix}` },
+    // Dot prefix in multiline commands aren't treated as commands
+    { client: client_unix, send: '("a"',
+      expect: prompt_multiline },
+    { client: client_unix, send: '.charAt(0))',
+      expect: `'a'\n${prompt_unix}` },
     // Floating point numbers are not interpreted as REPL commands.
     { client: client_unix, send: '.1234',
       expect: '0.1234' },
@@ -278,6 +283,10 @@ function error_test() {
       expect: 'undefined\n' + prompt_unix },
     { client: client_unix, send: '/* \'\n"\n\'"\'\n*/',
       expect: 'undefined\n' + prompt_unix },
+    // REPL should get a normal require() function, not one that allows
+    // access to internal modules without the --expose_internals flag.
+    { client: client_unix, send: 'require("internal/repl")',
+      expect: /^Error: Cannot find module 'internal\/repl'/ },
   ]);
 }
 

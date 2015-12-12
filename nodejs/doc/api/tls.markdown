@@ -159,7 +159,7 @@ Returned by tls.createSecurePair.
 The event is emitted from the SecurePair once the pair has successfully
 established a secure connection.
 
-Similarly to the checking for the server 'secureConnection' event,
+Similarly to the checking for the server `'secureConnection'` event,
 pair.cleartext.authorized should be checked to confirm whether the certificate
 used properly authorized.
 
@@ -173,7 +173,7 @@ connections using TLS or SSL.
 
 `function (exception, tlsSocket) { }`
 
-When a client connection emits an 'error' event before secure connection is
+When a client connection emits an `'error'` event before secure connection is
 established - it will be forwarded here.
 
 `tlsSocket` is the [tls.TLSSocket][] that the error originated from.
@@ -207,9 +207,9 @@ Calling `callback(err)` will result in a `socket.destroy(err)` call.
 
 Typical flow:
 
-1. Client connects to server and sends `OCSPRequest` to it (via status info
+1. Client connects to server and sends `'OCSPRequest'` to it (via status info
    extension in ClientHello.)
-2. Server receives request and invokes `OCSPRequest` event listener if present
+2. Server receives request and invokes `'OCSPRequest'` event listener if present
 3. Server grabs OCSP url from either `certificate` or `issuer` and performs an
    [OCSP request] to the CA
 4. Server receives `OCSPResponse` from CA and sends it back to client via
@@ -333,7 +333,7 @@ gets high.
 
 ## Class: tls.TLSSocket
 
-This is a wrapped version of [net.Socket][] that does transparent encryption
+This is a wrapped version of [`net.Socket`][] that does transparent encryption
 of written data and all required TLS negotiation.
 
 This instance implements a duplex [Stream][] interfaces.  It has all the
@@ -346,7 +346,7 @@ only return data while the connection is open.
 
 Construct a new TLSSocket object from existing TCP socket.
 
-`socket` is an instance of [net.Socket][]
+`socket` is an instance of [`net.Socket`][]
 
 `options` is an optional object that might contain following properties:
 
@@ -356,7 +356,7 @@ Construct a new TLSSocket object from existing TCP socket.
   - `isServer`: If `true` - TLS socket will be instantiated in server-mode.
     Default: `false`
 
-  - `server`: An optional [net.Server][] instance
+  - `server`: An optional [`net.Server`][] instance
 
   - `requestCert`: Optional, see [tls.createSecurePair][]
 
@@ -371,7 +371,7 @@ Construct a new TLSSocket object from existing TCP socket.
   - `session`: Optional, a `Buffer` instance, containing TLS session
 
   - `requestOCSP`: Optional, if `true` - OCSP status request extension would
-    be added to client hello, and `OCSPResponse` event will be emitted on socket
+    be added to client hello, and `'OCSPResponse'` event will be emitted on socket
     before establishing secure communication
 
 ### Event: 'OCSPResponse'
@@ -425,7 +425,7 @@ Example:
 { name: 'AES256-SHA', version: 'TLSv1/SSLv3' }
 
 See SSL_CIPHER_get_name() and SSL_CIPHER_get_version() in
-http://www.openssl.org/docs/ssl/ssl.html#DEALING_WITH_CIPHERS for more
+https://www.openssl.org/docs/ssl/ssl.html#DEALING_WITH_CIPHERS for more
 information.
 
 ### tlsSocket.getEphemeralKeyInfo()
@@ -605,7 +605,7 @@ Creates a new client connection to the given `port` and `host` (old API) or
     error. Default: 1024.
 
 The `callback` parameter will be added as a listener for the
-['secureConnect'][] event.
+[`'secureConnect'`][] event.
 
 `tls.connect()` returns a [tls.TLSSocket][] object.
 
@@ -680,7 +680,7 @@ dictionary with keys:
   (Certificate Revocation List)
 * `ciphers`: A string describing the ciphers to use or exclude.
   Consult
-  <http://www.openssl.org/docs/apps/ciphers.html#CIPHER_LIST_FORMAT>
+  <https://www.openssl.org/docs/apps/ciphers.html#CIPHER_LIST_FORMAT>
   for details on the format.
 * `honorCipherOrder` : When choosing a cipher, use the server's preferences
   instead of the client preferences. For further details see `tls` module
@@ -719,7 +719,7 @@ NOTE: `cleartext` has the same APIs as [tls.TLSSocket][]
 ## tls.createServer(options[, secureConnectionListener])
 
 Creates a new [tls.Server][].  The `connectionListener` argument is
-automatically set as a listener for the [secureConnection][] event.  The
+automatically set as a listener for the [`'secureConnection'`][] event.  The
 `options` object has these possibilities:
 
   - `pfx`: A string or `Buffer` containing the private key, certificate and
@@ -914,30 +914,30 @@ Example:
     console.log(ciphers); // ['AES128-SHA', 'AES256-SHA', ...]
 
 
-[OpenSSL cipher list format documentation]: http://www.openssl.org/docs/apps/ciphers.html#CIPHER_LIST_FORMAT
-[Chrome's 'modern cryptography' setting]: http://www.chromium.org/Home/chromium-security/education/tls#TOC-Deprecation-of-TLS-Features-Algorithms-in-Chrome
+[OpenSSL cipher list format documentation]: https://www.openssl.org/docs/apps/ciphers.html#CIPHER_LIST_FORMAT
+[Chrome's 'modern cryptography' setting]: https://www.chromium.org/Home/chromium-security/education/tls#TOC-Deprecation-of-TLS-Features-Algorithms-in-Chrome
 [specific attacks affecting larger AES key sizes]: https://www.schneier.com/blog/archives/2009/07/another_new_aes.html
-[BEAST attacks]: http://blog.ivanristic.com/2011/10/mitigating-the-beast-attack-on-tls.html
+[BEAST attacks]: https://blog.ivanristic.com/2011/10/mitigating-the-beast-attack-on-tls.html
 [crypto.getCurves()]: crypto.html#crypto_crypto_getcurves
 [tls.createServer]: #tls_tls_createserver_options_secureconnectionlistener
-[tls.createSecurePair]: #tls_tls_createsecurepair_context_isserver_requestcert_rejectunauthorized
+[tls.createSecurePair]: #tls_tls_createsecurepair_context_isserver_requestcert_rejectunauthorized_options
 [tls.TLSSocket]: #tls_class_tls_tlssocket
-[net.Server]: net.html#net_class_net_server
-[net.Socket]: net.html#net_class_net_socket
+[`net.Server`]: net.html#net_class_net_server
+[`net.Socket`]: net.html#net_class_net_socket
 [net.Server.address()]: net.html#net_server_address
-['secureConnect']: #tls_event_secureconnect
-[secureConnection]: #tls_event_secureconnection
+[`'secureConnect'`]: #tls_event_secureconnect
+[`'secureConnection'`]: #tls_event_secureconnection
 [Perfect Forward Secrecy]: #tls_perfect_forward_secrecy
 [Stream]: stream.html#stream_stream
-[SSL_METHODS]: http://www.openssl.org/docs/ssl/ssl.html#DEALING_WITH_PROTOCOL_METHODS
+[SSL_METHODS]: https://www.openssl.org/docs/ssl/ssl.html#DEALING_WITH_PROTOCOL_METHODS
 [tls.Server]: #tls_class_tls_server
-[SSL_CTX_set_timeout]: http://www.openssl.org/docs/ssl/SSL_CTX_set_timeout.html
-[RFC 4492]: http://www.rfc-editor.org/rfc/rfc4492.txt
-[Forward secrecy]: http://en.wikipedia.org/wiki/Perfect_forward_secrecy
+[SSL_CTX_set_timeout]: https://www.openssl.org/docs/ssl/SSL_CTX_set_timeout.html
+[RFC 4492]: https://www.rfc-editor.org/rfc/rfc4492.txt
+[Forward secrecy]: https://en.wikipedia.org/wiki/Perfect_forward_secrecy
 [DHE]: https://en.wikipedia.org/wiki/Diffie%E2%80%93Hellman_key_exchange
 [ECDHE]: https://en.wikipedia.org/wiki/Elliptic_curve_Diffie%E2%80%93Hellman
-[asn1.js]: http://npmjs.org/package/asn1.js
-[OCSP request]: http://en.wikipedia.org/wiki/OCSP_stapling
+[asn1.js]: https://npmjs.org/package/asn1.js
+[OCSP request]: https://en.wikipedia.org/wiki/OCSP_stapling
 [TLS recommendations]: https://wiki.mozilla.org/Security/Server_Side_TLS
 [TLS Session Tickets]: https://www.ietf.org/rfc/rfc5077.txt
 [getPeerCertificate]: #tls_tlssocket_getpeercertificate_detailed

@@ -40,7 +40,7 @@ function alignPool() {
 }
 
 
-function Buffer(arg) {
+function Buffer(arg, encoding) {
   // Common case.
   if (typeof arg === 'number') {
     // If less than zero, or NaN.
@@ -51,7 +51,7 @@ function Buffer(arg) {
 
   // Slightly less common case.
   if (typeof arg === 'string') {
-    return fromString(arg, arguments[1]);
+    return fromString(arg, encoding);
   }
 
   // Unusual.
@@ -272,6 +272,7 @@ function byteLength(string, encoding) {
 
       case 'utf8':
       case 'utf-8':
+      case undefined:
         return binding.byteLengthUtf8(string);
 
       case 'ucs2':
@@ -326,13 +327,34 @@ Object.defineProperty(Buffer.prototype, 'offset', {
 function slowToString(encoding, start, end) {
   var loweredCase = false;
 
-  start = start >>> 0;
-  end = end === undefined || end === Infinity ? this.length : end >>> 0;
+  // No need to verify that "this.length <= MAX_UINT32" since it's a read-only
+  // property of a typed array.
+
+  // This behaves neither like String nor Uint8Array in that we set start/end
+  // to their upper/lower bounds if the value passed is out of range.
+  // undefined is handled specially as per ECMA-262 6th Edition,
+  // Section 13.3.3.7 Runtime Semantics: KeyedBindingInitialization.
+  if (start === undefined || start < 0)
+    start = 0;
+  // Return early if start > this.length. Done here to prevent potential uint32
+  // coercion fail below.
+  if (start > this.length)
+    return '';
+
+  if (end === undefined || end > this.length)
+    end = this.length;
+
+  if (end <= 0)
+    return '';
+
+  // Force coersion to uint32. This will also coerce falsey/NaN values to 0.
+  end >>>= 0;
+  start >>>= 0;
+
+  if (end <= start)
+    return '';
 
   if (!encoding) encoding = 'utf8';
-  if (start < 0) start = 0;
-  if (end > this.length) end = this.length;
-  if (end <= start) return '';
 
   while (true) {
     switch (encoding) {
@@ -938,10 +960,13 @@ Buffer.prototype.writeIntLE = function(value, offset, byteLength, noAssert) {
 
   var i = 0;
   var mul = 1;
-  var sub = value < 0 ? 1 : 0;
+  var sub = 0;
   this[offset] = value;
-  while (++i < byteLength && (mul *= 0x100))
+  while (++i < byteLength && (mul *= 0x100)) {
+    if (value < 0 && sub === 0 && this[offset + i - 1] !== 0)
+      sub = 1;
     this[offset + i] = ((value / mul) >> 0) - sub;
+  }
 
   return offset + byteLength;
 };
@@ -961,10 +986,13 @@ Buffer.prototype.writeIntBE = function(value, offset, byteLength, noAssert) {
 
   var i = byteLength - 1;
   var mul = 1;
-  var sub = value < 0 ? 1 : 0;
+  var sub = 0;
   this[offset + i] = value;
-  while (--i >= 0 && (mul *= 0x100))
+  while (--i >= 0 && (mul *= 0x100)) {
+    if (value < 0 && sub === 0 && this[offset + i + 1] !== 0)
+      sub = 1;
     this[offset + i] = ((value / mul) >> 0) - sub;
+  }
 
   return offset + byteLength;
 };
@@ -1028,20 +1056,13 @@ Buffer.prototype.writeInt32BE = function(value, offset, noAssert) {
 };
 
 
-function checkFloat(buffer, value, offset, ext) {
-  if (!(buffer instanceof Buffer))
-    throw new TypeError('buffer must be a Buffer instance');
-  if (offset + ext > buffer.length)
-    throw new RangeError('index out of range');
-}
-
-
 Buffer.prototype.writeFloatLE = function writeFloatLE(val, offset, noAssert) {
   val = +val;
   offset = offset >>> 0;
   if (!noAssert)
-    checkFloat(this, val, offset, 4);
-  binding.writeFloatLE(this, val, offset);
+    binding.writeFloatLE(this, val, offset);
+  else
+    binding.writeFloatLE(this, val, offset, true);
   return offset + 4;
 };
 
@@ -1050,8 +1071,9 @@ Buffer.prototype.writeFloatBE = function writeFloatBE(val, offset, noAssert) {
   val = +val;
   offset = offset >>> 0;
   if (!noAssert)
-    checkFloat(this, val, offset, 4);
-  binding.writeFloatBE(this, val, offset);
+    binding.writeFloatBE(this, val, offset);
+  else
+    binding.writeFloatBE(this, val, offset, true);
   return offset + 4;
 };
 
@@ -1060,8 +1082,9 @@ Buffer.prototype.writeDoubleLE = function writeDoubleLE(val, offset, noAssert) {
   val = +val;
   offset = offset >>> 0;
   if (!noAssert)
-    checkFloat(this, val, offset, 8);
-  binding.writeDoubleLE(this, val, offset);
+    binding.writeDoubleLE(this, val, offset);
+  else
+    binding.writeDoubleLE(this, val, offset, true);
   return offset + 8;
 };
 
@@ -1070,7 +1093,8 @@ Buffer.prototype.writeDoubleBE = function writeDoubleBE(val, offset, noAssert) {
   val = +val;
   offset = offset >>> 0;
   if (!noAssert)
-    checkFloat(this, val, offset, 8);
-  binding.writeDoubleBE(this, val, offset);
+    binding.writeDoubleBE(this, val, offset);
+  else
+    binding.writeDoubleBE(this, val, offset, true);
   return offset + 8;
 };

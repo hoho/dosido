@@ -5,6 +5,8 @@ const Buffer = require('buffer').Buffer;
 const internalUtil = require('internal/util');
 const binding = process.binding('util');
 
+const isError = internalUtil.isError;
+
 var Debug;
 
 const formatRegExp = /%[sdj%]/g;
@@ -195,6 +197,7 @@ function ensureDebugIsInitialized() {
 
 function inspectPromise(p) {
   ensureDebugIsInitialized();
+  // Only create a mirror if the object is a Promise.
   if (!binding.isPromise(p))
     return null;
   const mirror = Debug.MakeMirror(p, true);
@@ -289,16 +292,19 @@ function formatValue(ctx, value, recurseTimes) {
   var constructor = getConstructorOf(value);
   var base = '', empty = false, braces, formatter;
 
+  // We can't compare constructors for various objects using a comparison like
+  // `constructor === Array` because the object could have come from a different
+  // context and thus the constructor won't match. Instead we check the
+  // constructor names (including those up the prototype chain where needed) to
+  // determine object types.
   if (Array.isArray(value)) {
-    // We can't use `constructor === Array` because this could
-    // have come from a Debug context.
-    // Otherwise, an Array will print "Array [...]".
+    // Unset the constructor to prevent "Array [...]" for ordinary arrays.
     if (constructor && constructor.name === 'Array')
       constructor = null;
     braces = ['[', ']'];
     empty = value.length === 0;
     formatter = formatArray;
-  } else if (value instanceof Set) {
+  } else if (binding.isSet(value)) {
     braces = ['{', '}'];
     // With `showHidden`, `length` will display as a hidden property for
     // arrays. For consistency's sake, do the same for `size`, even though this
@@ -307,7 +313,7 @@ function formatValue(ctx, value, recurseTimes) {
       keys.unshift('size');
     empty = value.size === 0;
     formatter = formatSet;
-  } else if (value instanceof Map) {
+  } else if (binding.isMap(value)) {
     braces = ['{', '}'];
     // Ditto.
     if (ctx.showHidden)
@@ -315,8 +321,7 @@ function formatValue(ctx, value, recurseTimes) {
     empty = value.size === 0;
     formatter = formatMap;
   } else {
-    // Only create a mirror if the object superficially looks like a Promise.
-    var promiseInternals = value instanceof Promise && inspectPromise(value);
+    var promiseInternals = inspectPromise(value);
     if (promiseInternals) {
       braces = ['{', '}'];
       formatter = formatPromise;
@@ -332,7 +337,8 @@ function formatValue(ctx, value, recurseTimes) {
         empty = false;
         formatter = formatCollectionIterator;
       } else {
-        if (constructor === Object)
+        // Unset the constructor to prevent "Object {...}" for ordinary objects.
+        if (constructor && constructor.name === 'Object')
           constructor = null;
         braces = ['{', '}'];
         empty = true;  // No other data than keys.
@@ -666,7 +672,7 @@ function isUndefined(arg) {
 exports.isUndefined = isUndefined;
 
 function isRegExp(re) {
-  return objectToString(re) === '[object RegExp]';
+  return binding.isRegExp(re);
 }
 exports.isRegExp = isRegExp;
 
@@ -676,13 +682,10 @@ function isObject(arg) {
 exports.isObject = isObject;
 
 function isDate(d) {
-  return objectToString(d) === '[object Date]';
+  return binding.isDate(d);
 }
 exports.isDate = isDate;
 
-function isError(e) {
-  return objectToString(e) === '[object Error]' || e instanceof Error;
-}
 exports.isError = isError;
 
 function isFunction(arg) {
@@ -697,10 +700,6 @@ function isPrimitive(arg) {
 exports.isPrimitive = isPrimitive;
 
 exports.isBuffer = Buffer.isBuffer;
-
-function objectToString(o) {
-  return Object.prototype.toString.call(o);
-}
 
 
 function pad(n) {

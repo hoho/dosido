@@ -3,6 +3,11 @@ Node.js
 
 [![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/nodejs/node?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
+Node.js is a JavaScript runtime built on Chrome's V8 JavaScript engine. Node.js
+uses an event-driven, non-blocking I/O model that makes it lightweight and
+efficient. The Node.js package ecosystem, npm, is the largest ecosystem of open
+source libraries in the world.
+
 The Node.js project is supported by the
 [Node.js Foundation](https://nodejs.org/en/foundation/). Contributions,
 policies and releases are managed under an
@@ -147,7 +152,7 @@ $ man doc/node.1
 To test if Node.js was built correctly:
 
 ```
-$ node -e "console.log('Hello from node.js ' + process.version)"
+$ node -e "console.log('Hello from Node.js ' + process.version)"
 ```
 
 ### Windows
@@ -174,7 +179,7 @@ To run the tests:
 To test if Node.js was built correctly:
 
 ```
-$ node -e "console.log('Hello from node.js ' + process.version)"
+$ node -e "console.log('Hello from Node.js ' + process.version)"
 ```
 
 ### Android / Android based devices, aka. Firefox OS
@@ -350,10 +355,10 @@ Instructions:
 
 ## Security
 
-All security bugs in node.js are taken seriously and should be reported by
+All security bugs in Node.js are taken seriously and should be reported by
 emailing security@nodejs.org. This will be delivered to a subset of the project
 team who handle security issues. Please don't disclose security bugs
-public until they have been handled by the security team.
+publicly until they have been handled by the security team.
 
 Your email will be acknowledged within 24 hours, and you’ll receive a more
 detailed response to your email within 48 hours indicating the next steps in
@@ -389,10 +394,12 @@ information about the governance of the Node.js project, see
 * [domenic](https://github.com/domenic) - **Domenic Denicola** &lt;d@domenic.me&gt;
 * [evanlucas](https://github.com/evanlucas) - **Evan Lucas** &lt;evanlucas@me.com&gt;
 * [geek](https://github.com/geek) - **Wyatt Preul** &lt;wpreul@gmail.com&gt;
+* [iarna](https://github.com/iarna) - **Rebecca Turner** &lt;me@re-becca.org&gt;
 * [isaacs](https://github.com/isaacs) - **Isaac Z. Schlueter** &lt;i@izs.me&gt;
 * [jbergstroem](https://github.com/jbergstroem) - **Johan Bergström** &lt;bugs@bergstroem.nu&gt;
 * [joaocgreis](https://github.com/joaocgreis) - **João Reis** &lt;reis@janeasystems.com&gt;
 * [julianduque](https://github.com/julianduque) - **Julian Duque** &lt;julianduquej@gmail.com&gt;
+* [JungMinu](https://github.com/JungMinu) - **Minwoo Jung** &lt;jmwsoft@gmail.com&gt;
 * [lxe](https://github.com/lxe) - **Aleksey Smolenchuk** &lt;lxe@lxe.co&gt;
 * [mhdawson](https://github.com/mhdawson) - **Michael Dawson** &lt;michael_dawson@ca.ibm.com&gt;
 * [micnic](https://github.com/micnic) - **Nicu Micleușanu** &lt;micnic90@gmail.com&gt;
@@ -419,6 +426,7 @@ information about the governance of the Node.js project, see
 * [tunniclm](https://github.com/tunniclm) - **Mike Tunnicliffe** &lt;m.j.tunnicliffe@gmail.com&gt;
 * [vkurchatkin](https://github.com/vkurchatkin) - **Vladimir Kurchatkin** &lt;vladimir.kurchatkin@gmail.com&gt;
 * [yosuke-furukawa](https://github.com/yosuke-furukawa) - **Yosuke Furukawa** &lt;yosuke.furukawa@gmail.com&gt;
+* [zkat](https://github.com/zkat) - **Kat Marchán** &lt;kzm@sykosomatic.org&gt;
 
 Collaborators & TSC members follow the [COLLABORATOR_GUIDE.md](./COLLABORATOR_GUIDE.md) in
 maintaining the Node.js project.
