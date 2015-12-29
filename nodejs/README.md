@@ -349,8 +349,8 @@ Instructions:
 * [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 * [CONTRIBUTING.md](./CONTRIBUTING.md)
 * [GOVERNANCE.md](./GOVERNANCE.md)
-* IRC:
-  [#io.js on Freenode.net](http://webchat.freenode.net?channels=io.js&uio=d4)
+* IRC (general questions): [#node.js on Freenode.net](http://webchat.freenode.net?channels=node.js&uio=d4)
+* IRC (node core development): [#node-dev on Freenode.net](http://webchat.freenode.net?channels=node-dev&uio=d4)
 * [nodejs/node on Gitter](https://gitter.im/nodejs/node)
 
 ## Security
@@ -390,6 +390,7 @@ information about the governance of the Node.js project, see
 ### Collaborators
 
 * [brendanashworth](https://github.com/brendanashworth) - **Brendan Ashworth** &lt;brendan.ashworth@me.com&gt;
+* [calvinmetcalf](https://github.com/calvinmetcalf) - **Calvin Metcalf** &lt;calvin.metcalf@gmail.com&gt;
 * [ChALkeR](https://github.com/ChALkeR) - **Сковорода Никита Андреевич** &lt;chalkerx@gmail.com&gt;
 * [domenic](https://github.com/domenic) - **Domenic Denicola** &lt;d@domenic.me&gt;
 * [evanlucas](https://github.com/evanlucas) - **Evan Lucas** &lt;evanlucas@me.com&gt;
@@ -401,6 +402,7 @@ information about the governance of the Node.js project, see
 * [julianduque](https://github.com/julianduque) - **Julian Duque** &lt;julianduquej@gmail.com&gt;
 * [JungMinu](https://github.com/JungMinu) - **Minwoo Jung** &lt;jmwsoft@gmail.com&gt;
 * [lxe](https://github.com/lxe) - **Aleksey Smolenchuk** &lt;lxe@lxe.co&gt;
+* [mcollina](https://github.com/mcollina) - **Matteo Collina** &lt;matteo.collina@gmail.com&gt;
 * [mhdawson](https://github.com/mhdawson) - **Michael Dawson** &lt;michael_dawson@ca.ibm.com&gt;
 * [micnic](https://github.com/micnic) - **Nicu Micleușanu** &lt;micnic90@gmail.com&gt;
 * [mikeal](https://github.com/mikeal) - **Mikeal Rogers** &lt;mikeal.rogers@gmail.com&gt;
@@ -410,6 +412,7 @@ information about the governance of the Node.js project, see
 * [petkaantonov](https://github.com/petkaantonov) - **Petka Antonov** &lt;petka_antonov@hotmail.com&gt;
 * [qard](https://github.com/qard) - **Stephen Belanger** &lt;admin@stephenbelanger.com&gt;
 * [rlidwka](https://github.com/rlidwka) - **Alex Kocharin** &lt;alex@kocharin.ru&gt;
+* [rmg](https://github.com/rmg) - **Ryan Graham** &lt;r.m.graham@gmail.com&gt;
 * [robertkowalski](https://github.com/robertkowalski) - **Robert Kowalski** &lt;rok@kowalski.gd&gt;
 * [romankl](https://github.com/romankl) - **Roman Klauke** &lt;romaaan.git@gmail.com&gt;
 * [saghul](https://github.com/saghul) - **Saúl Ibarra Corretgé** &lt;saghul@gmail.com&gt;

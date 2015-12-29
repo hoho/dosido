@@ -30,7 +30,7 @@ valid_os = ('win', 'mac', 'solaris', 'freebsd', 'openbsd', 'linux',
 valid_arch = ('arm', 'arm64', 'ia32', 'mips', 'mipsel', 'ppc', 'ppc64', 'x32',
               'x64', 'x86')
 valid_arm_float_abi = ('soft', 'softfp', 'hard')
-valid_arm_fpu = ('vfp', 'vfpv2', 'vfpv3', 'vfpv3-d16', 'neon')
+valid_arm_fpu = ('vfp', 'vfpv3', 'vfpv3-d16', 'neon')
 valid_mips_arch = ('loongson', 'r1', 'r2', 'r6', 'rx')
 valid_mips_fpu = ('fp32', 'fp64', 'fpxx')
 valid_mips_float_abi = ('soft', 'hard')
@@ -557,18 +557,13 @@ def cc_macros(cc=None):
 def is_arch_armv7():
   """Check for ARMv7 instructions"""
   cc_macros_cache = cc_macros()
-  return ('__ARM_ARCH_7__' in cc_macros_cache or
-          '__ARM_ARCH_7A__' in cc_macros_cache or
-          '__ARM_ARCH_7R__' in cc_macros_cache or
-          '__ARM_ARCH_7M__' in cc_macros_cache or
-          '__ARM_ARCH_7S__' in cc_macros_cache)
+  return cc_macros_cache.get('__ARM_ARCH') == '7'
 
 
 def is_arch_armv6():
   """Check for ARMv6 instructions"""
   cc_macros_cache = cc_macros()
-  return ('__ARM_ARCH_6__' in cc_macros_cache or
-          '__ARM_ARCH_6M__' in cc_macros_cache)
+  return cc_macros_cache.get('__ARM_ARCH') == '6'
 
 
 def is_arm_hard_float_abi():
@@ -589,7 +584,7 @@ def host_arch_cc():
     # would be xlc so hard code gcc
     k = cc_macros('gcc')
   else:
-    k = cc_macros()
+    k = cc_macros(os.environ.get('CC_host'))
 
   matchup = {
     '__aarch64__' : 'arm64',
@@ -636,7 +631,7 @@ def configure_arm(o):
   else:
     arm_float_abi = 'default'
 
-  arm_fpu = 'vfpv2'
+  arm_fpu = 'vfp'
 
   if is_arch_armv7():
     arm_fpu = 'vfpv3'

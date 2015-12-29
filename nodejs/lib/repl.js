@@ -35,6 +35,7 @@ const Module = require('module');
 const domain = require('domain');
 const debug = util.debuglog('repl');
 
+const parentModule = module;
 const replMap = new WeakMap();
 
 try {
@@ -526,6 +527,8 @@ REPLServer.prototype.createContext = function() {
   }
 
   const module = new Module('<repl>');
+  module.paths = Module._resolveLookupPaths('<repl>', parentModule)[1];
+
   const require = internalModule.makeRequireFunction.call(module);
   context.module = module;
   context.require = require;
@@ -1079,6 +1082,9 @@ function defineDefaultCommands(repl) {
               self.write(line + '\n');
             }
           });
+        } else {
+          this.outputStream.write('Failed to load:' + file +
+                                  ' is not a valid file\n');
         }
       } catch (e) {
         this.outputStream.write('Failed to load:' + file + '\n');

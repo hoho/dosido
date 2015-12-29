@@ -966,6 +966,8 @@ Example:
 
     http.get("http://www.google.com/index.html", function(res) {
       console.log("Got response: " + res.statusCode);
+      // consume response body
+      res.resume();
     }).on('error', function(e) {
       console.log("Got error: " + e.message);
     });
@@ -1061,7 +1063,8 @@ even if there is no data being written to the request body.
 
 If any error is encountered during the request (be that with DNS resolution,
 TCP level errors, or actual HTTP parse errors) an `'error'` event is emitted
-on the returned request object.
+on the returned request object. As with all `'error'` events, if no listeners
+are registered the error will be thrown.
 
 There are a few special headers that should be noted.
 

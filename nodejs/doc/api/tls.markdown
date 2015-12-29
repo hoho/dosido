@@ -564,9 +564,9 @@ Creates a new client connection to the given `port` and `host` (old API) or
   - `cert`: A string or `Buffer` containing the certificate key of the client in
     PEM format. (Could be an array of certs).
 
-  - `ca`: An array of strings or `Buffer`s of trusted certificates in PEM
-    format. If this is omitted several well known "root" CAs will be used,
-    like VeriSign. These are used to authorize connections.
+  - `ca`: A string, `Buffer` or array of strings or `Buffer`s of trusted
+    certificates in PEM format. If this is omitted several well known "root"
+    CAs will be used, like VeriSign. These are used to authorize connections.
 
   - `ciphers`: A string describing the ciphers to use or exclude, separated by
    `:`. Uses the same default cipher suite as `tls.createServer`.
@@ -596,6 +596,10 @@ Creates a new client connection to the given `port` and `host` (old API) or
   - `secureProtocol`: The SSL method to use, e.g. `SSLv3_method` to force
     SSL version 3. The possible values depend on your installation of
     OpenSSL and are defined in the constant [SSL_METHODS][].
+
+  - `secureContext`: An optional TLS context object from
+     `tls.createSecureContext( ... )`. Could it be used for caching client
+     certificates, key, and CA certificates.
 
   - `session`: A `Buffer` instance, containing TLS session.
 
@@ -674,8 +678,9 @@ dictionary with keys:
   objects in the format `{pem: key, passphrase: passphrase}`. (Required)
 * `passphrase` : A string of passphrase for the private key or pfx
 * `cert` : A string holding the PEM encoded certificate
-* `ca` : Either a string or list of strings of PEM encoded CA
-  certificates to trust.
+* `ca`: A string, `Buffer` or array of strings or `Buffer`s of trusted
+  certificates in PEM format. If this is omitted several well known "root"
+  CAs will be used, like VeriSign. These are used to authorize connections.
 * `crl` : Either a string or list of strings of PEM encoded CRLs
   (Certificate Revocation List)
 * `ciphers`: A string describing the ciphers to use or exclude.
@@ -736,9 +741,9 @@ automatically set as a listener for the [`'secureConnection'`][] event.  The
   - `cert`: A string or `Buffer` containing the certificate key of the server in
     PEM format. (Could be an array of certs). (Required)
 
-  - `ca`: An array of strings or `Buffer`s of trusted certificates in PEM
-    format. If this is omitted several well known "root" CAs will be used,
-    like VeriSign. These are used to authorize connections.
+  - `ca`: A string, `Buffer` or array of strings or `Buffer`s of trusted
+    certificates in PEM format. If this is omitted several well known "root"
+    CAs will be used, like VeriSign. These are used to authorize connections.
 
   - `crl` : Either a string or list of strings of PEM encoded CRLs (Certificate
     Revocation List)
