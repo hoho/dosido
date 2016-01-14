@@ -9,16 +9,16 @@ Note that once you've invoked this module, your Node.js program will not
 terminate until you've closed the interface. Here's how to allow your
 program to gracefully exit:
 
-    var readline = require('readline');
+    const readline = require('readline');
 
-    var rl = readline.createInterface({
+    const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
 
-    rl.question("What do you think of Node.js? ", function(answer) {
+    rl.question('What do you think of Node.js? ', (answer) => {
       // TODO: Log the answer in a database
-      console.log("Thank you for your valuable feedback:", answer);
+      console.log('Thank you for your valuable feedback:', answer);
 
       rl.close();
     });
@@ -66,8 +66,8 @@ nothing is displayed.
 
 Example usage:
 
-    interface.question('What is your favorite food?', function(answer) {
-      console.log('Oh, so your favorite food is ' + answer);
+    interface.question('What is your favorite food?', (answer) => {
+      console.log(`Oh, so your favorite food is ${answer}`);
     });
 
 ### rl.resume()
@@ -117,8 +117,8 @@ user hits enter, or return. This is a good hook to listen for user input.
 
 Example of listening for `'line'`:
 
-    rl.on('line', function (cmd) {
-      console.log('You just typed: '+cmd);
+    rl.on('line', (cmd) => {
+      console.log(`You just typed: ${cmd}`);
     });
 
 ### Event: 'pause'
@@ -132,7 +132,7 @@ Also emitted whenever the `input` stream is not paused and receives the
 
 Example of listening for `'pause'`:
 
-    rl.on('pause', function() {
+    rl.on('pause', () => {
       console.log('Readline paused.');
     });
 
@@ -144,7 +144,7 @@ Emitted whenever the `input` stream is resumed.
 
 Example of listening for `'resume'`:
 
-    rl.on('resume', function() {
+    rl.on('resume', () => {
       console.log('Readline resumed.');
     });
 
@@ -161,7 +161,7 @@ background.
 
 Example of listening for `SIGCONT`:
 
-    rl.on('SIGCONT', function() {
+    rl.on('SIGCONT', () => {
       // `prompt` will automatically resume the stream
       rl.prompt();
     });
@@ -176,8 +176,8 @@ stream receives a `SIGINT`, `pause` will be triggered.
 
 Example of listening for `SIGINT`:
 
-    rl.on('SIGINT', function() {
-      rl.question('Are you sure you want to exit?', function(answer) {
+    rl.on('SIGINT', () => {
+      rl.question('Are you sure you want to exit?', (answer) => {
         if (answer.match(/^y(es)?$/i)) rl.pause();
       });
     });
@@ -200,7 +200,7 @@ before the program was sent to the background.
 
 Example of listening for `SIGTSTP`:
 
-    rl.on('SIGTSTP', function() {
+    rl.on('SIGTSTP', () => {
       // This will override SIGTSTP and prevent the program from going to the
       // background.
       console.log('Caught SIGTSTP.');
@@ -211,13 +211,13 @@ Example of listening for `SIGTSTP`:
 Here's an example of how to use all these together to craft a tiny command
 line interface:
 
-    var readline = require('readline'),
-        rl = readline.createInterface(process.stdin, process.stdout);
+    const readline = require('readline');
+    const rl = readline.createInterface(process.stdin, process.stdout);
 
     rl.setPrompt('OHAI> ');
     rl.prompt();
 
-    rl.on('line', function(line) {
+    rl.on('line', (line) => {
       switch(line.trim()) {
         case 'hello':
           console.log('world!');
@@ -227,9 +227,25 @@ line interface:
           break;
       }
       rl.prompt();
-    }).on('close', function() {
+    }).on('close', () => {
       console.log('Have a great day!');
       process.exit(0);
+    });
+
+## Example: Read File Stream Line-by-Line
+
+A common case for `readline`'s `input` option is to pass a filesystem readable
+stream to it. This is how one could craft line-by-line parsing of a file:
+
+    const readline = require('readline');
+    const fs = require('fs');
+
+    const rl = readline.createInterface({
+      input: fs.createReadStream('sample.txt')
+    });
+
+    rl.on('line', function (line) {
+      console.log('Line from file:', line);
     });
 
 ## readline.clearLine(stream, dir)
@@ -247,7 +263,7 @@ Clears the screen from the current position of the cursor down.
 
 ## readline.createInterface(options)
 
-Creates a readline `Interface` instance. Accepts an `options Object that takes
+Creates a readline `Interface` instance. Accepts an `options` Object that takes
 the following values:
 
  - `input` - the readable stream to listen to (Required).
@@ -277,7 +293,7 @@ Example:
 
     function completer(line) {
       var completions = '.help .error .exit .quit .q'.split(' ')
-      var hits = completions.filter(function(c) { return c.indexOf(line) == 0 })
+      var hits = completions.filter((c) => { return c.indexOf(line) == 0 })
       // show all completions if none found
       return [hits.length ? hits : completions, line]
     }
@@ -291,8 +307,8 @@ Also `completer` can be run in async mode if it accepts two arguments:
 `createInterface` is commonly used with [`process.stdin`][] and
 [`process.stdout`][] in order to accept user input:
 
-    var readline = require('readline');
-    var rl = readline.createInterface({
+    const readline = require('readline');
+    const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });

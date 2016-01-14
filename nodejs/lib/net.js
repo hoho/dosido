@@ -931,7 +931,6 @@ function lookupAndConnect(self, options) {
   port |= 0;
 
   // If host is an IP, skip performing a lookup
-  // TODO(evanlucas) should we hot path this for localhost?
   var addressType = exports.isIP(host);
   if (addressType) {
     process.nextTick(function() {
@@ -951,12 +950,12 @@ function lookupAndConnect(self, options) {
 
   if (dnsopts.family !== 4 && dnsopts.family !== 6) {
     dnsopts.hints = dns.ADDRCONFIG;
-    // The AI_V4MAPPED hint is not supported on FreeBSD, and getaddrinfo
-    // returns EAI_BADFLAGS. However, it seems to be supported on most other
-    // systems. See
+    // The AI_V4MAPPED hint is not supported on FreeBSD or Android,
+    // and getaddrinfo returns EAI_BADFLAGS. However, it seems to be
+    // supported on most other systems. See
     // http://lists.freebsd.org/pipermail/freebsd-bugs/2008-February/028260.html
     // for more information on the lack of support for FreeBSD.
-    if (process.platform !== 'freebsd')
+    if (process.platform !== 'freebsd' && process.platform !== 'android')
       dnsopts.hints |= dns.V4MAPPED;
   }
 

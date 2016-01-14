@@ -8,6 +8,8 @@ var child_process = require('child_process');
 const stream = require('stream');
 const util = require('util');
 
+const testRoot = path.resolve(process.env.NODE_TEST_DIR ||
+                              path.dirname(__filename));
 
 exports.testDir = path.dirname(__filename);
 exports.fixturesDir = path.join(exports.testDir, 'fixtures');
@@ -69,17 +71,27 @@ exports.refreshTmpDir = function() {
 };
 
 if (process.env.TEST_THREAD_ID) {
-  // Distribute ports in parallel tests
-  if (!process.env.NODE_COMMON_PORT)
-    exports.PORT += +process.env.TEST_THREAD_ID * 100;
-
+  exports.PORT += process.env.TEST_THREAD_ID * 100;
   exports.tmpDirName += '.' + process.env.TEST_THREAD_ID;
 }
-exports.tmpDir = path.join(exports.testDir, exports.tmpDirName);
+exports.tmpDir = path.join(testRoot, exports.tmpDirName);
 
 var opensslCli = null;
 var inFreeBSDJail = null;
 var localhostIPv4 = null;
+
+exports.localIPv6Hosts = [
+  // Debian/Ubuntu
+  'ip6-localhost',
+  'ip6-loopback',
+
+  // SUSE
+  'ipv6-localhost',
+  'ipv6-loopback',
+
+  // Typically universal
+  'localhost',
+];
 
 Object.defineProperty(exports, 'inFreeBSDJail', {
   get: function() {
@@ -155,19 +167,11 @@ Object.defineProperty(exports, 'hasFipsCrypto', {
 
 if (exports.isWindows) {
   exports.PIPE = '\\\\.\\pipe\\libuv-test';
+  if (process.env.TEST_THREAD_ID) {
+    exports.PIPE += '.' + process.env.TEST_THREAD_ID;
+  }
 } else {
   exports.PIPE = exports.tmpDir + '/test.sock';
-}
-
-if (process.env.NODE_COMMON_PIPE) {
-  exports.PIPE = process.env.NODE_COMMON_PIPE;
-  // Remove manually, the test runner won't do it
-  // for us like it does for files in test/tmp.
-  try {
-    fs.unlinkSync(exports.PIPE);
-  } catch (e) {
-    // Ignore.
-  }
 }
 
 if (exports.isWindows) {
@@ -242,6 +246,9 @@ exports.spawnPwd = function(options) {
 };
 
 exports.platformTimeout = function(ms) {
+  if (process.config.target_defaults.default_configuration === 'Debug')
+    ms = 2 * ms;
+
   if (process.arch !== 'arm')
     return ms;
 

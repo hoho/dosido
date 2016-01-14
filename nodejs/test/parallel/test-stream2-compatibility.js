@@ -1,11 +1,10 @@
 'use strict';
-var common = require('../common');
+require('../common');
 var R = require('_stream_readable');
 var W = require('_stream_writable');
 var assert = require('assert');
 
 var util = require('util');
-var EE = require('events').EventEmitter;
 
 var ondataCalled = 0;
 
