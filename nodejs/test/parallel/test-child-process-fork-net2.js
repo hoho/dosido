@@ -66,22 +66,22 @@ if (process.argv[2] === 'child') {
 
   var server = net.createServer();
 
-  var connected = 0,
-      closed = 0;
+  let connected = 0;
+  let closed = 0;
   server.on('connection', function(socket) {
     switch (connected % 6) {
       case 0:
-        child1.send('end', socket, { track: false }); break;
+        child1.send('end', socket); break;
       case 1:
-        child1.send('write', socket, { track: true }); break;
+        child1.send('write', socket); break;
       case 2:
-        child2.send('end', socket, { track: true }); break;
+        child2.send('end', socket); break;
       case 3:
-        child2.send('write', socket, { track: false }); break;
+        child2.send('write', socket); break;
       case 4:
-        child3.send('end', socket, { track: false }); break;
+        child3.send('end', socket); break;
       case 5:
-        child3.send('write', socket, { track: false }); break;
+        child3.send('write', socket); break;
     }
     connected += 1;
 

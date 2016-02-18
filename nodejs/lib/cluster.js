@@ -33,8 +33,12 @@ function Worker(options) {
 
   if (options.process) {
     this.process = options.process;
-    this.process.on('error', this.emit.bind(this, 'error'));
-    this.process.on('message', this.emit.bind(this, 'message'));
+    this.process.on('error', (code, signal) =>
+      this.emit('error', code, signal)
+    );
+    this.process.on('message', (message, handle) =>
+      this.emit('message', message, handle)
+    );
   }
 }
 util.inherits(Worker, EventEmitter);
@@ -337,7 +341,9 @@ function masterInit() {
       process: workerProcess
     });
 
-    worker.on('message', this.emit.bind(this, 'message'));
+    worker.on('message', (message, handle) =>
+      this.emit('message', message, handle)
+    );
 
     worker.process.once('exit', function(exitCode, signalCode) {
       /*
@@ -428,7 +434,7 @@ function masterInit() {
     else if (message.act === 'listening')
       listening(worker, message);
     else if (message.act === 'suicide')
-      worker.suicide = true;
+      suicide(worker, message);
     else if (message.act === 'close')
       close(worker, message);
   }
@@ -437,6 +443,11 @@ function masterInit() {
     worker.state = 'online';
     worker.emit('online');
     cluster.emit('online', worker);
+  }
+
+  function suicide(worker, message) {
+    worker.suicide = true;
+    send(worker, { ack: message.seq });
   }
 
   function queryServer(worker, message) {
@@ -535,7 +546,7 @@ function workerInit() {
       if (message.act === 'newconn')
         onconnection(message, handle);
       else if (message.act === 'disconnect')
-        worker.disconnect();
+        _disconnect.call(worker, true);
     }
   };
 
@@ -656,14 +667,36 @@ function workerInit() {
   }
 
   Worker.prototype.disconnect = function() {
+    _disconnect.call(this);
+  };
+
+  Worker.prototype.destroy = function() {
+    this.suicide = true;
+    if (!this.isConnected()) process.exit(0);
+    var exit = process.exit.bind(null, 0);
+    send({ act: 'suicide' }, () => process.disconnect());
+    process.once('disconnect', exit);
+  };
+
+  function send(message, cb) {
+    sendHelper(process, message, null, cb);
+  }
+
+  function _disconnect(masterInitiated) {
     this.suicide = true;
     let waitingCount = 1;
 
     function checkWaitingCount() {
       waitingCount--;
       if (waitingCount === 0) {
-        send({ act: 'suicide' });
-        process.disconnect();
+        // If disconnect is worker initiated, wait for ack to be sure suicide
+        // is properly set in the master, otherwise, if it's master initiated
+        // there's no need to send the suicide message
+        if (masterInitiated) {
+          process.disconnect();
+        } else {
+          send({ act: 'suicide' }, () => process.disconnect());
+        }
       }
     }
 
@@ -675,19 +708,6 @@ function workerInit() {
     }
 
     checkWaitingCount();
-  };
-
-  Worker.prototype.destroy = function() {
-    this.suicide = true;
-    if (!this.isConnected()) process.exit(0);
-    var exit = process.exit.bind(null, 0);
-    send({ act: 'suicide' }, exit);
-    process.once('disconnect', exit);
-    process.disconnect();
-  };
-
-  function send(message, cb) {
-    sendHelper(process, message, null, cb);
   }
 }
 

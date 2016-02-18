@@ -587,8 +587,8 @@ fs.openSync = function(path, flags, mode) {
 fs.read = function(fd, buffer, offset, length, position, callback) {
   if (!(buffer instanceof Buffer)) {
     // legacy string interface (fd, length, position, encoding, callback)
-    var cb = arguments[4],
-        encoding = arguments[3];
+    const cb = arguments[4];
+    const encoding = arguments[3];
 
     assertEncoding(encoding);
 
@@ -1146,16 +1146,16 @@ function writeAll(fd, isUserFd, buffer, offset, length, position, callback_) {
   fs.write(fd, buffer, offset, length, position, function(writeErr, written) {
     if (writeErr) {
       if (isUserFd) {
-        if (callback) callback(writeErr);
+        callback(writeErr);
       } else {
         fs.close(fd, function() {
-          if (callback) callback(writeErr);
+          callback(writeErr);
         });
       }
     } else {
       if (written === length) {
         if (isUserFd) {
-          if (callback) callback(null);
+          callback(null);
         } else {
           fs.close(fd, callback);
         }
@@ -1193,7 +1193,7 @@ fs.writeFile = function(path, data, options, callback_) {
 
   fs.open(path, flag, options.mode, function(openErr, fd) {
     if (openErr) {
-      if (callback) callback(openErr);
+      callback(openErr);
     } else {
       writeFd(fd, false);
     }
@@ -1446,18 +1446,14 @@ fs.unwatchFile = function(filename, listener) {
 
 // Regexp that finds the next partion of a (partial) path
 // result is [base_with_slash, base], e.g. ['somedir/', 'somedir']
-if (isWindows) {
-  var nextPartRe = /(.*?)(?:[\/\\]+|$)/g;
-} else {
-  var nextPartRe = /(.*?)(?:[\/]+|$)/g;
-}
+const nextPartRe = isWindows ?
+  /(.*?)(?:[\/\\]+|$)/g :
+  /(.*?)(?:[\/]+|$)/g;
 
 // Regex to find the device root, including trailing slash. E.g. 'c:\\'.
-if (isWindows) {
-  var splitRootRe = /^(?:[a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/][^\\\/]+)?[\\\/]*/;
-} else {
-  var splitRootRe = /^[\/]*/;
-}
+const splitRootRe = isWindows ?
+  /^(?:[a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/][^\\\/]+)?[\\\/]*/ :
+  /^[\/]*/;
 
 fs.realpathSync = function realpathSync(p, cache) {
   // make p is absolute
@@ -1467,9 +1463,9 @@ fs.realpathSync = function realpathSync(p, cache) {
     return cache[p];
   }
 
-  var original = p,
-      seenLinks = {},
-      knownHard = {};
+  const original = p;
+  const seenLinks = {};
+  const knownHard = {};
 
   // current character position in p
   var pos;
@@ -1569,9 +1565,9 @@ fs.realpath = function realpath(p, cache, cb) {
     return process.nextTick(cb.bind(null, null, cache[p]));
   }
 
-  var original = p,
-      seenLinks = {},
-      knownHard = {};
+  const original = p;
+  const seenLinks = {};
+  const knownHard = {};
 
   // current character position in p
   var pos;
@@ -1842,7 +1838,7 @@ ReadStream.prototype.close = function(cb) {
       this.once('open', close);
       return;
     }
-    return process.nextTick(this.emit.bind(this, 'close'));
+    return process.nextTick(() => this.emit('close'));
   }
   this.closed = true;
   close();
@@ -1886,6 +1882,7 @@ function WriteStream(path, options) {
   this.mode = options.mode === undefined ? 0o666 : options.mode;
 
   this.start = options.start;
+  this.autoClose = options.autoClose === undefined ? true : !!options.autoClose;
   this.pos = undefined;
   this.bytesWritten = 0;
 
@@ -1907,7 +1904,11 @@ function WriteStream(path, options) {
     this.open();
 
   // dispose on finish.
-  this.once('finish', this.close);
+  this.once('finish', function() {
+    if (this.autoClose) {
+      this.close();
+    }
+  });
 }
 
 fs.FileWriteStream = fs.WriteStream; // support the legacy name
@@ -1916,7 +1917,9 @@ fs.FileWriteStream = fs.WriteStream; // support the legacy name
 WriteStream.prototype.open = function() {
   fs.open(this.path, this.flags, this.mode, function(er, fd) {
     if (er) {
-      this.destroy();
+      if (this.autoClose) {
+        this.destroy();
+      }
       this.emit('error', er);
       return;
     }
@@ -1939,7 +1942,9 @@ WriteStream.prototype._write = function(data, encoding, cb) {
   var self = this;
   fs.write(this.fd, data, 0, data.length, this.pos, function(er, bytes) {
     if (er) {
-      self.destroy();
+      if (self.autoClose) {
+        self.destroy();
+      }
       return cb(er);
     }
     self.bytesWritten += bytes;
@@ -2020,9 +2025,9 @@ util.inherits(SyncWriteStream, Stream);
 
 // Export
 Object.defineProperty(fs, 'SyncWriteStream', {
-    configurable: true,
-    writable: true,
-    value: SyncWriteStream
+  configurable: true,
+  writable: true,
+  value: SyncWriteStream
 });
 
 SyncWriteStream.prototype.write = function(data, arg1, arg2) {

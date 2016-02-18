@@ -12,8 +12,7 @@ var start = Date.now();
 var err;
 var caught = false;
 
-try
-{
+try {
   var cmd = `"${process.execPath}" -e "setTimeout(function(){}, ${SLEEP});"`;
   var ret = execSync(cmd, {timeout: TIMER});
 } catch (e) {
@@ -39,7 +38,7 @@ var msgBuf = new Buffer(msg + '\n');
 
 cmd = `"${process.execPath}" -e "console.log(\'${msg}\');"`;
 
-var ret = execSync(cmd);
+ret = execSync(cmd);
 
 assert.strictEqual(ret.length, msgBuf.length);
 assert.deepEqual(ret, msgBuf, 'execSync result buffer should match');

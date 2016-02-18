@@ -224,9 +224,9 @@ CryptoStream.prototype._write = function write(data, encoding, cb) {
 
 
 CryptoStream.prototype._writePending = function writePending() {
-  var data = this._pending,
-      encoding = this._pendingEncoding,
-      cb = this._pendingCallback;
+  const data = this._pending;
+  const encoding = this._pendingEncoding;
+  const cb = this._pendingCallback;
 
   this._pending = null;
   this._pendingEncoding = '';
@@ -252,9 +252,9 @@ CryptoStream.prototype._read = function read(size) {
     out = this.pair.ssl.encOut;
   }
 
-  var bytesRead = 0,
-      start = this._buffer.offset,
-      last = start;
+  var bytesRead = 0;
+  const start = this._buffer.offset;
+  var last = start;
   do {
     assert(last === this._buffer.offset);
     var read = this._buffer.use(this.pair.ssl, out, size - bytesRead);
@@ -604,8 +604,8 @@ function onhandshakedone() {
 
 
 function onclienthello(hello) {
-  var self = this,
-      once = false;
+  const self = this;
+  var once = false;
 
   this._resumingSession = true;
   function callback(err, session) {
@@ -706,14 +706,15 @@ function SecurePair(context, isServer, requestCert, rejectUnauthorized,
                             this._rejectUnauthorized);
 
   if (this._isServer) {
-    this.ssl.onhandshakestart = onhandshakestart.bind(this);
-    this.ssl.onhandshakedone = onhandshakedone.bind(this);
-    this.ssl.onclienthello = onclienthello.bind(this);
-    this.ssl.onnewsession = onnewsession.bind(this);
+    this.ssl.onhandshakestart = () => onhandshakestart.call(this);
+    this.ssl.onhandshakedone = () => onhandshakedone.call(this);
+    this.ssl.onclienthello = (hello) => onclienthello.call(this, hello);
+    this.ssl.onnewsession =
+        (key, session) => onnewsession.call(this, key, session);
     this.ssl.lastHandshakeTime = 0;
     this.ssl.handshakes = 0;
   } else {
-    this.ssl.onocspresponse = onocspresponse.bind(this);
+    this.ssl.onocspresponse = (resp) => onocspresponse.call(this, resp);
   }
 
   if (process.features.tls_sni) {

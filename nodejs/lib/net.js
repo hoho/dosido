@@ -5,6 +5,7 @@ const stream = require('stream');
 const timers = require('timers');
 const util = require('util');
 const internalUtil = require('internal/util');
+const internalNet = require('internal/net');
 const assert = require('assert');
 const cares = process.binding('cares_wrap');
 const uv = process.binding('uv');
@@ -22,6 +23,7 @@ const WriteWrap = process.binding('stream_wrap').WriteWrap;
 var cluster;
 const errnoException = util._errnoException;
 const exceptionWithHostPort = util._exceptionWithHostPort;
+const isLegalPort = internalNet.isLegalPort;
 
 function noop() {}
 
@@ -322,7 +324,7 @@ Socket.prototype._onTimeout = function() {
 Socket.prototype.setNoDelay = function(enable) {
   if (!this._handle) {
     this.once('connect',
-              enable ? this.setNoDelay : this.setNoDelay.bind(this, enable));
+              enable ? this.setNoDelay : () => this.setNoDelay(enable));
     return this;
   }
 
@@ -336,7 +338,7 @@ Socket.prototype.setNoDelay = function(enable) {
 
 Socket.prototype.setKeepAlive = function(setting, msecs) {
   if (!this._handle) {
-    this.once('connect', this.setKeepAlive.bind(this, setting, msecs));
+    this.once('connect', () => this.setKeepAlive(setting, msecs));
     return this;
   }
 
@@ -384,7 +386,7 @@ Socket.prototype._read = function(n) {
 
   if (this._connecting || !this._handle) {
     debug('_read wait for connection');
-    this.once('connect', this._read.bind(this, n));
+    this.once('connect', () => this._read(n));
   } else if (!this._handle.reading) {
     // not already reading, start the flow
     debug('Socket._read readStart');
@@ -651,10 +653,8 @@ Socket.prototype._writeGeneric = function(writev, data, encoding, cb) {
     var chunks = new Array(data.length << 1);
     for (var i = 0; i < data.length; i++) {
       var entry = data[i];
-      var chunk = entry.chunk;
-      var enc = entry.encoding;
-      chunks[i * 2] = chunk;
-      chunks[i * 2 + 1] = enc;
+      chunks[i * 2] = entry.chunk;
+      chunks[i * 2 + 1] = entry.encoding;
     }
     err = this._handle.writev(req, chunks);
 
@@ -722,10 +722,10 @@ function createWriteReq(req, handle, data, encoding) {
 
 
 Socket.prototype.__defineGetter__('bytesWritten', function() {
-  var bytes = this._bytesDispatched,
-      state = this._writableState,
-      data = this._pendingData,
-      encoding = this._pendingEncoding;
+  var bytes = this._bytesDispatched;
+  const state = this._writableState;
+  const data = this._pendingData;
+  const encoding = this._pendingEncoding;
 
   if (!state)
     return undefined;
@@ -760,7 +760,7 @@ function afterWrite(status, handle, req, err) {
   }
 
   if (status < 0) {
-    var ex = exceptionWithHostPort(status, 'write', req.address, req.port);
+    var ex = errnoException(status, 'write', req.error);
     debug('write failure', ex);
     self._destroy(ex, req.cb);
     return;
@@ -806,14 +806,14 @@ function connect(self, address, port, addressType, localAddress, localPort) {
     err = bind(localAddress, localPort);
 
     if (err) {
-      var ex = exceptionWithHostPort(err, 'bind', localAddress, localPort);
+      const ex = exceptionWithHostPort(err, 'bind', localAddress, localPort);
       self._destroy(ex);
       return;
     }
   }
 
   if (addressType === 6 || addressType === 4) {
-    var req = new TCPConnectWrap();
+    const req = new TCPConnectWrap();
     req.oncomplete = afterConnect;
     req.address = address;
     req.port = port;
@@ -826,7 +826,7 @@ function connect(self, address, port, addressType, localAddress, localPort) {
       err = self._handle.connect6(req, address, port);
 
   } else {
-    var req = new PipeConnectWrap();
+    const req = new PipeConnectWrap();
     req.address = address;
     req.oncomplete = afterConnect;
     err = self._handle.connect(req, address, afterConnect);
@@ -840,18 +840,9 @@ function connect(self, address, port, addressType, localAddress, localPort) {
       details = sockname.address + ':' + sockname.port;
     }
 
-    var ex = exceptionWithHostPort(err, 'connect', address, port, details);
+    const ex = exceptionWithHostPort(err, 'connect', address, port, details);
     self._destroy(ex);
   }
-}
-
-
-// Check that the port number is not NaN when coerced to a number,
-// is an integer and that it falls within the legal range of port numbers.
-function isLegalPort(port) {
-  if (typeof port === 'string' && port.trim() === '')
-    return false;
-  return +port === (port >>> 0) && port >= 0 && port <= 0xFFFF;
 }
 
 
@@ -1131,8 +1122,7 @@ function _listen(handle, backlog) {
   return handle.listen(backlog || 511);
 }
 
-var createServerHandle = exports._createServerHandle =
-    function(address, port, addressType, fd) {
+function createServerHandle(address, port, addressType, fd) {
   var err = 0;
   // assign handle in listen, and clean up if bind or listen fails
   var handle;
@@ -1187,7 +1177,8 @@ var createServerHandle = exports._createServerHandle =
   }
 
   return handle;
-};
+}
+exports._createServerHandle = createServerHandle;
 
 
 Server.prototype._listen2 = function(address, port, addressType, backlog, fd) {
@@ -1350,7 +1341,7 @@ Server.prototype.listen = function() {
         else
           listen(self, null, h.port | 0, 4, backlog, undefined, h.exclusive);
       } else if (h.path && isPipeName(h.path)) {
-        var pipeName = self._pipeName = h.path;
+        const pipeName = self._pipeName = h.path;
         listen(self, pipeName, -1, -1, backlog, undefined, h.exclusive);
       } else {
         throw new Error('Invalid listen argument: ' + h);
@@ -1358,7 +1349,7 @@ Server.prototype.listen = function() {
     }
   } else if (isPipeName(arguments[0])) {
     // UNIX socket or Windows pipe.
-    var pipeName = self._pipeName = arguments[0];
+    const pipeName = self._pipeName = arguments[0];
     listen(self, pipeName, -1, -1, backlog);
 
   } else if (arguments[1] === undefined ||
@@ -1443,8 +1434,8 @@ Server.prototype.getConnections = function(cb) {
   }
 
   // Poll slaves
-  var left = this._slaves.length,
-      total = this._connections;
+  var left = this._slaves.length;
+  var total = this._connections;
 
   function oncount(err, count) {
     if (err) {
@@ -1486,8 +1477,8 @@ Server.prototype.close = function(cb) {
   }
 
   if (this._usingSlaves) {
-    var self = this,
-        left = this._slaves.length;
+    var self = this;
+    var left = this._slaves.length;
 
     // Increment connections to be sure that, even if all sockets will be closed
     // during polling of slaves, `close` event will be emitted only once.

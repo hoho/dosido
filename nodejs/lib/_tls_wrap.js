@@ -398,8 +398,8 @@ TLSSocket.prototype._init = function(socket, wrap) {
 
   // For clients, we will always have either a given ca list or be using
   // default one
-  var requestCert = !!options.requestCert || !options.isServer,
-      rejectUnauthorized = !!options.rejectUnauthorized;
+  const requestCert = !!options.requestCert || !options.isServer;
+  const rejectUnauthorized = !!options.rejectUnauthorized;
 
   this._requestCert = requestCert;
   this._rejectUnauthorized = rejectUnauthorized;
@@ -407,11 +407,11 @@ TLSSocket.prototype._init = function(socket, wrap) {
     ssl.setVerifyMode(requestCert, rejectUnauthorized);
 
   if (options.isServer) {
-    ssl.onhandshakestart = onhandshakestart.bind(this);
-    ssl.onhandshakedone = onhandshakedone.bind(this);
-    ssl.onclienthello = onclienthello.bind(this);
-    ssl.oncertcb = oncertcb.bind(this);
-    ssl.onnewsession = onnewsession.bind(this);
+    ssl.onhandshakestart = () => onhandshakestart.call(this);
+    ssl.onhandshakedone = () => onhandshakedone.call(this);
+    ssl.onclienthello = (hello) => onclienthello.call(this, hello);
+    ssl.oncertcb = (info) => oncertcb.call(this, info);
+    ssl.onnewsession = (key, session) => onnewsession.call(this, key, session);
     ssl.lastHandshakeTime = 0;
     ssl.handshakes = 0;
 
@@ -425,8 +425,8 @@ TLSSocket.prototype._init = function(socket, wrap) {
     }
   } else {
     ssl.onhandshakestart = function() {};
-    ssl.onhandshakedone = this._finishInit.bind(this);
-    ssl.onocspresponse = onocspresponse.bind(this);
+    ssl.onhandshakedone = () => this._finishInit();
+    ssl.onocspresponse = (resp) => onocspresponse.call(this, resp);
 
     if (options.session)
       ssl.setSession(options.session);
@@ -501,8 +501,8 @@ TLSSocket.prototype._init = function(socket, wrap) {
 };
 
 TLSSocket.prototype.renegotiate = function(options, callback) {
-  var requestCert = this._requestCert,
-      rejectUnauthorized = this._rejectUnauthorized;
+  var requestCert = this._requestCert;
+  var rejectUnauthorized = this._rejectUnauthorized;
 
   if (this.destroyed)
     return;
@@ -993,10 +993,10 @@ exports.connect = function(/* [port, host], options, cb */) {
   var hostname = options.servername ||
                  options.host ||
                  (options.socket && options.socket._host) ||
-                 'localhost',
-      NPN = {},
-      ALPN = {},
-      context = options.secureContext || tls.createSecureContext(options);
+                 'localhost';
+  const NPN = {};
+  const ALPN = {};
+  const context = options.secureContext || tls.createSecureContext(options);
   tls.convertNPNProtocols(options.NPNProtocols, NPN);
   tls.convertALPNProtocols(options.ALPNProtocols, ALPN);
 

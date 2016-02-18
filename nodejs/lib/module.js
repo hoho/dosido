@@ -23,6 +23,20 @@ function hasOwnProperty(obj, prop) {
 }
 
 
+function stat(filename) {
+  filename = path._makeLong(filename);
+  const cache = stat.cache;
+  if (cache !== null) {
+    const result = cache.get(filename);
+    if (result !== undefined) return result;
+  }
+  const result = internalModuleStat(filename);
+  if (cache !== null) cache.set(filename, result);
+  return result;
+}
+stat.cache = null;
+
+
 function Module(id, parent) {
   this.id = id;
   this.exports = {};
@@ -104,7 +118,7 @@ Module._realpathCache = {};
 
 // check if the file exists and is not a directory
 function tryFile(requestPath) {
-  const rc = internalModuleStat(path._makeLong(requestPath));
+  const rc = stat(requestPath);
   return rc === 0 && toRealPath(requestPath);
 }
 
@@ -141,12 +155,12 @@ Module._findPath = function(request, paths) {
   // For each path
   for (var i = 0, PL = paths.length; i < PL; i++) {
     // Don't search further if path doesn't exist
-    if (paths[i] && internalModuleStat(path._makeLong(paths[i])) < 1) continue;
+    if (paths[i] && stat(paths[i]) < 1) continue;
     var basePath = path.resolve(paths[i], request);
     var filename;
 
     if (!trailingSlash) {
-      const rc = internalModuleStat(path._makeLong(basePath));
+      const rc = stat(basePath);
       if (rc === 0) {  // File.
         filename = toRealPath(basePath);
       } else if (rc === 1) {  // Directory.
@@ -350,7 +364,7 @@ Module.prototype.load = function(filename) {
 Module.prototype.require = function(path) {
   assert(path, 'missing path');
   assert(typeof path === 'string', 'path must be a string');
-  return Module._load(path, this);
+  return Module._load(path, this, /* isMain */ false);
 };
 
 
@@ -394,7 +408,11 @@ Module.prototype._compile = function(content, filename) {
   const dirname = path.dirname(filename);
   const require = internalModule.makeRequireFunction.call(this);
   const args = [this.exports, require, this, filename, dirname];
-  return compiledWrapper.apply(this.exports, args);
+  const depth = internalModule.requireDepth;
+  if (depth === 0) stat.cache = new Map();
+  const result = compiledWrapper.apply(this.exports, args);
+  if (depth === 0) stat.cache = null;
+  return result;
 };
 
 
@@ -434,10 +452,11 @@ Module.runMain = function() {
 Module._initPaths = function() {
   const isWindows = process.platform === 'win32';
 
+  var homeDir;
   if (isWindows) {
-    var homeDir = process.env.USERPROFILE;
+    homeDir = process.env.USERPROFILE;
   } else {
-    var homeDir = process.env.HOME;
+    homeDir = process.env.HOME;
   }
 
   var paths = [path.resolve(process.execPath, '..', '..', 'lib', 'node')];

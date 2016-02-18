@@ -12,11 +12,13 @@ user is able to stream data.
 
 HTTP message headers are represented by an object like this:
 
-    { 'content-length': '123',
-      'content-type': 'text/plain',
-      'connection': 'keep-alive',
-      'host': 'mysite.com',
-      'accept': '*/*' }
+```
+{ 'content-length': '123',
+  'content-type': 'text/plain',
+  'connection': 'keep-alive',
+  'host': 'mysite.com',
+  'accept': '*/*' }
+```
 
 Keys are lowercased. Values are not modified.
 
@@ -32,12 +34,14 @@ property, which is an array of `[key, value, key2, value2, ...]`.  For
 example, the previous message header object might have a `rawHeaders`
 list like the following:
 
-    [ 'ConTent-Length', '123456',
-      'content-LENGTH', '123',
-      'content-type', 'text/plain',
-      'CONNECTION', 'keep-alive',
-      'Host', 'mysite.com',
-      'accepT', '*/*' ]
+```
+[ 'ConTent-Length', '123456',
+  'content-LENGTH', '123',
+  'content-type', 'text/plain',
+  'CONNECTION', 'keep-alive',
+  'Host', 'mysite.com',
+  'accepT', '*/*' ]
+```
 
 ## Class: http.Agent
 
@@ -64,23 +68,27 @@ a `'close'` event or a special `'agentRemove'` event. This means that if
 you intend to keep one HTTP request open for a long time and don't
 want it to stay in the pool you can do something along the lines of:
 
-    http.get(options, (res) => {
-      // Do stuff
-    }).on('socket', (socket) => {
-      socket.emit('agentRemove');
-    });
+```js
+http.get(options, (res) => {
+  // Do stuff
+}).on('socket', (socket) => {
+  socket.emit('agentRemove');
+});
+```
 
 Alternatively, you could just opt out of pooling entirely using
 `agent:false`:
 
-    http.get({
-      hostname: 'localhost',
-      port: 80,
-      path: '/',
-      agent: false  // create a new agent just for this one request
-    }, (res) => {
-      // Do stuff with response
-    })
+```js
+http.get({
+  hostname: 'localhost',
+  port: 80,
+  path: '/',
+  agent: false  // create a new agent just for this one request
+}, (res) => {
+  // Do stuff with response
+})
+```
 
 ### new Agent([options])
 
@@ -102,7 +110,7 @@ of these values set to their respective defaults.
 
 To configure any of them, you must create your own [`http.Agent`][] object.
 
-```javascript
+```js
 const http = require('http');
 var keepAliveAgent = new http.Agent({ keepAlive: true });
 options.agent = keepAliveAgent;
@@ -192,6 +200,17 @@ The request implements the [Writable Stream][] interface. This is an
 Emitted when the request has been aborted by the client. This event is only
 emitted on the first call to `abort()`.
 
+### Event: 'checkExpectation'
+
+`function (request, response) { }`
+
+Emitted each time a request with an http Expect header is received, where the
+value is not 100-continue. If this event isn't listened for, the server will
+automatically respond with a 417 Expectation Failed as appropriate.
+
+Note that when this event is emitted and handled, the `request` event will
+not be emitted.
+
 ### Event: 'connect'
 
 `function (response, socket, head) { }`
@@ -202,58 +221,60 @@ their connections closed.
 
 A client server pair that show you how to listen for the `'connect'` event.
 
-    const http = require('http');
-    const net = require('net');
-    const url = require('url');
+```js
+const http = require('http');
+const net = require('net');
+const url = require('url');
 
-    // Create an HTTP tunneling proxy
-    var proxy = http.createServer( (req, res) => {
-      res.writeHead(200, {'Content-Type': 'text/plain'});
-      res.end('okay');
+// Create an HTTP tunneling proxy
+var proxy = http.createServer( (req, res) => {
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end('okay');
+});
+proxy.on('connect', (req, cltSocket, head) => {
+  // connect to an origin server
+  var srvUrl = url.parse(`http://${req.url}`);
+  var srvSocket = net.connect(srvUrl.port, srvUrl.hostname, () => {
+    cltSocket.write('HTTP/1.1 200 Connection Established\r\n' +
+                    'Proxy-agent: Node.js-Proxy\r\n' +
+                    '\r\n');
+    srvSocket.write(head);
+    srvSocket.pipe(cltSocket);
+    cltSocket.pipe(srvSocket);
+  });
+});
+
+// now that proxy is running
+proxy.listen(1337, '127.0.0.1', () => {
+
+  // make a request to a tunneling proxy
+  var options = {
+    port: 1337,
+    hostname: '127.0.0.1',
+    method: 'CONNECT',
+    path: 'www.google.com:80'
+  };
+
+  var req = http.request(options);
+  req.end();
+
+  req.on('connect', (res, socket, head) => {
+    console.log('got connected!');
+
+    // make a request over an HTTP tunnel
+    socket.write('GET / HTTP/1.1\r\n' +
+                 'Host: www.google.com:80\r\n' +
+                 'Connection: close\r\n' +
+                 '\r\n');
+    socket.on('data', (chunk) => {
+      console.log(chunk.toString());
     });
-    proxy.on('connect', (req, cltSocket, head) => {
-      // connect to an origin server
-      var srvUrl = url.parse(`http://${req.url}`);
-      var srvSocket = net.connect(srvUrl.port, srvUrl.hostname, () => {
-        cltSocket.write('HTTP/1.1 200 Connection Established\r\n' +
-                        'Proxy-agent: Node.js-Proxy\r\n' +
-                        '\r\n');
-        srvSocket.write(head);
-        srvSocket.pipe(cltSocket);
-        cltSocket.pipe(srvSocket);
-      });
+    socket.on('end', () => {
+      proxy.close();
     });
-
-    // now that proxy is running
-    proxy.listen(1337, '127.0.0.1', () => {
-
-      // make a request to a tunneling proxy
-      var options = {
-        port: 1337,
-        hostname: '127.0.0.1',
-        method: 'CONNECT',
-        path: 'www.google.com:80'
-      };
-
-      var req = http.request(options);
-      req.end();
-
-      req.on('connect', (res, socket, head) => {
-        console.log('got connected!');
-
-        // make a request over an HTTP tunnel
-        socket.write('GET / HTTP/1.1\r\n' +
-                     'Host: www.google.com:80\r\n' +
-                     'Connection: close\r\n' +
-                     '\r\n');
-        socket.on('data', (chunk) => {
-          console.log(chunk.toString());
-        });
-        socket.on('end', () => {
-          proxy.close();
-        });
-      });
-    });
+  });
+});
+```
 
 ### Event: 'continue'
 
@@ -292,44 +313,46 @@ their connections closed.
 
 A client server pair that show you how to listen for the `'upgrade'` event.
 
-    const http = require('http');
+```js
+const http = require('http');
 
-    // Create an HTTP server
-    var srv = http.createServer( (req, res) => {
-      res.writeHead(200, {'Content-Type': 'text/plain'});
-      res.end('okay');
-    });
-    srv.on('upgrade', (req, socket, head) => {
-      socket.write('HTTP/1.1 101 Web Socket Protocol Handshake\r\n' +
-                   'Upgrade: WebSocket\r\n' +
-                   'Connection: Upgrade\r\n' +
-                   '\r\n');
+// Create an HTTP server
+var srv = http.createServer( (req, res) => {
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end('okay');
+});
+srv.on('upgrade', (req, socket, head) => {
+  socket.write('HTTP/1.1 101 Web Socket Protocol Handshake\r\n' +
+               'Upgrade: WebSocket\r\n' +
+               'Connection: Upgrade\r\n' +
+               '\r\n');
 
-      socket.pipe(socket); // echo back
-    });
+  socket.pipe(socket); // echo back
+});
 
-    // now that server is running
-    srv.listen(1337, '127.0.0.1', () => {
+// now that server is running
+srv.listen(1337, '127.0.0.1', () => {
 
-      // make a request
-      var options = {
-        port: 1337,
-        hostname: '127.0.0.1',
-        headers: {
-          'Connection': 'Upgrade',
-          'Upgrade': 'websocket'
-        }
-      };
+  // make a request
+  var options = {
+    port: 1337,
+    hostname: '127.0.0.1',
+    headers: {
+      'Connection': 'Upgrade',
+      'Upgrade': 'websocket'
+    }
+  };
 
-      var req = http.request(options);
-      req.end();
+  var req = http.request(options);
+  req.end();
 
-      req.on('upgrade', (res, socket, upgradeHead) => {
-        console.log('got upgraded!');
-        socket.end();
-        process.exit(0);
-      });
-    });
+  req.on('upgrade', (res, socket, upgradeHead) => {
+    console.log('got upgraded!');
+    socket.end();
+    process.exit(0);
+  });
+});
+```
 
 ### request.abort()
 
@@ -608,14 +631,16 @@ be silently discarded.
 Note that HTTP requires the `Trailer` header to be sent if you intend to
 emit trailers, with a list of the header fields in its value. E.g.,
 
-    response.writeHead(200, { 'Content-Type': 'text/plain',
-                              'Trailer': 'Content-MD5' });
-    response.write(fileData);
-    response.addTrailers({'Content-MD5': '7895bf4b8828b55ceaf47747b4bca667'});
-    response.end();
+```js
+response.writeHead(200, { 'Content-Type': 'text/plain',
+                          'Trailer': 'Content-MD5' });
+response.write(fileData);
+response.addTrailers({'Content-MD5': '7895bf4b8828b55ceaf47747b4bca667'});
+response.end();
+```
 
-Attempting to set a trailer field name that contains invalid characters will
-result in a [`TypeError`][] being thrown.
+Attempting to set a header field name or value that contains invalid characters
+will result in a [`TypeError`][] being thrown.
 
 ### response.end([data][, encoding][, callback])
 
@@ -642,7 +667,9 @@ implicitly flushed.
 
 Example:
 
-    var contentType = response.getHeader('content-type');
+```js
+var contentType = response.getHeader('content-type');
+```
 
 ### response.headersSent
 
@@ -654,7 +681,9 @@ Removes a header that's queued for implicit sending.
 
 Example:
 
-    response.removeHeader('Content-Encoding');
+```js
+response.removeHeader('Content-Encoding');
+```
 
 ### response.sendDate
 
@@ -672,14 +701,18 @@ here if you need to send multiple headers with the same name.
 
 Example:
 
-    response.setHeader('Content-Type', 'text/html');
+```js
+response.setHeader('Content-Type', 'text/html');
+```
 
 or
 
-    response.setHeader('Set-Cookie', ['type=ninja', 'language=javascript']);
+```js
+response.setHeader('Set-Cookie', ['type=ninja', 'language=javascript']);
+```
 
-Attempting to set a header field name that contains invalid characters will
-result in a [`TypeError`][] being thrown.
+Attempting to set a header field name or value that contains invalid characters
+will result in a [`TypeError`][] being thrown.
 
 ### response.setTimeout(msecs, callback)
 
@@ -706,7 +739,9 @@ the headers get flushed.
 
 Example:
 
-    response.statusCode = 404;
+```js
+response.statusCode = 404;
+```
 
 After response header was sent to the client, this property indicates the
 status code which was sent out.
@@ -720,7 +755,9 @@ code will be used.
 
 Example:
 
-    response.statusMessage = 'Not found';
+```js
+response.statusMessage = 'Not found';
+```
 
 After response header was sent to the client, this property indicates the
 status message which was sent out.
@@ -765,16 +802,18 @@ argument.
 
 Example:
 
-    var body = 'hello world';
-    response.writeHead(200, {
-      'Content-Length': body.length,
-      'Content-Type': 'text/plain' });
+```js
+var body = 'hello world';
+response.writeHead(200, {
+  'Content-Length': body.length,
+  'Content-Type': 'text/plain' });
+```
 
 This method must only be called once on a message and it must
 be called before [`response.end()`][] is called.
 
-If you call [`response.write()`][] or [`response.end()`][] before calling this, the
-implicit/mutable headers will be calculated and call this function for you.
+If you call [`response.write()`][] or [`response.end()`][] before calling this,
+the implicit/mutable headers will be calculated and call this function for you.
 
 Note that Content-Length is given in bytes not characters. The above example
 works because the string `'hello world'` contains only single byte characters.
@@ -782,6 +821,9 @@ If the body contains higher coded characters then `Buffer.byteLength()`
 should be used to determine the number of bytes in a given encoding.
 And Node.js does not check whether Content-Length and the length of the body
 which has been transmitted are equal or not.
+
+Attempting to set a header field name or value that contains invalid characters
+will result in a [`TypeError`][] being thrown.
 
 ## Class: http.IncomingMessage
 
@@ -807,12 +849,14 @@ The request/response headers object.
 Key-value pairs of header names and values. Header names are lower-cased.
 Example:
 
-    // Prints something like:
-    //
-    // { 'user-agent': 'curl/7.22.0',
-    //   host: '127.0.0.1:8000',
-    //   accept: '*/*' }
-    console.log(request.headers);
+```js
+// Prints something like:
+//
+// { 'user-agent': 'curl/7.22.0',
+//   host: '127.0.0.1:8000',
+//   accept: '*/*' }
+console.log(request.headers);
+```
 
 Duplicates in raw headers are handled in the following ways, depending on the
 header name:
@@ -850,17 +894,19 @@ odd-numbered offsets are the associated values.
 
 Header names are not lowercased, and duplicates are not merged.
 
-    // Prints something like:
-    //
-    // [ 'user-agent',
-    //   'this is invalid because there can be only one',
-    //   'User-Agent',
-    //   'curl/7.22.0',
-    //   'Host',
-    //   '127.0.0.1:8000',
-    //   'ACCEPT',
-    //   '*/*' ]
-    console.log(request.rawHeaders);
+```js
+// Prints something like:
+//
+// [ 'user-agent',
+//   'this is invalid because there can be only one',
+//   'User-Agent',
+//   'curl/7.22.0',
+//   'Host',
+//   '127.0.0.1:8000',
+//   'ACCEPT',
+//   '*/*' ]
+console.log(request.rawHeaders);
+```
 
 ### message.rawTrailers
 
@@ -886,14 +932,14 @@ The 3-digit HTTP response status code. E.G. `404`.
 
 **Only valid for response obtained from [`http.ClientRequest`][].**
 
+The HTTP response status message (reason phrase). E.G. `OK` or `Internal Server Error`.
+
 ### message.socket
 
 The [`net.Socket`][] object associated with the connection.
 
 With HTTPS support, use [`request.socket.getPeerCertificate()`][] to obtain the
 client's authentication details.
-
-The HTTP response status message (reason phrase). E.G. `OK` or `Internal Server Error`.
 
 ### message.trailers
 
@@ -906,32 +952,46 @@ The request/response trailers object. Only populated at the `'end'` event.
 Request URL string. This contains only the URL that is
 present in the actual HTTP request. If the request is:
 
-    GET /status?name=ryan HTTP/1.1\r\n
-    Accept: text/plain\r\n
-    \r\n
+```
+GET /status?name=ryan HTTP/1.1\r\n
+Accept: text/plain\r\n
+\r\n
+```
 
 Then `request.url` will be:
 
-    '/status?name=ryan'
+```
+'/status?name=ryan'
+```
 
 If you would like to parse the URL into its parts, you can use
 `require('url').parse(request.url)`.  Example:
 
-    node> require('url').parse('/status?name=ryan')
-    { href: '/status?name=ryan',
-      search: '?name=ryan',
-      query: 'name=ryan',
-      pathname: '/status' }
+```
+$ node
+> require('url').parse('/status?name=ryan')
+{
+  href: '/status?name=ryan',
+  search: '?name=ryan',
+  query: 'name=ryan',
+  pathname: '/status'
+}
+```
 
 If you would like to extract the params from the query string,
 you can use the `require('querystring').parse` function, or pass
 `true` as the second argument to `require('url').parse`.  Example:
 
-    node> require('url').parse('/status?name=ryan', true)
-    { href: '/status?name=ryan',
-      search: '?name=ryan',
-      query: { name: 'ryan' },
-      pathname: '/status' }
+```
+$ node
+> require('url').parse('/status?name=ryan', true)
+{
+  href: '/status?name=ryan',
+  search: '?name=ryan',
+  query: {name: 'ryan'},
+  pathname: '/status'
+}
+```
 
 ## http.METHODS
 
@@ -969,13 +1029,15 @@ is that it sets the method to GET and calls `req.end()` automatically.
 
 Example:
 
-    http.get('http://www.google.com/index.html', (res) => {
-      console.log(`Got response: ${res.statusCode}`);
-      // consume response body
-      res.resume();
-    }).on('error', (e) => {
-      console.log(`Got error: ${e.message}`);
-    });
+```js
+http.get('http://www.google.com/index.html', (res) => {
+  console.log(`Got response: ${res.statusCode}`);
+  // consume response body
+  res.resume();
+}).on('error', (e) => {
+  console.log(`Got error: ${e.message}`);
+});
+```
 
 ## http.globalAgent
 
@@ -992,7 +1054,7 @@ automatically parsed with [`url.parse()`][].
 
 Options:
 
-- `protocol`: Protocol to use. Defaults to `'http'`.
+- `protocol`: Protocol to use. Defaults to `'http:'`.
 - `host`: A domain name or IP address of the server to issue the request to.
   Defaults to `'localhost'`.
 - `hostname`: Alias for `host`. To support [`url.parse()`][] `hostname` is
@@ -1027,40 +1089,42 @@ upload a file with a POST request, then write to the `ClientRequest` object.
 
 Example:
 
-    var postData = querystring.stringify({
-      'msg' : 'Hello World!'
-    });
+```js
+var postData = querystring.stringify({
+  'msg' : 'Hello World!'
+});
 
-    var options = {
-      hostname: 'www.google.com',
-      port: 80,
-      path: '/upload',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': postData.length
-      }
-    };
+var options = {
+  hostname: 'www.google.com',
+  port: 80,
+  path: '/upload',
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Content-Length': postData.length
+  }
+};
 
-    var req = http.request(options, (res) => {
-      console.log(`STATUS: ${res.statusCode}`);
-      console.log(`HEADERS: ${JSON.stringify(res.headers)}`);
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => {
-        console.log(`BODY: ${chunk}`);
-      });
-      res.on('end', () => {
-        console.log('No more data in response.')
-      })
-    });
+var req = http.request(options, (res) => {
+  console.log(`STATUS: ${res.statusCode}`);
+  console.log(`HEADERS: ${JSON.stringify(res.headers)}`);
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => {
+    console.log(`BODY: ${chunk}`);
+  });
+  res.on('end', () => {
+    console.log('No more data in response.')
+  })
+});
 
-    req.on('error', (e) => {
-      console.log(`problem with request: ${e.message}`);
-    });
+req.on('error', (e) => {
+  console.log(`problem with request: ${e.message}`);
+});
 
-    // write data to request body
-    req.write(postData);
-    req.end();
+// write data to request body
+req.write(postData);
+req.end();
+```
 
 Note that in the example `req.end()` was called. With `http.request()` one
 must always call `req.end()` to signify that you're done with the request -
@@ -1096,7 +1160,7 @@ There are a few special headers that should be noted.
 [`http.Agent`]: #http_class_http_agent
 [`http.ClientRequest`]: #http_class_http_clientrequest
 [`http.globalAgent`]: #http_http_globalagent
-[`http.IncomingMessage`]: #http_http_incomingmessage
+[`http.IncomingMessage`]: #http_class_http_incomingmessage
 [`http.request()`]: #http_http_request_options_callback
 [`http.Server`]: #http_class_http_server
 [`http.ServerResponse`]: #http_class_http_serverresponse

@@ -117,23 +117,22 @@ function fromString(string, encoding) {
   return b;
 }
 
+function fromArrayLike(obj) {
+  const length = obj.length;
+  const b = allocate(length);
+  for (let i = 0; i < length; i++)
+    b[i] = obj[i] & 255;
+  return b;
+}
 
 function fromObject(obj) {
   if (obj instanceof Buffer) {
-    var b = allocate(obj.length);
+    const b = allocate(obj.length);
 
     if (b.length === 0)
       return b;
 
     obj.copy(b, 0, 0, obj.length);
-    return b;
-  }
-
-  if (Array.isArray(obj)) {
-    var length = obj.length;
-    var b = allocate(length);
-    for (var i = 0; i < length; i++)
-      b[i] = obj[i] & 255;
     return b;
   }
 
@@ -145,25 +144,15 @@ function fromObject(obj) {
     return binding.createFromArrayBuffer(obj);
   }
 
-  if (obj.buffer instanceof ArrayBuffer || obj.length) {
-    var length;
-    if (typeof obj.length !== 'number' || obj.length !== obj.length)
-      length = 0;
-    else
-      length = obj.length;
-    var b = allocate(length);
-    for (var i = 0; i < length; i++) {
-      b[i] = obj[i] & 255;
+  if (obj.buffer instanceof ArrayBuffer || 'length' in obj) {
+    if (typeof obj.length !== 'number' || obj.length !== obj.length) {
+      return allocate(0);
     }
-    return b;
+    return fromArrayLike(obj);
   }
 
   if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
-    var array = obj.data;
-    var b = allocate(array.length);
-    for (var i = 0; i < array.length; i++)
-      b[i] = array[i] & 255;
-    return b;
+    return fromArrayLike(obj.data);
   }
 
   throw new TypeError('must start with number, buffer, array or string');
@@ -219,14 +208,14 @@ Buffer.isEncoding = function(encoding) {
 
 Buffer.concat = function(list, length) {
   if (!Array.isArray(list))
-    throw new TypeError('list argument must be an Array of Buffers.');
+    throw new TypeError('list argument must be an Array of Buffers');
 
   if (list.length === 0)
     return new Buffer(0);
 
   if (length === undefined) {
     length = 0;
-    for (var i = 0; i < list.length; i++)
+    for (let i = 0; i < list.length; i++)
       length += list[i].length;
   } else {
     length = length >>> 0;
@@ -234,8 +223,10 @@ Buffer.concat = function(list, length) {
 
   var buffer = new Buffer(length);
   var pos = 0;
-  for (var i = 0; i < list.length; i++) {
+  for (let i = 0; i < list.length; i++) {
     var buf = list[i];
+    if (!Buffer.isBuffer(buf))
+      throw new TypeError('list argument must be an Array of Buffers');
     buf.copy(buffer, pos);
     pos += buf.length;
   }
@@ -257,6 +248,9 @@ function base64ByteLength(str, bytes) {
 
 
 function byteLength(string, encoding) {
+  if (string instanceof Buffer)
+    return string.length;
+
   if (typeof string !== 'string')
     string = '' + string;
 
@@ -393,10 +387,11 @@ function slowToString(encoding, start, end) {
 
 
 Buffer.prototype.toString = function() {
+  let result;
   if (arguments.length === 0) {
-    var result = this.utf8Slice(0, this.length);
+    result = this.utf8Slice(0, this.length);
   } else {
-    var result = slowToString.apply(this, arguments);
+    result = slowToString.apply(this, arguments);
   }
   if (result === undefined)
     throw new Error('toString failed');
@@ -536,8 +531,6 @@ Buffer.prototype.set = internalUtil.deprecate(function set(offset, v) {
 }, 'Buffer.set is deprecated. Use array indexes instead.');
 
 
-// TODO(trevnorris): fix these checks to follow new standard
-// write(string, offset = 0, length = buffer.length, encoding = 'utf8')
 var writeWarned = false;
 const writeMsg = 'Buffer.write(string, encoding, offset, length) is ' +
                  'deprecated. Use write(string[, offset[, length]]' +
@@ -630,8 +623,6 @@ Buffer.prototype.toJSON = function() {
 };
 
 
-// TODO(trevnorris): currently works like Array.prototype.slice(), which
-// doesn't follow the new standard for throwing on out of range indexes.
 Buffer.prototype.slice = function slice(start, end) {
   const buffer = this.subarray(start, end);
   Object.setPrototypeOf(buffer, Buffer.prototype);

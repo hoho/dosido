@@ -21,8 +21,8 @@ assert.throws(function() {
   vm.runInDebugContext('(function(f) { f(f) })(function(f) { f(f) })');
 }, /RangeError/);
 
-assert.equal(typeof(vm.runInDebugContext('this')), 'object');
-assert.equal(typeof(vm.runInDebugContext('Debug')), 'object');
+assert.equal(typeof vm.runInDebugContext('this'), 'object');
+assert.equal(typeof vm.runInDebugContext('Debug'), 'object');
 
 assert.strictEqual(vm.runInDebugContext(), undefined);
 assert.strictEqual(vm.runInDebugContext(0), 0);
@@ -87,7 +87,7 @@ proc.once('exit', common.mustCall(function(exitCode, signalCode) {
   assert.equal(signalCode, null);
 }));
 
-var proc = spawn(process.execPath, [script, 'handle-fatal-exception']);
+proc = spawn(process.execPath, [script, 'handle-fatal-exception']);
 proc.stdout.on('data', common.fail);
 proc.stderr.on('data', common.fail);
 proc.once('exit', common.mustCall(function(exitCode, signalCode) {

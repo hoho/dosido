@@ -38,8 +38,8 @@ server.onconnection = function(err, client) {
 
       var req = new WriteWrap();
       req.async = false;
-      var err = client.writeBuffer(req, buffer);
-      assert.equal(err, 0);
+      const returnCode = client.writeBuffer(req, buffer);
+      assert.equal(returnCode, 0);
       client.pendingWrites.push(req);
 
       console.log('client.writeQueueSize: ' + client.writeQueueSize);
@@ -65,7 +65,7 @@ server.onconnection = function(err, client) {
         writeCount++;
         console.log('write ' + writeCount);
         maybeCloseClient();
-      };
+      }
 
       sliceCount++;
     } else {
