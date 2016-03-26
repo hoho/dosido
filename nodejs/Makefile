@@ -11,6 +11,24 @@ STAGINGSERVER ?= node-www
 
 OSTYPE := $(shell uname -s | tr '[A-Z]' '[a-z]')
 
+ifdef QUICKCHECK
+  QUICKCHECK_ARG := --quickcheck
+endif
+
+ifdef ENABLE_V8_TAP
+  TAP_V8 := --junitout v8-tap.xml
+  TAP_V8_INTL := --junitout v8-intl-tap.xml
+  TAP_V8_BENCHMARKS := --junitout v8-benchmarks-tap.xml
+endif
+
+V8_TEST_OPTIONS = $(V8_EXTRA_TEST_OPTIONS)
+ifdef DISABLE_V8_I18N
+  V8_TEST_OPTIONS += --noi18n
+  V8_BUILD_OPTIONS += i18nsupport=off
+endif
+
+BUILDTYPE_LOWER := $(shell echo $(BUILDTYPE) | tr '[A-Z]' '[a-z]')
+
 # Determine EXEEXT
 EXEEXT := $(shell $(PYTHON) -c \
 		"import sys; print('.exe' if sys.platform == 'win32' else '')")
@@ -81,11 +99,17 @@ distclean:
 	-rm -rf deps/icu
 	-rm -rf deps/icu4c*.tgz deps/icu4c*.zip deps/icu-tmp
 	-rm -f $(BINARYTAR).* $(TARBALL).*
+	-rm -rf deps/v8/testing/gmock
+	-rm -rf deps/v8/testing/gtest
 
 check: test
 
 cctest: all
 	@out/$(BUILDTYPE)/$@
+
+v8:
+	tools/make-v8.sh v8
+	$(MAKE) -C deps/v8 $(V8_ARCH) $(V8_BUILD_OPTIONS)
 
 test: | cctest  # Depends on 'all'.
 	$(PYTHON) tools/test.py --mode=release message parallel sequential -J
@@ -168,6 +192,9 @@ test-internet: all
 test-debugger: all
 	$(PYTHON) tools/test.py debugger
 
+test-known-issues: all
+	$(PYTHON) tools/test.py known_issues --expect-fail
+
 test-npm: $(NODE_EXE)
 	NODE=$(NODE) tools/test-npm.sh
 
@@ -183,6 +210,30 @@ test-timers:
 
 test-timers-clean:
 	$(MAKE) --directory=tools clean
+
+test-v8:
+	# note: performs full test unless QUICKCHECK is specified
+	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
+        --mode=$(BUILDTYPE_LOWER) $(V8_TEST_OPTIONS) $(QUICKCHECK_ARG) \
+        --no-presubmit \
+        --shell-dir=$(PWD)/deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) \
+	 $(TAP_V8)
+
+test-v8-intl:
+	# note: performs full test unless QUICKCHECK is specified
+	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
+        --mode=$(BUILDTYPE_LOWER) --no-presubmit $(QUICKCHECK_ARG) \
+        --shell-dir=deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) intl \
+        $(TAP_V8_INTL)
+
+test-v8-benchmarks:
+	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) --mode=$(BUILDTYPE_LOWER) \
+        --download-data $(QUICKCHECK_ARG) --no-presubmit \
+        --shell-dir=deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) benchmarks \
+	 $(TAP_V8_BENCHMARKS)
+
+test-v8-all: test-v8 test-v8-intl test-v8-benchmarks
+	# runs all v8 tests
 
 apidoc_sources = $(wildcard doc/api/*.markdown)
 apidocs = $(addprefix out/,$(apidoc_sources:.markdown=.html)) \
@@ -272,6 +323,9 @@ else
 ifeq ($(DESTCPU),arm)
 ARCH=arm
 else
+ifeq ($(DESTCPU),aarch64)
+ARCH=arm64
+else
 ifeq ($(DESTCPU),ppc64)
 ARCH=ppc64
 else
@@ -282,6 +336,16 @@ ARCH=x86
 endif
 endif
 endif
+endif
+endif
+
+# node and v8 use different arch names (e.g. node 'x86' vs v8 'ia32').
+# pass the proper v8 arch name to $V8_ARCH based on user-specified $DESTCPU.
+ifeq ($(DESTCPU),x86)
+V8_ARCH=ia32
+else
+V8_ARCH ?= $(DESTCPU)
+
 endif
 
 # enforce "x86" over "ia32" as the generally accepted way of referring to 32-bit intel
@@ -368,6 +432,7 @@ $(TARBALL): release-only $(NODE_EXE) doc
 	rm -rf $(TARNAME)/deps/uv/{docs,samples,test}
 	rm -rf $(TARNAME)/deps/openssl/{doc,demos,test}
 	rm -rf $(TARNAME)/deps/zlib/contrib # too big, unused
+	rm -rf $(TARNAME)/.github # github issue templates
 	find $(TARNAME)/ -type l | xargs rm # annoying on windows
 	tar -cf $(TARNAME).tar $(TARNAME)
 	rm -rf $(TARNAME)
@@ -501,7 +566,10 @@ bench-events: all
 bench-util: all
 	@$(NODE) benchmark/common.js util
 
-bench-all: bench bench-misc bench-array bench-buffer bench-url bench-events
+bench-dgram: all
+	@$(NODE) benchmark/common.js dgram
+
+bench-all: bench bench-misc bench-array bench-buffer bench-url bench-events bench-dgram bench-util
 
 bench: bench-net bench-http bench-fs bench-tls
 
@@ -514,8 +582,8 @@ bench-idle:
 	$(NODE) benchmark/idle_clients.js &
 
 jslint:
-	$(NODE) tools/eslint/bin/eslint.js lib src test tools/doc tools/eslint-rules \
-		--rulesdir tools/eslint-rules --quiet
+	$(NODE) tools/eslint/bin/eslint.js benchmark lib src test tools/doc \
+	  tools/eslint-rules --rulesdir tools/eslint-rules
 
 CPPLINT_EXCLUDE ?=
 CPPLINT_EXCLUDE += src/node_lttng.cc
@@ -549,4 +617,5 @@ lint: jslint cpplint
 	dynamiclib test test-all test-addons build-addons website-upload pkg \
 	blog blogclean tar binary release-only bench-http-simple bench-idle \
 	bench-all bench bench-misc bench-array bench-buffer bench-net \
-	bench-http bench-fs bench-tls cctest run-ci
+	bench-http bench-fs bench-tls cctest run-ci test-v8 test-v8-intl \
+	test-v8-benchmarks test-v8-all v8

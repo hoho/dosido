@@ -84,6 +84,7 @@ class LineParser {
     this._literal = null;
     this.shouldFail = false;
     this.blockComment = false;
+    this.regExpLiteral = false;
   }
 
   parseLine(line) {
@@ -99,6 +100,11 @@ class LineParser {
       }
 
       if (!this._literal) {
+        if (this.regExpLiteral && current === '/') {
+          this.regExpLiteral = false;
+          previous = null;
+          continue;
+        }
         if (previous === '*' && current === '/') {
           if (this.blockComment) {
             this.blockComment = false;
@@ -115,13 +121,17 @@ class LineParser {
           break;
         }
 
-        if (previous === '/' && current === '*') {
-          this.blockComment = true;
+        if (previous === '/') {
+          if (current === '*') {
+            this.blockComment = true;
+          } else {
+            this.regExpLiteral = true;
+          }
           previous = null;
         }
       }
 
-      if (this.blockComment) continue;
+      if (this.blockComment || this.regExpLiteral) continue;
 
       if (current === this._literal) {
         this._literal = null;
@@ -184,8 +194,6 @@ function REPLServer(prompt,
     prompt = options.prompt;
     dom = options.domain;
     replMode = options.replMode;
-  } else if (typeof prompt !== 'string') {
-    throw new Error('An options Object, or a prompt String are required');
   } else {
     options = {};
   }
@@ -220,7 +228,7 @@ function REPLServer(prompt,
             (self.replMode === exports.REPL_MODE_STRICT || retry)) {
           // "void 0" keeps the repl from returning "use strict" as the
           // result value for let/const statements.
-          code = `'use strict'; void 0; ${code}`;
+          code = `'use strict'; void 0;\n${code}`;
         }
         var script = vm.createScript(code, {
           filename: file,
@@ -279,6 +287,10 @@ function REPLServer(prompt,
     debug('domain error');
     const top = replMap.get(self);
     internalUtil.decorateErrorStack(e);
+    if (e.stack && self.replMode === exports.REPL_MODE_STRICT) {
+      e.stack = e.stack.replace(/(\s+at\s+repl:)(\d+)/,
+                                (_, pre, line) => pre + (line - 1));
+    }
     top.outputStream.write((e.stack || e) + '\n');
     top.lineParser.reset();
     top.bufferedCommand = '';
@@ -1112,7 +1124,7 @@ function regexpEscape(s) {
 REPLServer.prototype.convertToContext = function(cmd) {
   const scopeVar = /^\s*var\s*([_\w\$]+)(.*)$/m;
   const scopeFunc = /^\s*function\s*([_\w\$]+)/;
-  var self = this, matches;
+  var matches;
 
   // Replaces: var foo = "bar";  with: self.context.foo = bar;
   matches = scopeVar.exec(cmd);
@@ -1121,9 +1133,9 @@ REPLServer.prototype.convertToContext = function(cmd) {
   }
 
   // Replaces: function foo() {};  with: foo = function foo() {};
-  matches = scopeFunc.exec(self.bufferedCommand);
+  matches = scopeFunc.exec(this.bufferedCommand);
   if (matches && matches.length === 2) {
-    return matches[1] + ' = ' + self.bufferedCommand;
+    return matches[1] + ' = ' + this.bufferedCommand;
   }
 
   return cmd;
@@ -1140,7 +1152,10 @@ function isRecoverableError(e, self) {
       self._inTemplateLiteral = true;
       return true;
     }
-    return /^(Unexpected end of input|Unexpected token)/.test(message);
+
+    return message.startsWith('Unexpected end of input') ||
+      message.startsWith('Unexpected token') ||
+      message.startsWith('missing ) after argument list');
   }
   return false;
 }

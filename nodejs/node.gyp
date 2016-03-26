@@ -546,7 +546,7 @@
             }]
           ],
           'action': [
-            '<(python)',
+            'python',
             'tools/js2c.py',
             '<@(_outputs)',
             '<@(_inputs)',

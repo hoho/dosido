@@ -32,7 +32,7 @@ mean that data sent to the child process may not be immediately consumed.*
 The `child_process.spawn()` method spawns the child process asynchronously,
 without blocking the Node.js event loop. The `child_process.spawnSync()`
 function provides equivalent functionality in a synchronous manner that blocks
-the event loop until the spawned process either exits of is terminated.
+the event loop until the spawned process either exits or is terminated.
 
 For convenience, the `child_process` module provides a handful of synchronous
 and asynchronous alternatives to [`child_process.spawn()`][] and
@@ -77,11 +77,12 @@ The importance of the distinction between `child_process.exec()` and
 `child_process.execFile()` can vary based on platform. On Unix-type operating
 systems (Unix, Linux, OSX) `child_process.execFile()` can be more efficient
 because it does not spawn a shell. On Windows, however, `.bat` and `.cmd`
-files are not executable on their own without a terminal and therefore cannot
-be launched using `child_process.execFile()` (or even `child_process.spawn()`).
-When running on Windows, `.bat` and `.cmd` files can only be invoked using
-either `child_process.exec()` or by spawning `cmd.exe` and passing the `.bat`
-or `.cmd` file as an argument (which is what `child_process.exec()` does).
+files are not executable on their own without a terminal, and therefore cannot
+be launched using `child_process.execFile()`. When running on Windows, `.bat`
+and `.cmd` files can be invoked using `child_process.spawn()` with the `shell`
+option set, with `child_process.exec()`, or by spawning `cmd.exe` and passing
+the `.bat` or `.cmd` file as an argument (which is what the `shell` option and
+`child_process.exec()` do).
 
 ```js
 // On Windows Only ...
@@ -132,7 +133,7 @@ exec('my.bat', (err, stdout, stderr) => {
   * `error` {Error}
   * `stdout` {Buffer}
   * `stderr` {Buffer}
-* Return: ChildProcess object
+* Return: {ChildProcess}
 
 Spawns a shell then executes the `command` within that shell, buffering any
 generated output.
@@ -183,7 +184,7 @@ replace the existing process and uses a shell to execute the command.*
 
 ### child_process.execFile(file[, args][, options][, callback])
 
-* `file` {String} A path to an executable file
+* `file` {String} The name or path of the executable file to run
 * `args` {Array} List of string arguments
 * `options` {Object}
   * `cwd` {String} Current working directory of the child process
@@ -199,7 +200,7 @@ replace the existing process and uses a shell to execute the command.*
   * `error` {Error}
   * `stdout` {Buffer}
   * `stderr` {Buffer}
-* Return: ChildProcess object
+* Return: {ChildProcess}
 
 The `child_process.execFile()` function is similar to [`child_process.exec()`][]
 except that it does not spawn a shell. Rather, the specified executable `file`
@@ -235,7 +236,7 @@ const child = execFile('node', ['--version'], (error, stdout, stderr) => {
     [`stdio`][] for more details (default is false)
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
-* Return: ChildProcess object
+* Return: {ChildProcess}
 
 The `child_process.fork()` method is a special case of
 [`child_process.spawn()`][] used specifically to spawn new Node.js processes.
@@ -277,7 +278,11 @@ not clone the current process.*
     [`options.detached`][])
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
-* return: {ChildProcess object}
+  * `shell` {Boolean|String} If `true`, runs `command` inside of a shell. Uses
+    '/bin/sh' on UNIX, and 'cmd.exe' on Windows. A different shell can be
+    specified as a string. The shell should understand the `-c` switch on UNIX,
+    or `/s /c` on Windows. Defaults to `false` (no shell).
+* return: {ChildProcess}
 
 The `child_process.spawn()` method spawns a new process using the given
 `command`, with command line arguments in `args`. If omitted, `args` defaults
@@ -497,7 +502,7 @@ configuration at startup.
 
 ### child_process.execFileSync(file[, args][, options])
 
-* `file` {String} The filename of the program to run
+* `file` {String} The name or path of the executable file to run
 * `args` {Array} List of string arguments
 * `options` {Object}
   * `cwd` {String} Current working directory of the child process
@@ -581,6 +586,10 @@ throw.  The [`Error`][] object will contain the entire result from
   * `maxBuffer` {Number} largest amount of data (in bytes) allowed on stdout or
     stderr - if exceeded child process is killed
   * `encoding` {String} The encoding used for all stdio inputs and outputs. (Default: 'buffer')
+  * `shell` {Boolean|String} If `true`, runs `command` inside of a shell. Uses
+    '/bin/sh' on UNIX, and 'cmd.exe' on Windows. A different shell can be
+    specified as a string. The shell should understand the `-c` switch on UNIX,
+    or `/s /c` on Windows. Defaults to `false` (no shell).
 * return: {Object}
   * `pid` {Number} Pid of the child process
   * `output` {Array} Array of results from stdio output
@@ -626,7 +635,7 @@ disconnecting it is no longer possible to send or receive messages, and the
 
 ### Event:  'error'
 
-* `err` {Error Object} the error.
+* `err` {Error} the error.
 
 The `'error'` event is emitted whenever:
 
@@ -663,7 +672,7 @@ See `waitpid(2)`.
 ### Event: 'message'
 
 * `message` {Object} a parsed JSON object or primitive value.
-* `sendHandle` {Handle object} a [`net.Socket`][] or [`net.Server`][] object, or
+* `sendHandle` {Handle} a [`net.Socket`][] or [`net.Server`][] object, or
   undefined.
 
 The `'message'` event is triggered when a child process uses `process.send()`
@@ -727,7 +736,7 @@ See `kill(2)`
 
 ### child.pid
 
-* {Integer}
+* {Number} Integer
 
 Returns the process identifier (PID) of the child process.
 
@@ -741,12 +750,13 @@ console.log(`Spawned child pid: ${grep.pid}`);
 grep.stdin.end();
 ```
 
-### child.send(message[, sendHandle][, callback])
+### child.send(message[, sendHandle[, options]][, callback])
 
 * `message` {Object}
-* `sendHandle` {Handle object}
+* `sendHandle` {Handle}
+* `options` {Object}
 * `callback` {Function}
-* Return: Boolean
+* Return: {Boolean}
 
 When an IPC channel has been established between the parent and child (
 i.e. when using [`child_process.fork()`][]), the `child.send()` method can be
@@ -792,6 +802,14 @@ passing a TCP server or socket object to the child process. The child will
 receive the object as the second argument passed to the callback function
 registered on the `process.on('message')` event.
 
+The `options` argument, if present, is an object used to parameterize the
+sending of certain types of handles. `options` supports the following
+properties:
+
+  * `keepOpen` - A Boolean value that can be used when passing instances of
+    `net.Socket`. When `true`, the socket is kept open in the sending process.
+    Defaults to `false`.
+
 The optional `callback` is a function that is invoked after the message is
 sent but before the child may have received it.  The function is called with a
 single argument: `null` on success, or an [`Error`][] object on failure.
@@ -808,7 +826,7 @@ used to implement flow control.
 #### Example: sending a server object
 
 The `sendHandle` argument can be used, for instance, to pass the handle of
-a TSCP server object to the child process as illustrated in the example below:
+a TCP server object to the child process as illustrated in the example below:
 
 ```js
 const child = require('child_process').fork('child.js');
@@ -884,9 +902,11 @@ tracking when the socket is destroyed. To indicate this, the `.connections`
 property becomes `null`. It is recommended not to use `.maxConnections` when
 this occurs.
 
+*Note: this function uses [`JSON.stringify()`][] internally to serialize the `message`.*
+
 ### child.stderr
 
-* {Stream object}
+* {Stream}
 
 A `Readable Stream` that represents the child process's `stderr`.
 
@@ -898,7 +918,7 @@ the same value.
 
 ### child.stdin
 
-* {Stream object}
+* {Stream}
 
 A `Writable Stream` that represents the child process's `stdin`.
 
@@ -950,7 +970,7 @@ assert.equal(child.stdio[2], child.stderr);
 
 ### child.stdout
 
-* {Stream object}
+* {Stream}
 
 A `Readable Stream` that represents the child process's `stdout`.
 
@@ -978,3 +998,4 @@ to the same value.
 [`options.stdio`]: #child_process_options_stdio
 [`stdio`]: #child_process_options_stdio
 [synchronous counterparts]: #child_process_synchronous_process_creation
+[`JSON.stringify()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify

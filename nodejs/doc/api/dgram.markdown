@@ -43,7 +43,7 @@ Once triggered, no new `'message'` events will be emitted on this socket.
 
 ### Event: 'error'
 
-* `exception` Error object
+* `exception` {Error}
 
 The `'error'` event is emitted whenever any error occurs. The event handler
 function is passed a single Error object.
@@ -55,8 +55,8 @@ datagram messages. This occurs as soon as UDP sockets are created.
 
 ### Event: 'message'
 
-* `msg` Buffer object. The message
-* `rinfo` Object. Remote address information
+* `msg` {Buffer} - The message
+* `rinfo` {Object} - Remote address information
 
 The `'message'` event is emitted when a new datagram is available on a socket.
 The event handler function is passed two arguments: `msg` and `rinfo`. The
@@ -72,8 +72,8 @@ socket.on('message', (msg, rinfo) => {
 
 ### socket.addMembership(multicastAddress[, multicastInterface])
 
-* `multicastAddress` String
-* `multicastInterface` String, Optional
+* `multicastAddress` {String}
+* `multicastInterface` {String}, Optional
 
 Tells the kernel to join a multicast group at the given `multicastAddress`
 using the `IP_ADD_MEMBERSHIP` socket option. If the `multicastInterface`
@@ -88,9 +88,9 @@ properties.
 
 ### socket.bind([port][, address][, callback])
 
-* `port` Integer, Optional
-* `address` String, Optional
-* `callback` Function with no parameters, Optional. Called when
+* `port` {Number} - Integer, Optional
+* `address` {String}, Optional
+* `callback` {Function} with no parameters, Optional. Called when
   binding is complete.
 
 For UDP sockets, causes the `dgram.Socket` to listen for datagram messages on a
@@ -174,8 +174,8 @@ provided, it is added as a listener for the [`'close'`][] event.
 
 ### socket.dropMembership(multicastAddress[, multicastInterface])
 
-* `multicastAddress` String
-* `multicastInterface` String, Optional
+* `multicastAddress` {String}
+* `multicastInterface` {String}, Optional
 
 Instructs the kernel to leave a multicast group at `multicastAddress` using the
 `IP_DROP_MEMBERSHIP` socket option. This method is automatically called by the
@@ -187,33 +187,29 @@ drop membership on all valid interfaces.
 
 ### socket.send(msg, [offset, length,] port, address[, callback])
 
-* `msg` Buffer object, string, or an array of either. Message to be
-  sent.
-* `offset` Integer. Optional. Offset in the buffer where the message starts.
-* `length` Integer. Optional. Number of bytes in the message.
-* `port` Integer. Destination port.
-* `address` String. Destination hostname or IP address.
-* `callback` Function. Called when the message has been sent. Optional.
+* `msg` {Buffer|String|Array} Message to be sent
+* `offset` {Number} Integer. Optional. Offset in the buffer where the message starts.
+* `length` {Number} Integer. Optional. Number of bytes in the message.
+* `port` {Number} Integer. Destination port.
+* `address` {String} Destination hostname or IP address.
+* `callback` {Function} Called when the message has been sent. Optional.
 
 Broadcasts a datagram on the socket. The destination `port` and `address` must
 be specified.
 
-The `msg` argument containins the message to be sent.
+The `msg` argument contains the message to be sent.
 Depending on its type, different behavior can apply. If `msg` is a `Buffer`,
 the `offset` and `length` specify the offset within the `Buffer` where the
 message begins and the number of bytes in the message, respectively.
 If `msg` is a `String`, then it is automatically converted to a `Buffer`
-with `'utf8'` enecoding. With messages that
+with `'utf8'` encoding. With messages that
 contain  multi-byte characters, `offset` and `length` will be calculated with
 respect to [byte length][] and not the character position.
 If `msg` is an array, `offset` and `length` must not be specified.
 
 The `address` argument is a string. If the value of `address` is a host name,
 DNS will be used to resolve the address of the host. If the `address` is not
-specified or is an empty string, `'0.0.0.0'` or `'::0'` will be used instead.
-It is possible, depending on the network configuration, that these defaults
-may not work; accordingly, it is best to be explicit about the destination
-address.
+specified or is an empty string, `'127.0.0.1'` or `'::1'` will be used instead.
 
 If the socket has not been previously bound with a call to `bind`, the socket
 is assigned a random port number and is bound to the "all interfaces" address
@@ -229,16 +225,35 @@ The only way to know for sure that the datagram has been sent is by using a
 passed as the first argument to the `callback`. If a `callback` is not given,
 the error is emitted as an `'error'` event on the `socket` object.
 
+Offset and length are optional, but if you specify one you would need to
+specify the other. Also, they are supported only when the first
+argument is a `Buffer`.
+
 Example of sending a UDP packet to a random port on `localhost`;
 
 ```js
 const dgram = require('dgram');
 const message = new Buffer('Some bytes');
 const client = dgram.createSocket('udp4');
-client.send(message, 0, message.length, 41234, 'localhost', (err) => {
+client.send(message, 41234, 'localhost', (err) => {
   client.close();
 });
 ```
+
+Example of sending a UDP packet composed of multiple buffers to a random port on `localhost`;
+
+```js
+const dgram = require('dgram');
+const buf1 = new Buffer('Some ');
+const buf2 = new Buffer('bytes');
+const client = dgram.createSocket('udp4');
+client.send([buf1, buf2], 41234, 'localhost', (err) => {
+  client.close();
+});
+```
+
+Sending multiple buffers might be faster or slower depending on your
+application and operating system: benchmark it. Usually it is faster.
 
 **A Note about UDP datagram size**
 
@@ -269,21 +284,21 @@ source that the data did not reach its intended recipient.
 
 ### socket.setBroadcast(flag)
 
-* `flag` Boolean
+* `flag` {Boolean}
 
 Sets or clears the `SO_BROADCAST` socket option.  When set to `true`, UDP
 packets may be sent to a local interface's broadcast address.
 
 ### socket.setMulticastLoopback(flag)
 
-* `flag` Boolean
+* `flag` {Boolean}
 
 Sets or clears the `IP_MULTICAST_LOOP` socket option.  When set to `true`,
 multicast packets will also be received on the local interface.
 
 ### socket.setMulticastTTL(ttl)
 
-* `ttl` Integer
+* `ttl` {Number} Integer
 
 Sets the `IP_MULTICAST_TTL` socket option.  While TTL generally stands for
 "Time to Live", in this context it specifies the number of IP hops that a
@@ -296,7 +311,7 @@ between 0 and 255. The default on most systems is `1` but can vary.
 
 ### socket.setTTL(ttl)
 
-* `ttl` Integer
+* `ttl` {Number} Integer
 
 Sets the `IP_TTL` socket option. While TTL generally stands for "Time to Live",
 in this context it specifies the number of IP hops that a packet is allowed to
@@ -359,9 +374,9 @@ s.bind(1234, () => {
 
 ### dgram.createSocket(options[, callback])
 
-* `options` Object
-* `callback` Function. Attached as a listener to `'message'` events.
-* Returns: Socket object
+* `options` {Object}
+* `callback` {Function} Attached as a listener to `'message'` events.
+* Returns: {dgram.Socket}
 
 Creates a `dgram.Socket` object. The `options` argument is an object that
 should contain a `type` field of either `udp4` or `udp6` and an optional
@@ -381,10 +396,10 @@ and `udp6` sockets). The bound address and port can be retrieved using
 
 ### dgram.createSocket(type[, callback])
 
-* `type` String. Either 'udp4' or 'udp6'
-* `callback` Function. Attached as a listener to `'message'` events.
+* `type` {String} - Either 'udp4' or 'udp6'
+* `callback` {Function} - Attached as a listener to `'message'` events.
   Optional
-* Returns: Socket object
+* Returns: {dgram.Socket}
 
 Creates a `dgram.Socket` object of the specified `type`. The `type` argument
 can be either `udp4` or `udp6`. An optional `callback` function can be passed

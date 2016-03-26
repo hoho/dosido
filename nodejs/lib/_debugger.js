@@ -567,7 +567,7 @@ Client.prototype.mirrorObject = function(handle, depth, cb) {
 
       waitForOthers();
       function waitForOthers() {
-        if (--waiting === 0 && cb) {
+        if (--waiting === 0) {
           keyValues.forEach(function(kv) {
             mirror[kv.name] = kv.value;
           });
@@ -1015,11 +1015,7 @@ function leftPad(n, prefix, maxN) {
   const nchars = Math.max(2, String(maxN).length) + 1;
   const nspaces = nchars - s.length - 1;
 
-  for (var i = 0; i < nspaces; i++) {
-    prefix += ' ';
-  }
-
-  return prefix + s;
+  return prefix + ' '.repeat(nspaces) + s;
 }
 
 

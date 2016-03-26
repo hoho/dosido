@@ -29,24 +29,24 @@ function lookup(address, family, callback) {
 
 
 function lookup4(address, callback) {
-  return lookup(address || '0.0.0.0', 4, callback);
+  return lookup(address || '127.0.0.1', 4, callback);
 }
 
 
 function lookup6(address, callback) {
-  return lookup(address || '::0', 6, callback);
+  return lookup(address || '::1', 6, callback);
 }
 
 
 function newHandle(type) {
   if (type == 'udp4') {
-    var handle = new UDP();
+    const handle = new UDP();
     handle.lookup = lookup4;
     return handle;
   }
 
   if (type == 'udp6') {
-    var handle = new UDP();
+    const handle = new UDP();
     handle.lookup = lookup6;
     handle.bind = handle.bind6;
     handle.send = handle.send6;
@@ -166,6 +166,13 @@ Socket.prototype.bind = function(port_ /*, address, callback*/) {
     exclusive = false;
   }
 
+  // defaulting address for bind to all interfaces
+  if (!address && self._handle.lookup === lookup4) {
+    address = '0.0.0.0';
+  } else if (!address && self._handle.lookup === lookup6) {
+    address = '::';
+  }
+
   // resolve address first
   self._handle.lookup(address, function(err, ip) {
     if (err) {
@@ -209,7 +216,7 @@ Socket.prototype.bind = function(port_ /*, address, callback*/) {
       if (!self._handle)
         return; // handle has been closed in the mean time
 
-      var err = self._handle.bind(ip, port || 0, flags);
+      const err = self._handle.bind(ip, port || 0, flags);
       if (err) {
         var ex = exceptionWithHostPort(err, 'bind', ip, port);
         self.emit('error', ex);
@@ -243,6 +250,56 @@ Socket.prototype.sendto = function(buffer,
 };
 
 
+function sliceBuffer(buffer, offset, length) {
+  if (typeof buffer === 'string')
+    buffer = new Buffer(buffer);
+  else if (!(buffer instanceof Buffer))
+    throw new TypeError('First argument must be a buffer or string');
+
+  offset = offset >>> 0;
+  length = length >>> 0;
+
+  return buffer.slice(offset, offset + length);
+}
+
+
+function fixBuffer(buffer) {
+  for (var i = 0, l = buffer.length; i < l; i++) {
+    var buf = buffer[i];
+    if (typeof buf === 'string')
+      buffer[i] = new Buffer(buf);
+    else if (!(buf instanceof Buffer))
+      return false;
+  }
+
+  return true;
+}
+
+
+function enqueue(self, toEnqueue) {
+  // If the send queue hasn't been initialized yet, do it, and install an
+  // event handler that flushes the send queue after binding is done.
+  if (!self._sendQueue) {
+    self._sendQueue = [];
+    self.once('listening', function() {
+      // Flush the send queue.
+      for (var i = 0; i < this._sendQueue.length; i++)
+        this.send.apply(self, this._sendQueue[i]);
+      this._sendQueue = undefined;
+    });
+  }
+  self._sendQueue.push(toEnqueue);
+  return;
+}
+
+
+// valid combinations
+// send(buffer, offset, length, port, address, callback)
+// send(buffer, offset, length, port, address)
+// send(buffer, offset, length, port)
+// send(bufferOrList, port, address, callback)
+// send(bufferOrList, port, address)
+// send(bufferOrList, port)
 Socket.prototype.send = function(buffer,
                                  offset,
                                  length,
@@ -251,30 +308,28 @@ Socket.prototype.send = function(buffer,
                                  callback) {
   var self = this;
 
-  if (typeof buffer === 'string')
-    buffer = new Buffer(buffer);
-  else if (!(buffer instanceof Buffer))
-    throw new TypeError('First argument must be a buffer or string');
+  if (address || (port && typeof port !== 'function')) {
+    buffer = sliceBuffer(buffer, offset, length);
+  } else {
+    callback = port;
+    port = offset;
+    address = length;
+  }
 
-  offset = offset | 0;
-  if (offset < 0)
-    throw new RangeError('Offset should be >= 0');
+  if (!Array.isArray(buffer)) {
+    if (typeof buffer === 'string') {
+      buffer = [ new Buffer(buffer) ];
+    } else if (!(buffer instanceof Buffer)) {
+      throw new TypeError('First argument must be a buffer or a string');
+    } else {
+      buffer = [ buffer ];
+    }
+  } else if (!fixBuffer(buffer)) {
+    throw new TypeError('Buffer list arguments must be buffers or strings');
+  }
 
-  if ((length == 0 && offset > buffer.length) ||
-      (length > 0 && offset >= buffer.length))
-    throw new RangeError('Offset into buffer too large');
-
-  // Sending a zero-length datagram is kind of pointless but it _is_
-  // allowed, hence check that length >= 0 rather than > 0.
-  length = length | 0;
-  if (length < 0)
-    throw new RangeError('Length should be >= 0');
-
-  if (offset + length > buffer.length)
-    throw new RangeError('Offset + length beyond buffer length');
-
-  port = port | 0;
-  if (port <= 0 || port > 65535)
+  port = port >>> 0;
+  if (port === 0 || port > 65535)
     throw new RangeError('Port should be > 0 and < 65536');
 
   // Normalize callback so it's either a function or undefined but not anything
@@ -290,61 +345,55 @@ Socket.prototype.send = function(buffer,
   // If the socket hasn't been bound yet, push the outbound packet onto the
   // send queue and send after binding is complete.
   if (self._bindState != BIND_STATE_BOUND) {
-    // If the send queue hasn't been initialized yet, do it, and install an
-    // event handler that flushes the send queue after binding is done.
-    if (!self._sendQueue) {
-      self._sendQueue = [];
-      self.once('listening', function() {
-        // Flush the send queue.
-        for (var i = 0; i < self._sendQueue.length; i++)
-          self.send.apply(self, self._sendQueue[i]);
-        self._sendQueue = undefined;
-      });
-    }
-    self._sendQueue.push([buffer, offset, length, port, address, callback]);
+    enqueue(self, [buffer, port, address, callback]);
     return;
   }
 
-  self._handle.lookup(address, function(ex, ip) {
-    if (ex) {
-      if (typeof callback === 'function') {
-        callback(ex);
-        return;
-      }
-
-      self.emit('error', ex);
-    } else if (self._handle) {
-      var req = new SendWrap();
-      req.buffer = buffer;  // Keep reference alive.
-      req.length = length;
-      req.address = address;
-      req.port = port;
-      if (callback) {
-        req.callback = callback;
-        req.oncomplete = afterSend;
-      }
-      var err = self._handle.send(req,
-                                  buffer,
-                                  offset,
-                                  length,
-                                  port,
-                                  ip,
-                                  !!callback);
-      if (err && callback) {
-        // don't emit as error, dgram_legacy.js compatibility
-        var ex = exceptionWithHostPort(err, 'send', address, port);
-        process.nextTick(callback, ex);
-      }
-    }
+  self._handle.lookup(address, function afterDns(ex, ip) {
+    doSend(ex, self, ip, buffer, address, port, callback);
   });
 };
 
 
-function afterSend(err) {
+function doSend(ex, self, ip, buffer, address, port, callback) {
+  if (ex) {
+    if (typeof callback === 'function') {
+      callback(ex);
+      return;
+    }
+
+    self.emit('error', ex);
+    return;
+  } else if (!self._handle) {
+    return;
+  }
+
+  var req = new SendWrap();
+  req.buffer = buffer;  // Keep reference alive.
+  req.address = address;
+  req.port = port;
+  if (callback) {
+    req.callback = callback;
+    req.oncomplete = afterSend;
+  }
+  var err = self._handle.send(req,
+                              buffer,
+                              buffer.length,
+                              port,
+                              ip,
+                              !!callback);
+  if (err && callback) {
+    // don't emit as error, dgram_legacy.js compatibility
+    const ex = exceptionWithHostPort(err, 'send', address, port);
+    process.nextTick(callback, ex);
+  }
+}
+
+function afterSend(err, sent) {
   if (err) {
     err = exceptionWithHostPort(err, 'send', this.address, this.port);
   }
-  this.callback(err, this.length);
+  this.callback(err, sent);
 }
 
 
@@ -355,8 +404,7 @@ Socket.prototype.close = function(callback) {
   this._stopReceiving();
   this._handle.close();
   this._handle = null;
-  var self = this;
-  process.nextTick(socketCloseNT, self);
+  process.nextTick(socketCloseNT, this);
 
   return this;
 };

@@ -59,7 +59,11 @@ exports.createServer = function(options, connectionListener) {
 // connect(path, [cb]);
 //
 exports.connect = exports.createConnection = function() {
-  var args = normalizeConnectArgs(arguments);
+  const argsLen = arguments.length;
+  var args = new Array(argsLen);
+  for (var i = 0; i < argsLen; i++)
+    args[i] = arguments[i];
+  args = normalizeConnectArgs(args);
   debug('createConnection', args);
   var s = new Socket(args[0]);
   return Socket.prototype.connect.apply(s, args);
@@ -171,6 +175,10 @@ function Socket(options) {
       this.read(0);
     }
   }
+
+  // Reserve properties
+  this.server = null;
+  this._server = null;
 }
 util.inherits(Socket, stream.Duplex);
 
@@ -269,9 +277,8 @@ function writeAfterFIN(chunk, encoding, cb) {
 
   var er = new Error('This socket has been ended by the other party');
   er.code = 'EPIPE';
-  var self = this;
   // TODO: defer error events consistently everywhere, not just the cb
-  self.emit('error', er);
+  this.emit('error', er);
   if (typeof cb === 'function') {
     process.nextTick(cb, er);
   }
@@ -292,9 +299,8 @@ Socket.prototype.read = function(n) {
 
 Socket.prototype.listen = function() {
   debug('socket.listen');
-  var self = this;
-  self.on('connection', arguments[0]);
-  listen(self, null, null, null);
+  this.on('connection', arguments[0]);
+  listen(this, null, null, null);
 };
 
 
@@ -481,12 +487,12 @@ Socket.prototype._destroy = function(exception, cb) {
   this.destroyed = true;
   fireErrorCallbacks();
 
-  if (this.server) {
+  if (this._server) {
     COUNTER_NET_SERVER_CONNECTION_CLOSE(this);
     debug('has server');
-    this.server._connections--;
-    if (this.server._emitCloseIfDrained) {
-      this.server._emitCloseIfDrained();
+    this._server._connections--;
+    if (this._server._emitCloseIfDrained) {
+      this._server._emitCloseIfDrained();
     }
   }
 };
@@ -854,7 +860,11 @@ Socket.prototype.connect = function(options, cb) {
     // Old API:
     // connect(port, [host], [cb])
     // connect(path, [cb]);
-    var args = normalizeConnectArgs(arguments);
+    const argsLen = arguments.length;
+    var args = new Array(argsLen);
+    for (var i = 0; i < argsLen; i++)
+      args[i] = arguments[i];
+    args = normalizeConnectArgs(args);
     return Socket.prototype.connect.apply(this, args);
   }
 
@@ -872,7 +882,6 @@ Socket.prototype.connect = function(options, cb) {
     this._sockname = null;
   }
 
-  var self = this;
   var pipe = !!options.path;
   debug('pipe', pipe, options.path);
 
@@ -882,21 +891,20 @@ Socket.prototype.connect = function(options, cb) {
   }
 
   if (typeof cb === 'function') {
-    self.once('connect', cb);
+    this.once('connect', cb);
   }
 
   this._unrefTimer();
 
-  self._connecting = true;
-  self.writable = true;
+  this._connecting = true;
+  this.writable = true;
 
   if (pipe) {
-    connect(self, options.path);
-
+    connect(this, options.path);
   } else {
-    lookupAndConnect(self, options);
+    lookupAndConnect(this, options);
   }
-  return self;
+  return this;
 };
 
 
@@ -1183,11 +1191,10 @@ exports._createServerHandle = createServerHandle;
 
 Server.prototype._listen2 = function(address, port, addressType, backlog, fd) {
   debug('listen2', address, port, addressType, backlog, fd);
-  var self = this;
 
   // If there is not yet a handle, we need to create one and bind.
   // In the case of a server sent via IPC, we don't need to do this.
-  if (self._handle) {
+  if (this._handle) {
     debug('_listen2: have a handle already');
   } else {
     debug('_listen2: create a handle');
@@ -1212,22 +1219,22 @@ Server.prototype._listen2 = function(address, port, addressType, backlog, fd) {
 
     if (typeof rval === 'number') {
       var error = exceptionWithHostPort(rval, 'listen', address, port);
-      process.nextTick(emitErrorNT, self, error);
+      process.nextTick(emitErrorNT, this, error);
       return;
     }
-    self._handle = rval;
+    this._handle = rval;
   }
 
-  self._handle.onconnection = onconnection;
-  self._handle.owner = self;
+  this._handle.onconnection = onconnection;
+  this._handle.owner = this;
 
-  var err = _listen(self._handle, backlog);
+  var err = _listen(this._handle, backlog);
 
   if (err) {
     var ex = exceptionWithHostPort(err, 'listen', address, port);
-    self._handle.close();
-    self._handle = null;
-    process.nextTick(emitErrorNT, self, ex);
+    this._handle.close();
+    this._handle = null;
+    process.nextTick(emitErrorNT, this, ex);
     return;
   }
 
@@ -1238,7 +1245,7 @@ Server.prototype._listen2 = function(address, port, addressType, backlog, fd) {
   if (this._unref)
     this.unref();
 
-  process.nextTick(emitListeningNT, self);
+  process.nextTick(emitListeningNT, this);
 };
 
 
@@ -1377,6 +1384,14 @@ Server.prototype.listen = function() {
   return self;
 };
 
+Object.defineProperty(Server.prototype, 'listening', {
+  get: function() {
+    return !!this._handle;
+  },
+  configurable: true,
+  enumerable: true
+});
+
 Server.prototype.address = function() {
   if (this._handle && this._handle.getsockname) {
     var out = {};
@@ -1416,6 +1431,7 @@ function onconnection(err, clientHandle) {
 
   self._connections++;
   socket.server = self;
+  socket._server = self;
 
   DTRACE_NET_SERVER_CONNECTION(socket);
   LTTNG_NET_SERVER_CONNECTION(socket);
@@ -1497,15 +1513,14 @@ Server.prototype.close = function(cb) {
 
 Server.prototype._emitCloseIfDrained = function() {
   debug('SERVER _emitCloseIfDrained');
-  var self = this;
 
-  if (self._handle || self._connections) {
+  if (this._handle || this._connections) {
     debug('SERVER handle? %j   connections? %d',
-          !!self._handle, self._connections);
+          !!this._handle, this._connections);
     return;
   }
 
-  process.nextTick(emitCloseNT, self);
+  process.nextTick(emitCloseNT, this);
 };
 
 
@@ -1547,12 +1562,12 @@ exports.isIP = cares.isIP;
 
 
 exports.isIPv4 = function(input) {
-  return exports.isIP(input) === 4;
+  return cares.isIPv4(input);
 };
 
 
 exports.isIPv6 = function(input) {
-  return exports.isIP(input) === 6;
+  return cares.isIPv6(input);
 };
 
 

@@ -12,6 +12,7 @@
 
   function startup() {
     var EventEmitter = NativeModule.require('events');
+    process._eventsCount = 0;
 
     Object.setPrototypeOf(process, Object.create(EventEmitter.prototype, {
       constructor: {
@@ -87,8 +88,9 @@
         delete process.env.NODE_UNIQUE_ID;
       }
 
-      if (process._eval != null) {
-        // User passed '-e' or '--eval' arguments to Node.
+      if (process._eval != null && !process._forceRepl) {
+        // User passed '-e' or '--eval' arguments to Node without '-i' or
+        // '--interactive'
         startup.preloadModules();
         evalScript('[eval]');
       } else if (process.argv[1]) {
@@ -160,6 +162,11 @@
               process.exit();
             });
           });
+
+          if (process._eval != null) {
+            // User passed '-e' or '--eval'
+            evalScript('[eval]');
+          }
         } else {
           // Read all of stdin - execute it.
           process.stdin.setEncoding('utf8');
@@ -364,6 +371,26 @@
         scheduleMicrotasks();
     }
 
+    function _combinedTickCallback(args, callback) {
+      if (args === undefined) {
+        callback();
+      } else {
+        switch (args.length) {
+          case 1:
+            callback(args[0]);
+            break;
+          case 2:
+            callback(args[0], args[1]);
+            break;
+          case 3:
+            callback(args[0], args[1], args[2]);
+            break;
+          default:
+            callback.apply(null, args);
+        }
+      }
+    }
+
     // Run callbacks that have no domain.
     // Using domains will cause this to be overridden.
     function _tickCallback() {
@@ -374,27 +401,10 @@
           tock = nextTickQueue[tickInfo[kIndex]++];
           callback = tock.callback;
           args = tock.args;
-          // Using separate callback execution functions helps to limit the
-          // scope of DEOPTs caused by using try blocks and allows direct
+          // Using separate callback execution functions allows direct
           // callback invocation with small numbers of arguments to avoid the
           // performance hit associated with using `fn.apply()`
-          if (args === undefined) {
-            nextTickCallbackWith0Args(callback);
-          } else {
-            switch (args.length) {
-              case 1:
-                nextTickCallbackWith1Arg(callback, args[0]);
-                break;
-              case 2:
-                nextTickCallbackWith2Args(callback, args[0], args[1]);
-                break;
-              case 3:
-                nextTickCallbackWith3Args(callback, args[0], args[1], args[2]);
-                break;
-              default:
-                nextTickCallbackWithManyArgs(callback, args);
-            }
-          }
+          _combinedTickCallback(args, callback);
           if (1e4 < tickInfo[kIndex])
             tickDone();
         }
@@ -415,27 +425,10 @@
           args = tock.args;
           if (domain)
             domain.enter();
-          // Using separate callback execution functions helps to limit the
-          // scope of DEOPTs caused by using try blocks and allows direct
+          // Using separate callback execution functions allows direct
           // callback invocation with small numbers of arguments to avoid the
           // performance hit associated with using `fn.apply()`
-          if (args === undefined) {
-            nextTickCallbackWith0Args(callback);
-          } else {
-            switch (args.length) {
-              case 1:
-                nextTickCallbackWith1Arg(callback, args[0]);
-                break;
-              case 2:
-                nextTickCallbackWith2Args(callback, args[0], args[1]);
-                break;
-              case 3:
-                nextTickCallbackWith3Args(callback, args[0], args[1], args[2]);
-                break;
-              default:
-                nextTickCallbackWithManyArgs(callback, args);
-            }
-          }
+          _combinedTickCallback(args, callback);
           if (1e4 < tickInfo[kIndex])
             tickDone();
           if (domain)
@@ -445,61 +438,6 @@
         _runMicrotasks();
         emitPendingUnhandledRejections();
       } while (tickInfo[kLength] !== 0);
-    }
-
-    function nextTickCallbackWith0Args(callback) {
-      var threw = true;
-      try {
-        callback();
-        threw = false;
-      } finally {
-        if (threw)
-          tickDone();
-      }
-    }
-
-    function nextTickCallbackWith1Arg(callback, arg1) {
-      var threw = true;
-      try {
-        callback(arg1);
-        threw = false;
-      } finally {
-        if (threw)
-          tickDone();
-      }
-    }
-
-    function nextTickCallbackWith2Args(callback, arg1, arg2) {
-      var threw = true;
-      try {
-        callback(arg1, arg2);
-        threw = false;
-      } finally {
-        if (threw)
-          tickDone();
-      }
-    }
-
-    function nextTickCallbackWith3Args(callback, arg1, arg2, arg3) {
-      var threw = true;
-      try {
-        callback(arg1, arg2, arg3);
-        threw = false;
-      } finally {
-        if (threw)
-          tickDone();
-      }
-    }
-
-    function nextTickCallbackWithManyArgs(callback, args) {
-      var threw = true;
-      try {
-        callback.apply(null, args);
-        threw = false;
-      } finally {
-        if (threw)
-          tickDone();
-      }
     }
 
     function TickObject(c, args) {
@@ -515,9 +453,9 @@
 
       var args;
       if (arguments.length > 1) {
-        args = [];
+        args = new Array(arguments.length - 1);
         for (var i = 1; i < arguments.length; i++)
-          args.push(arguments[i]);
+          args[i - 1] = arguments[i];
       }
 
       nextTickQueue.push(new TickObject(callback, args));
@@ -597,19 +535,19 @@
     module.paths = Module._nodeModulePaths(cwd);
     var script = process._eval;
     var body = script;
-    script = 'global.__filename = ' + JSON.stringify(name) + ';\n' +
+    script = `global.__filename = ${JSON.stringify(name)};\n` +
              'global.exports = exports;\n' +
              'global.module = module;\n' +
              'global.__dirname = __dirname;\n' +
              'global.require = require;\n' +
              'return require("vm").runInThisContext(' +
-             JSON.stringify(body) + ', { filename: ' +
-             JSON.stringify(name) + ' });\n';
+             `${JSON.stringify(body)}, { filename: ` +
+             `${JSON.stringify(name)} });\n`;
     // Defer evaluation for a tick.  This is a workaround for deferred
     // events not firing when evaluating scripts from the command line,
     // see https://github.com/nodejs/node/issues/1600.
     process.nextTick(function() {
-      var result = module._compile(script, name + '-wrapper');
+      var result = module._compile(script, `${name}-wrapper`);
       if (process._print_eval) console.log(result);
     });
   }
@@ -801,7 +739,7 @@
             sig.slice(0, 3) === 'SIG') {
           err = process._kill(pid, startup.lazyConstants()[sig]);
         } else {
-          throw new Error('Unknown signal: ' + sig);
+          throw new Error(`Unknown signal: ${sig}`);
         }
       }
 
@@ -906,7 +844,7 @@
   }
 
   function NativeModule(id) {
-    this.filename = id + '.js';
+    this.filename = `${id}.js`;
     this.id = id;
     this.exports = {};
     this.loaded = false;
@@ -926,10 +864,10 @@
     }
 
     if (!NativeModule.exists(id)) {
-      throw new Error('No such native module ' + id);
+      throw new Error(`No such native module ${id}`);
     }
 
-    process.moduleLoadList.push('NativeModule ' + id);
+    process.moduleLoadList.push(`NativeModule ${id}`);
 
     var nativeModule = new NativeModule(id);
 

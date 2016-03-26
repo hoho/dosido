@@ -38,6 +38,15 @@ The options when creating a script are:
   code are controlled by the options to the script's methods.
 - `timeout`: a number of milliseconds to execute `code` before terminating
   execution. If execution is terminated, an [`Error`][] will be thrown.
+- `cachedData`: an optional `Buffer` with V8's code cache data for the supplied
+  source. When supplied `cachedDataRejected` value will be set to either
+  `true` or `false` depending on acceptance of the data by V8.
+- `produceCachedData`: if `true` and no `cachedData` is present - V8 tries to
+  produce code cache data for `code`. Upon success, a `Buffer` with V8's code
+  cache data will be produced and stored in `cachedData` property of the
+  returned `vm.Script` instance. `cachedDataProduced` value will be set to
+  either `true` or `false` depending on whether code cache data is produced
+  successfully.
 
 ### script.runInContext(contextifiedSandbox[, options])
 

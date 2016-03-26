@@ -1,5 +1,5 @@
 'use strict';
-var common = require('../common');
+require('../common');
 var assert = require('assert');
 var a = require('assert');
 
@@ -10,7 +10,7 @@ function makeBlock(f) {
   };
 }
 
-assert.ok(common.indirectInstanceOf(a.AssertionError.prototype, Error),
+assert.ok(a.AssertionError.prototype instanceof Error,
           'a.AssertionError instanceof Error');
 
 assert.throws(makeBlock(a, false), a.AssertionError, 'ok(false)');
@@ -484,7 +484,7 @@ testBlockTypeError(assert.throws, undefined);
 testBlockTypeError(assert.doesNotThrow, undefined);
 
 // https://github.com/nodejs/node/issues/3275
-assert.throws(() => { throw 'error'; }, err => err === 'error');
-assert.throws(() => { throw new Error(); }, err => err instanceof Error);
+assert.throws(() => { throw 'error'; }, (err) => err === 'error');
+assert.throws(() => { throw new Error(); }, (err) => err instanceof Error);
 
 console.log('All OK');

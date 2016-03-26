@@ -33,7 +33,7 @@ function ClientRequest(options, cb) {
   if (agent === false) {
     agent = new defaultAgent.constructor();
   } else if ((agent === null || agent === undefined) &&
-             !options.createConnection) {
+             typeof options.createConnection !== 'function') {
     agent = defaultAgent;
   }
   self.agent = agent;
@@ -118,10 +118,20 @@ function ClientRequest(options, cb) {
                       self._renderHeaders());
   }
 
+  var called = false;
   if (self.socketPath) {
     self._last = true;
     self.shouldKeepAlive = false;
-    self.onSocket(self.agent.createConnection({ path: self.socketPath }));
+    const optionsPath = {
+      path: self.socketPath
+    };
+    const newSocket = self.agent.createConnection(optionsPath, oncreate);
+    if (newSocket && !called) {
+      called = true;
+      self.onSocket(newSocket);
+    } else {
+      return;
+    }
   } else if (self.agent) {
     // If there is an agent we should default to Connection:keep-alive,
     // but only if the Agent will actually reuse the connection!
@@ -139,12 +149,35 @@ function ClientRequest(options, cb) {
     // No agent, default to Connection:close.
     self._last = true;
     self.shouldKeepAlive = false;
-    if (options.createConnection) {
-      self.onSocket(options.createConnection(options));
+    if (typeof options.createConnection === 'function') {
+      const newSocket = options.createConnection(options, oncreate);
+      if (newSocket && !called) {
+        called = true;
+        self.onSocket(newSocket);
+      } else {
+        return;
+      }
     } else {
       debug('CLIENT use net.createConnection', options);
       self.onSocket(net.createConnection(options));
     }
+  }
+
+  function oncreate(err, socket) {
+    if (called)
+      return;
+    called = true;
+    if (err) {
+      process.nextTick(function() {
+        self.emit('error', err);
+      });
+      return;
+    }
+    self.onSocket(socket);
+    self._deferToConnect(null, null, function() {
+      self._flush();
+      self = null;
+    });
   }
 
   self._deferToConnect(null, null, function() {
@@ -471,6 +504,7 @@ function tickOnSocket(req, socket) {
   parser.reinitialize(HTTPParser.RESPONSE);
   parser.socket = socket;
   parser.incoming = null;
+  parser.outgoing = req;
   req.parser = parser;
 
   socket.parser = parser;
@@ -574,10 +608,18 @@ ClientRequest.prototype.setTimeout = function(msecs, callback) {
 };
 
 ClientRequest.prototype.setNoDelay = function() {
-  this._deferToConnect('setNoDelay', arguments);
+  const argsLen = arguments.length;
+  const args = new Array(argsLen);
+  for (var i = 0; i < argsLen; i++)
+    args[i] = arguments[i];
+  this._deferToConnect('setNoDelay', args);
 };
 ClientRequest.prototype.setSocketKeepAlive = function() {
-  this._deferToConnect('setKeepAlive', arguments);
+  const argsLen = arguments.length;
+  const args = new Array(argsLen);
+  for (var i = 0; i < argsLen; i++)
+    args[i] = arguments[i];
+  this._deferToConnect('setKeepAlive', args);
 };
 
 ClientRequest.prototype.clearTimeout = function(cb) {

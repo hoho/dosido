@@ -62,7 +62,9 @@ The character encodings currently supported by Node.js include:
 
 * `'ucs2'` - Alias of `'utf16le'`.
 
-* `'base64'` - Base64 string encoding.
+* `'base64'` - Base64 string encoding. When creating a buffer from a string,
+  this encoding will also correctly accept "URL and Filename Safe Alphabet" as
+  specified in [RFC 4648, Section 5].
 
 * `'binary'` - A way of encoding the buffer into a one-byte (`latin-1`)
   encoded string. The string `'latin-1'` is not supported. Instead, pass
@@ -351,7 +353,7 @@ for (var i = 0; i < str.length ; i++) {
   buf[i] = str.charCodeAt(i);
 }
 
-console.log(buf);
+console.log(buf.toString('ascii'));
   // Prints: Node.js
 ```
 
@@ -471,16 +473,19 @@ console.log(buf1.equals(buf3));
   // Prints: false
 ```
 
-### buf.fill(value[, offset[, end]])
+### buf.fill(value[, offset[, end]][, encoding])
 
-* `value` {String or Number}
+* `value` {String|Buffer|Number}
 * `offset` {Number} Default: 0
-* `end` {Number} Default: `buffer.length`
+* `end` {Number} Default: `buf.length`
+* `encoding` {String} Default: `'utf8'`
 * Return: {Buffer}
 
-Fills the Buffer with the specified value. If the `offset` and `end` are not
-given it will fill the entire Buffer. The method returns a reference to the
-Buffer so calls can be chained.
+Fills the Buffer with the specified value. If the `offset` (defaults to `0`)
+and `end` (defaults to `buf.length`) are not given the entire buffer will be
+filled. The method returns a reference to the Buffer, so calls can be chained.
+This is meant as a small simplification to creating a Buffer. Allowing the
+creation and fill of the Buffer to be done on a single line:
 
 ```js
 const b = new Buffer(50).fill('h');
@@ -488,9 +493,21 @@ console.log(b.toString());
   // Prints: hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
 ```
 
+`encoding` is only relevant if `value` is a string. Otherwise it is ignored.
+`value` is coerced to a `uint32` value if it is not a String or Number.
+
+The `fill()` operation writes bytes into the Buffer dumbly. If the final write
+falls in between a multi-byte character then whatever bytes fit into the buffer
+are written.
+
+```js
+Buffer(3).fill('\u0222');
+  // Prints: <Buffer c8 a2 c8>
+```
+
 ### buf.indexOf(value[, byteOffset][, encoding])
 
-* `value` {String, Buffer or Number}
+* `value` {String|Buffer|Number}
 * `byteOffset` {Number} Default: 0
 * `encoding` {String} Default: `'utf8'`
 * Return: {Number}
@@ -527,7 +544,7 @@ utf16Buffer.indexOf('\u03a3', -4, 'ucs2');
 
 ### buf.includes(value[, byteOffset][, encoding])
 
-* `value` {String, Buffer or Number}
+* `value` {String|Buffer|Number}
 * `byteOffset` {Number} Default: 0
 * `encoding` {String} Default: `'utf8'`
 * Return: {Boolean}
@@ -604,7 +621,7 @@ modify the length of a Buffer should therefore treat `length` as read-only and
 use [`buf.slice()`][] to create a new Buffer.
 
 ```js
-const buf = new Buffer(10);
+var buf = new Buffer(10);
 buf.write('abcdefghj', 0, 'ascii');
 console.log(buf.length);
   // Prints: 10
@@ -713,7 +730,7 @@ const buf = new Buffer([1,-2,3,4]);
 buf.readInt16BE();
   // returns 510
 buf.readInt16LE(1);
-  // returns -511
+  // returns 1022
 ```
 
 ### buf.readInt32BE(offset[, noAssert])
@@ -1025,7 +1042,7 @@ console.log(`${len} bytes: ${buf.toString('utf8', 0, len)}`);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 8`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeDoubleBE()` writes big endian, `writeDoubleLE()` writes little
@@ -1057,7 +1074,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 4`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeFloatBE()` writes big endian, `writeFloatLE()` writes little
@@ -1089,7 +1106,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 1`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset`. The `value` must be a
 valid signed 8-bit integer.
@@ -1115,7 +1132,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 2`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeInt16BE()` writes big endian, `writeInt16LE()` writes little
@@ -1142,7 +1159,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 4`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeInt32BE()` writes big endian, `writeInt32LE()` writes little
@@ -1170,7 +1187,7 @@ console.log(buf);
 * `offset` {Number} `0 <= offset <= buf.length - byteLength`
 * `byteLength` {Number} `0 < byteLength <= 6`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` and `byteLength`.
 Supports up to 48 bits of accuracy. For example:
@@ -1197,7 +1214,7 @@ should not be used unless you are certain of correctness.
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 1`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset`. The `value` must be a
 valid unsigned 8-bit integer.
@@ -1226,7 +1243,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 2`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeUInt16BE()` writes big endian, `writeUInt16LE()` writes little
@@ -1260,7 +1277,7 @@ console.log(buf);
 * `value` {Number} Bytes to be written to Buffer
 * `offset` {Number} `0 <= offset <= buf.length - 4`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` with specified endian
 format (`writeUInt32BE()` writes big endian, `writeUInt32LE()` writes little
@@ -1293,7 +1310,7 @@ console.log(buf);
 * `offset` {Number} `0 <= offset <= buf.length - byteLength`
 * `byteLength` {Number} `0 < byteLength <= 6`
 * `noAssert` {Boolean} Default: false
-* Return: {Number} Numbers of bytes written
+* Return: {Number} The offset plus the number of written bytes
 
 Writes `value` to the Buffer at the specified `offset` and `byteLength`.
 Supports up to 48 bits of accuracy. For example:
@@ -1364,3 +1381,4 @@ has observed undue memory retention in their applications.
 [`String.prototype.length`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/length
 [`util.inspect()`]: util.html#util_util_inspect_object_options
 [iterator]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols
+[RFC 4648, Section 5]: https://tools.ietf.org/html/rfc4648#section-5

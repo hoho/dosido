@@ -80,18 +80,21 @@ var opensslCli = null;
 var inFreeBSDJail = null;
 var localhostIPv4 = null;
 
-exports.localIPv6Hosts = [
-  // Debian/Ubuntu
-  'ip6-localhost',
-  'ip6-loopback',
+exports.localIPv6Hosts = ['localhost'];
+if (process.platform === 'linux') {
+  exports.localIPv6Hosts = [
+    // Debian/Ubuntu
+    'ip6-localhost',
+    'ip6-loopback',
 
-  // SUSE
-  'ipv6-localhost',
-  'ipv6-loopback',
+    // SUSE
+    'ipv6-localhost',
+    'ipv6-loopback',
 
-  // Typically universal
-  'localhost',
-];
+    // Typically universal
+    'localhost',
+  ];
+}
 
 Object.defineProperty(exports, 'inFreeBSDJail', {
   get: function() {
@@ -187,19 +190,6 @@ exports.hasIPv6 = Object.keys(ifaces).some(function(name) {
     return info.family === 'IPv6';
   });
 });
-
-function protoCtrChain(o) {
-  var result = [];
-  for (; o; o = o.__proto__) { result.push(o.constructor); }
-  return result.join();
-}
-
-exports.indirectInstanceOf = function(obj, cls) {
-  if (obj instanceof cls) { return true; }
-  var clsChain = protoCtrChain(cls.prototype);
-  var objChain = protoCtrChain(obj);
-  return objChain.slice(-clsChain.length) === clsChain;
-};
 
 
 exports.ddCommand = function(filename, kilobytes) {
@@ -470,7 +460,7 @@ exports.fail = function(msg) {
 // A stream to push an array into a REPL
 function ArrayStream() {
   this.run = function(data) {
-    data.forEach(line => {
+    data.forEach((line) => {
       this.emit('data', line + '\n');
     });
   };

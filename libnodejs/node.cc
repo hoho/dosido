@@ -1161,10 +1161,10 @@ void SetupPromises(const FunctionCallbackInfo<Value>& args) {
 
 
 Local<Value> MakeCallback(Environment* env,
-                           Local<Value> recv,
-                           const Local<Function> callback,
-                           int argc,
-                           Local<Value> argv[]) {
+                          Local<Value> recv,
+                          const Local<Function> callback,
+                          int argc,
+                          Local<Value> argv[]) {
   // If you hit this assertion, you forgot to enter the v8::Context first.
   CHECK_EQ(env->context(), env->isolate()->GetCurrentContext());
 
@@ -1173,6 +1173,8 @@ Local<Value> MakeCallback(Environment* env,
   Local<Object> object, domain;
   bool ran_init_callback = false;
   bool has_domain = false;
+
+  Environment::AsyncCallbackScope callback_scope(env);
 
   // TODO(trevnorris): Adding "_asyncQueue" to the "this" in the init callback
   // is a horrible way to detect usage. Rethink how detection should happen.
@@ -1194,51 +1196,49 @@ Local<Value> MakeCallback(Environment* env,
     }
   }
 
-  TryCatch try_catch;
-  try_catch.SetVerbose(true);
-
   if (has_domain) {
     Local<Value> enter_v = domain->Get(env->enter_string());
     if (enter_v->IsFunction()) {
-        enter_v.As<Function>()->Call(domain, 0, nullptr);
-      if (try_catch.HasCaught())
-        return Undefined(env->isolate());
+      if (enter_v.As<Function>()->Call(domain, 0, nullptr).IsEmpty()) {
+        FatalError("node::MakeCallback",
+                   "domain enter callback threw, please report this");
+      }
     }
   }
 
   if (ran_init_callback && !pre_fn.IsEmpty()) {
-    try_catch.SetVerbose(false);
-    pre_fn->Call(object, 0, nullptr);
-    if (try_catch.HasCaught())
+    if (pre_fn->Call(object, 0, nullptr).IsEmpty())
       FatalError("node::MakeCallback", "pre hook threw");
-    try_catch.SetVerbose(true);
   }
 
   Local<Value> ret = callback->Call(recv, argc, argv);
 
   if (ran_init_callback && !post_fn.IsEmpty()) {
-    try_catch.SetVerbose(false);
-    post_fn->Call(object, 0, nullptr);
-    if (try_catch.HasCaught())
+    if (post_fn->Call(object, 0, nullptr).IsEmpty())
       FatalError("node::MakeCallback", "post hook threw");
-    try_catch.SetVerbose(true);
+  }
+
+  if (ret.IsEmpty()) {
+    if (callback_scope.in_makecallback())
+      return ret;
+    // NOTE: Undefined() is returned here for backwards compatibility.
+    else
+      return Undefined(env->isolate());
   }
 
   if (has_domain) {
     Local<Value> exit_v = domain->Get(env->exit_string());
     if (exit_v->IsFunction()) {
-      exit_v.As<Function>()->Call(domain, 0, nullptr);
-      if (try_catch.HasCaught())
-        return Undefined(env->isolate());
+      if (exit_v.As<Function>()->Call(domain, 0, nullptr).IsEmpty()) {
+        FatalError("node::MakeCallback",
+                   "domain exit callback threw, please report this");
+      }
     }
   }
 
-  if (try_catch.HasCaught()) {
+  if (!env->KickNextTick(&callback_scope)) {
     return Undefined(env->isolate());
   }
-
-  if (!env->KickNextTick())
-    return Undefined(env->isolate());
 
   return ret;
 }
@@ -3272,6 +3272,8 @@ static bool ParseDebugOpt(const char* arg) {
 }
 
 static void PrintHelp() {
+  // XXX: If you add an option here, please also add it to doc/node.1 and
+  // doc/api/cli.markdown
   printf("Usage: node [options] [ -e script | script.js ] [arguments] \n"
          "       node debug script.js [arguments] \n"
          "\n"
@@ -3284,9 +3286,9 @@ static void PrintHelp() {
          "                        does not appear to be a terminal\n"
          "  -r, --require         module to preload (option can be repeated)\n"
          "  --no-deprecation      silence deprecation warnings\n"
+         "  --trace-deprecation   show stack traces on deprecations\n"
          "  --throw-deprecation   throw an exception anytime a deprecated "
          "function is used\n"
-         "  --trace-deprecation   show stack traces on deprecations\n"
          "  --trace-sync-io       show stack trace when use of sync IO\n"
          "                        is detected after the first tick\n"
          "  --track-heap-objects  track heap object allocations for heap "
@@ -4164,7 +4166,10 @@ static void StartNodeInstance(void* arg) {
     if (instance_data->use_debug_agent())
       StartDebug(env, debug_wait_connect);
 
-    LoadEnvironment(env);
+    {
+      Environment::AsyncCallbackScope callback_scope(env);
+      LoadEnvironment(env);
+    }
 
     env->set_trace_sync_io(trace_sync_io);
 

@@ -1,4 +1,5 @@
-SlowBuffer = require('buffer').SlowBuffer;
+'use strict';
+const SlowBuffer = require('buffer').SlowBuffer;
 
 var common = require('../common.js');
 var bench = common.createBenchmark(main, {
@@ -13,7 +14,7 @@ function main(conf) {
   var clazz = conf.type === 'fast' ? Buffer : SlowBuffer;
   bench.start();
   for (var i = 0; i < n * 1024; i++) {
-    b = new clazz(len);
+    new clazz(len);
   }
   bench.end(n);
 }

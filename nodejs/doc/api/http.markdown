@@ -117,6 +117,18 @@ options.agent = keepAliveAgent;
 http.request(options, onResponseCallback);
 ```
 
+### agent.createConnection(options[, callback])
+
+Produces a socket/stream to be used for HTTP requests.
+
+By default, this function is the same as [`net.createConnection()`][]. However,
+custom Agents may override this method in case greater flexibility is desired.
+
+A socket/stream can be supplied in one of two ways: by returning the
+socket/stream from this function, or by passing the socket/stream to `callback`.
+
+`callback` has a signature of `(err, stream)`.
+
 ### agent.destroy()
 
 Destroy any sockets that are currently in use by the agent.
@@ -555,6 +567,11 @@ parameter is 511 (not 512).
 This function is asynchronous. The last parameter `callback` will be added as
 a listener for the `'listening'` event.  See also [`net.Server.listen(port)`][].
 
+### server.listening
+
+A Boolean indicating whether or not the server is listening for
+connections.
+
 ### server.maxHeadersCount
 
 Limits maximum incoming headers count, equal to 1000 by default. If set to 0 -
@@ -714,6 +731,20 @@ response.setHeader('Set-Cookie', ['type=ninja', 'language=javascript']);
 Attempting to set a header field name or value that contains invalid characters
 will result in a [`TypeError`][] being thrown.
 
+When headers have been set with [`response.setHeader()`][], they will be merged with
+any headers passed to [`response.writeHead()`][], with the headers passed to
+[`response.writeHead()`][] given precedence.
+
+```js
+// returns content-type = text/plain
+const server = http.createServer((req,res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('X-Foo', 'bar');
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end('ok');
+});
+```
+
 ### response.setTimeout(msecs, callback)
 
 * `msecs` {Number}
@@ -815,6 +846,20 @@ be called before [`response.end()`][] is called.
 If you call [`response.write()`][] or [`response.end()`][] before calling this,
 the implicit/mutable headers will be calculated and call this function for you.
 
+When headers have been set with [`response.setHeader()`][], they will be merged with
+any headers passed to [`response.writeHead()`][], with the headers passed to
+[`response.writeHead()`][] given precedence.
+
+```js
+// returns content-type = text/plain
+const server = http.createServer((req,res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('X-Foo', 'bar');
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end('ok');
+});
+```
+
 Note that Content-Length is given in bytes not characters. The above example
 works because the string `'hello world'` contains only single byte characters.
 If the body contains higher coded characters then `Buffer.byteLength()`
@@ -874,8 +919,8 @@ In case of server request, the HTTP version sent by the client. In the case of
 client response, the HTTP version of the connected-to server.
 Probably either `'1.1'` or `'1.0'`.
 
-Also `response.httpVersionMajor` is the first integer and
-`response.httpVersionMinor` is the second.
+Also `message.httpVersionMajor` is the first integer and
+`message.httpVersionMinor` is the second.
 
 ### message.method
 
@@ -1079,6 +1124,10 @@ Options:
  - `Agent` object: explicitly use the passed in `Agent`.
  - `false`: opts out of connection pooling with an Agent, defaults request to
    `Connection: close`.
+- `createConnection`: A function that produces a socket/stream to use for the
+  request when the `agent` option is not used. This can be used to avoid
+  creating a custom Agent class just to override the default `createConnection`
+  function. See [`agent.createConnection()`][] for more details.
 
 The optional `callback` parameter will be added as a one time listener for
 the `'response'` event.
@@ -1154,6 +1203,7 @@ There are a few special headers that should be noted.
 [`'listening'`]: net.html#net_event_listening
 [`'response'`]: #http_event_response
 [`Agent`]: #http_class_http_agent
+[`agent.createConnection()`]: #http_agent_createconnection
 [`Buffer`]: buffer.html#buffer_buffer
 [`destroy()`]: #http_agent_destroy
 [`EventEmitter`]: events.html#events_class_events_eventemitter
@@ -1165,6 +1215,7 @@ There are a few special headers that should be noted.
 [`http.Server`]: #http_class_http_server
 [`http.ServerResponse`]: #http_class_http_serverresponse
 [`message.headers`]: #http_message_headers
+[`net.createConnection()`]: net.html#net_net_createconnection_options_connectlistener
 [`net.Server`]: net.html#net_class_net_server
 [`net.Server.close()`]: net.html#net_server_close_callback
 [`net.Server.listen()`]: net.html#net_server_listen_handle_callback
@@ -1173,6 +1224,7 @@ There are a few special headers that should be noted.
 [`net.Socket`]: net.html#net_class_net_socket
 [`request.socket.getPeerCertificate()`]: tls.html#tls_tlssocket_getpeercertificate_detailed
 [`response.end()`]: #http_response_end_data_encoding_callback
+[`response.setHeader()`]: #http_response_setheader_name_value
 [`response.write()`]: #http_response_write_chunk_encoding_callback
 [`response.write(data, encoding)`]: #http_response_write_chunk_encoding_callback
 [`response.writeContinue()`]: #http_response_writecontinue

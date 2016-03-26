@@ -1,3 +1,6 @@
+// This test is designed to fail with a segmentation fault in Node.js 4.1.0 and
+// execute without issues in Node.js 4.1.1 and up.
+
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -5,8 +8,7 @@ const httpCommon = require('_http_common');
 const HTTPParser = process.binding('http_parser').HTTPParser;
 const net = require('net');
 
-const PARALLEL = 30;
-const COUNT = httpCommon.parsers.max + 100;
+const COUNT = httpCommon.parsers.max + 1;
 
 const parsers = new Array(COUNT);
 for (var i = 0; i < parsers.length; i++)
@@ -16,13 +18,26 @@ var gotRequests = 0;
 var gotResponses = 0;
 
 function execAndClose() {
-  process.stdout.write('.');
   if (parsers.length === 0)
     return;
+  process.stdout.write('.');
 
   const parser = parsers.pop();
   parser.reinitialize(HTTPParser.RESPONSE);
+
   const socket = net.connect(common.PORT);
+  socket.on('error', (e) => {
+    // If SmartOS and ECONNREFUSED, then retry. See
+    // https://github.com/nodejs/node/issues/2663.
+    if (common.isSunOS && e.code === 'ECONNREFUSED') {
+      parsers.push(parser);
+      socket.destroy();
+      setImmediate(execAndClose);
+      return;
+    }
+    throw e;
+  });
+
   parser.consume(socket._handle._externalStream);
 
   parser.onIncoming = function onIncoming() {
@@ -41,10 +56,7 @@ var server = net.createServer(function(c) {
   c.end('HTTP/1.1 200 OK\r\n\r\n', function() {
     c.destroySoon();
   });
-}).listen(common.PORT, function() {
-  for (var i = 0; i < PARALLEL; i++)
-    execAndClose();
-});
+}).listen(common.PORT, execAndClose);
 
 process.on('exit', function() {
   assert.equal(gotResponses, COUNT);

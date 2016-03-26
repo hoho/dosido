@@ -1,6 +1,5 @@
 'use strict';
 
-const net = require('net');
 const util = require('util');
 
 const cares = process.binding('cares_wrap');
@@ -10,7 +9,7 @@ const GetAddrInfoReqWrap = cares.GetAddrInfoReqWrap;
 const GetNameInfoReqWrap = cares.GetNameInfoReqWrap;
 const QueryReqWrap = cares.QueryReqWrap;
 
-const isIp = net.isIP;
+const isIP = cares.isIP;
 
 
 function errnoException(err, syscall, hostname) {
@@ -23,7 +22,8 @@ function errnoException(err, syscall, hostname) {
   }
   var ex = null;
   if (typeof err === 'string') {  // c-ares error code.
-    ex = new Error(syscall + ' ' + err + (hostname ? ' ' + hostname : ''));
+    const errHost = hostname ? ' ' + hostname : '';
+    ex = new Error(`${syscall} ${err}${errHost}`);
     ex.code = err;
     ex.errno = err;
     ex.syscall = syscall;
@@ -146,7 +146,7 @@ exports.lookup = function lookup(hostname, options, callback) {
     return {};
   }
 
-  var matchedFamily = net.isIP(hostname);
+  var matchedFamily = isIP(hostname);
   if (matchedFamily) {
     if (all) {
       callback(null, [{address: hostname, family: matchedFamily}]);
@@ -186,7 +186,7 @@ exports.lookupService = function(host, port, callback) {
   if (arguments.length !== 3)
     throw new Error('invalid arguments');
 
-  if (cares.isIP(host) === 0)
+  if (isIP(host) === 0)
     throw new TypeError('host needs to be a valid IP address');
 
   if (typeof port !== 'number')
@@ -268,7 +268,7 @@ exports.resolve = function(hostname, type_, callback_) {
   if (typeof resolver === 'function') {
     return resolver(hostname, callback);
   } else {
-    throw new Error('Unknown type "' + type_ + '"');
+    throw new Error(`Unknown type "${type_}"`);
   }
 };
 
@@ -286,7 +286,7 @@ exports.setServers = function(servers) {
   var newSet = [];
 
   servers.forEach(function(serv) {
-    var ver = isIp(serv);
+    var ver = isIP(serv);
 
     if (ver)
       return newSet.push([ver, serv]);
@@ -295,18 +295,18 @@ exports.setServers = function(servers) {
 
     // we have an IPv6 in brackets
     if (match) {
-      ver = isIp(match[1]);
+      ver = isIP(match[1]);
       if (ver)
         return newSet.push([ver, match[1]]);
     }
 
     var s = serv.split(/:\d+$/)[0];
-    ver = isIp(s);
+    ver = isIP(s);
 
     if (ver)
       return newSet.push([ver, s]);
 
-    throw new Error('IP address is not properly formatted: ' + serv);
+    throw new Error(`IP address is not properly formatted: ${serv}`);
   });
 
   var r = cares.setServers(newSet);
@@ -316,8 +316,7 @@ exports.setServers = function(servers) {
     cares.setServers(orig.join(','));
 
     var err = cares.strerror(r);
-    throw new Error('c-ares failed to set servers: "' + err +
-                    '" [' + servers + ']');
+    throw new Error(`c-ares failed to set servers: "${err}" [${servers}]`);
   }
 };
 

@@ -314,6 +314,9 @@ proxiedMethods.forEach(function(name) {
 });
 
 tls_wrap.TLSWrap.prototype.close = function closeProxy(cb) {
+  if (this.owner)
+    this.owner.ssl = null;
+
   if (this._parentWrap && this._parentWrap._handle === this._parent) {
     this._parentWrap.once('close', cb);
     return this._parentWrap.destroy();
@@ -389,12 +392,6 @@ TLSSocket.prototype._init = function(socket, wrap) {
   ssl.writeQueueSize = 1;
 
   this.server = options.server;
-
-  // Move the server to TLSSocket, otherwise both `socket.destroy()` and
-  // `TLSSocket.destroy()` will decrement number of connections of the TLS
-  // server, leading to misfiring `server.close()` callback
-  if (socket && socket.server === this.server)
-    socket.server = null;
 
   // For clients, we will always have either a given ca list or be using
   // default one
@@ -660,6 +657,13 @@ TLSSocket.prototype.getCipher = function(err) {
 TLSSocket.prototype.getEphemeralKeyInfo = function() {
   if (this._handle)
     return this._handle.getEphemeralKeyInfo();
+
+  return null;
+};
+
+TLSSocket.prototype.getProtocol = function() {
+  if (this._handle)
+    return this._handle.getProtocol();
 
   return null;
 };
@@ -968,7 +972,11 @@ function normalizeConnectArgs(listArgs) {
 }
 
 exports.connect = function(/* [port, host], options, cb */) {
-  var args = normalizeConnectArgs(arguments);
+  const argsLen = arguments.length;
+  var args = new Array(argsLen);
+  for (var i = 0; i < argsLen; i++)
+    args[i] = arguments[i];
+  args = normalizeConnectArgs(args);
   var options = args[0];
   var cb = args[1];
 
