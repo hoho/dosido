@@ -1,1 +1,1 @@
-# Skip building OpenSSL, we will use static library from io.js.
+# Skip building OpenSSL, we will use static library from node.js.

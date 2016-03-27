@@ -5,6 +5,254 @@
 <change_log title="nginx">
 
 
+<changes ver="1.9.12" date="24.02.2016">
+
+<change type="feature">
+<para lang="ru">
+кодирование Хаффмана заголовков ответов в HTTP/2.<br/>
+Спасибо Владу Краснову.
+</para>
+<para lang="en">
+Huffman encoding of response headers in HTTP/2.<br/>
+Thanks to Vlad Krasnov.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+директива worker_cpu_affinity теперь поддерживает более 64 процессоров.
+</para>
+<para lang="en">
+the "worker_cpu_affinity" directive now supports more than 64 CPUs.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+совместимость со сторонними модулями на C++;
+ошибка появилась в 1.9.11.<br/>
+Спасибо Piotr Sikora.
+</para>
+<para lang="en">
+compatibility with 3rd party C++ modules;
+the bug had appeared in 1.9.11.<br/>
+Thanks to Piotr Sikora.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+nginx не собирался статически с OpenSSL на Linux;
+ошибка появилась в 1.9.11.
+</para>
+<para lang="en">
+nginx could not be built statically with OpenSSL on Linux;
+the bug had appeared in 1.9.11.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+директива "add_header ... always" с пустым значением
+не удаляла из заголовков ошибочных ответов
+строки Last-Modified и ETag.
+</para>
+<para lang="en">
+the "add_header ... always" directive with an empty value
+did not delete "Last-Modified" and "ETag" header lines
+from error responses.
+</para>
+</change>
+
+<change type="workaround">
+<para lang="ru">
+при использовании OpenSSL 1.0.2f в логах могли появляться
+сообщения "called a function you should not call" и
+"shutdown while in init".
+</para>
+<para lang="en">
+"called a function you should not call"
+and "shutdown while in init" messages might appear in logs
+when using OpenSSL 1.0.2f.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+ошибочные заголовки могли логгироваться некорректно.
+</para>
+<para lang="en">
+invalid headers might be logged incorrectly.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+утечки сокетов при использовании HTTP/2.
+</para>
+<para lang="en">
+socket leak when using HTTP/2.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+в модуле ngx_http_v2_module.
+</para>
+<para lang="en">
+in the ngx_http_v2_module.
+</para>
+</change>
+
+</changes>
+
+
+<changes ver="1.9.11" date="09.02.2016">
+
+<change type="feature">
+<para lang="ru">
+теперь resolver поддерживает TCP.
+</para>
+<para lang="en">
+TCP support in resolver.
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+динамические модули.
+</para>
+<para lang="en">
+dynamic modules.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+при использовании HTTP/2
+переменная $request_length не учитывала размер заголовков запроса.
+</para>
+<para lang="en">
+the $request_length variable did not include size of request headers
+when using HTTP/2.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+в модуле ngx_http_v2_module.
+</para>
+<para lang="en">
+in the ngx_http_v2_module.
+</para>
+</change>
+
+</changes>
+
+
+<changes ver="1.9.10" date="26.01.2016">
+
+<change type="security">
+<para lang="ru">
+при использовании директивы resolver
+во время обработки ответов DNS-сервера
+могло происходить разыменование некорректного адреса,
+что позволяло атакующему,
+имеющему возможность подделывать UDP-пакеты от DNS-сервера,
+вызвать segmentation fault в рабочем процессе (CVE-2016-0742).
+</para>
+<para lang="en">
+invalid pointer dereference might occur
+during DNS server response processing
+if the "resolver" directive was used,
+allowing an attacker who is able to forge UDP packets from the DNS server
+to cause segmentation fault in a worker process (CVE-2016-0742).
+</para>
+</change>
+
+<change type="security">
+<para lang="ru">
+при использовании директивы resolver
+во время обработки CNAME-записей
+могло произойти обращение к ранее освобождённой памяти,
+что позволяло атакующему,
+имеющему возможность инициировать преобразование произвольных имён в адреса,
+вызвать segmentation fault в рабочем процессе,
+а также потенциально могло иметь другие последствия (CVE-2016-0746).
+</para>
+<para lang="en">
+use-after-free condition might occur
+during CNAME response processing
+if the "resolver" directive was used,
+allowing an attacker who is able to trigger name resolution
+to cause segmentation fault in a worker process,
+or might have potential other impact (CVE-2016-0746).
+</para>
+</change>
+
+<change type="security">
+<para lang="ru">
+при использовании директивы resolver
+во время обработки CNAME-записей
+не во всех случаях проверялось ограничение
+на максимальное количество записей в цепочке,
+что позволяло атакующему,
+имеющему возможность инициировать преобразование произвольных имён в адреса,
+вызвать чрезмерное потребление ресурсов рабочими процессами (CVE-2016-0747).
+</para>
+<para lang="en">
+CNAME resolution was insufficiently limited
+if the "resolver" directive was used,
+allowing an attacker who is able to trigger arbitrary name resolution
+to cause excessive resource consumption in worker processes (CVE-2016-0747).
+</para>
+</change>
+
+<change type="feature">
+<para lang="ru">
+параметр auto директивы worker_cpu_affinity.
+</para>
+<para lang="en">
+the "auto" parameter of the "worker_cpu_affinity" directive.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+параметр proxy_protocol директивы listen не работал
+с IPv6 listen-сокетами.
+</para>
+<para lang="en">
+the "proxy_protocol" parameter of the "listen" directive did not work
+with IPv6 listen sockets.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+при использовании директивы keepalive
+соединения к бэкендам могли кэшироваться некорректно.
+</para>
+<para lang="en">
+connections to upstream servers might be cached incorrectly
+when using the "keepalive" directive.
+</para>
+</change>
+
+<change type="bugfix">
+<para lang="ru">
+после перенаправления запроса с помощью X-Accel-Redirect
+при проксировании использовался HTTP-метод оригинального запроса.
+</para>
+<para lang="en">
+proxying used the HTTP method of the original request
+after an "X-Accel-Redirect" redirection.
+</para>
+</change>
+
+</changes>
+
+
 <changes ver="1.9.9" date="09.12.2015">
 
 <change type="bugfix">
@@ -465,7 +713,7 @@ connection limiting in the stream module.
 
 <change type="feature">
 <para lang="ru">
-органичение скорости в модуле stream.
+ограничение скорости в модуле stream.
 </para>
 <para lang="en">
 data rate limiting in the stream module.

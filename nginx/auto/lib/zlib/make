@@ -1,1 +1,1 @@
-# Skip building zlib, we will use static library from io.js.
+# Skip building zlib, we will use static library from node.js.
