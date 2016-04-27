@@ -4,9 +4,10 @@
 
 #include "src/contexts.h"
 
+#include "src/ast/scopeinfo.h"
 #include "src/bootstrapper.h"
 #include "src/debug/debug.h"
-#include "src/scopeinfo.h"
+#include "src/isolate-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -18,7 +19,7 @@ Handle<ScriptContextTable> ScriptContextTable::Extend(
   int used = table->used();
   int length = table->length();
   CHECK(used >= 0 && length > 0 && used < length);
-  if (used + 1 == length) {
+  if (used + kFirstContextSlot == length) {
     CHECK(length < Smi::kMaxValue / 2);
     Isolate* isolate = table->GetIsolate();
     Handle<FixedArray> copy =
@@ -31,7 +32,7 @@ Handle<ScriptContextTable> ScriptContextTable::Extend(
   result->set_used(used + 1);
 
   DCHECK(script_context->IsScriptContext());
-  result->set(used + 1, *script_context);
+  result->set(used + kFirstContextSlot, *script_context);
   return result;
 }
 
@@ -41,12 +42,12 @@ bool ScriptContextTable::Lookup(Handle<ScriptContextTable> table,
   for (int i = 0; i < table->used(); i++) {
     Handle<Context> context = GetContext(table, i);
     DCHECK(context->IsScriptContext());
-    Handle<ScopeInfo> scope_info(ScopeInfo::cast(context->extension()));
+    Handle<ScopeInfo> scope_info(context->scope_info());
     int slot_index = ScopeInfo::ContextSlotIndex(
-        scope_info, name, &result->mode, &result->location, &result->init_flag,
+        scope_info, name, &result->mode, &result->init_flag,
         &result->maybe_assigned_flag);
 
-    if (slot_index >= 0 && result->location == VariableLocation::CONTEXT) {
+    if (slot_index >= 0) {
       result->context_index = i;
       result->slot_index = slot_index;
       return true;
@@ -56,25 +57,78 @@ bool ScriptContextTable::Lookup(Handle<ScriptContextTable> table,
 }
 
 
+bool Context::is_declaration_context() {
+  if (IsFunctionContext() || IsNativeContext() || IsScriptContext()) {
+    return true;
+  }
+  if (!IsBlockContext()) return false;
+  Object* ext = extension();
+  // If we have the special extension, we immediately know it must be a
+  // declaration scope. That's just a small performance shortcut.
+  return ext->IsSloppyBlockWithEvalContextExtension()
+      || ScopeInfo::cast(ext)->is_declaration_scope();
+}
+
+
 Context* Context::declaration_context() {
   Context* current = this;
-  while (!current->IsFunctionContext() && !current->IsNativeContext() &&
-         !current->IsScriptContext()) {
+  while (!current->is_declaration_context()) {
     current = current->previous();
     DCHECK(current->closure() == closure());
   }
   return current;
 }
 
-
-JSBuiltinsObject* Context::builtins() {
-  GlobalObject* object = global_object();
-  if (object->IsJSGlobalObject()) {
-    return JSGlobalObject::cast(object)->builtins();
-  } else {
-    DCHECK(object->IsJSBuiltinsObject());
-    return JSBuiltinsObject::cast(object);
+Context* Context::closure_context() {
+  Context* current = this;
+  while (!current->IsFunctionContext() && !current->IsScriptContext() &&
+         !current->IsNativeContext()) {
+    current = current->previous();
+    DCHECK(current->closure() == closure());
   }
+  return current;
+}
+
+JSObject* Context::extension_object() {
+  DCHECK(IsNativeContext() || IsFunctionContext() || IsBlockContext());
+  HeapObject* object = extension();
+  if (object->IsTheHole()) return nullptr;
+  if (IsBlockContext()) {
+    if (!object->IsSloppyBlockWithEvalContextExtension()) return nullptr;
+    object = SloppyBlockWithEvalContextExtension::cast(object)->extension();
+  }
+  DCHECK(object->IsJSContextExtensionObject() ||
+         (IsNativeContext() && object->IsJSGlobalObject()));
+  return JSObject::cast(object);
+}
+
+
+JSReceiver* Context::extension_receiver() {
+  DCHECK(IsNativeContext() || IsWithContext() ||
+         IsFunctionContext() || IsBlockContext());
+  return IsWithContext() ? JSReceiver::cast(extension()) : extension_object();
+}
+
+
+ScopeInfo* Context::scope_info() {
+  DCHECK(IsModuleContext() || IsScriptContext() || IsBlockContext());
+  HeapObject* object = extension();
+  if (object->IsSloppyBlockWithEvalContextExtension()) {
+    DCHECK(IsBlockContext());
+    object = SloppyBlockWithEvalContextExtension::cast(object)->scope_info();
+  }
+  return ScopeInfo::cast(object);
+}
+
+
+String* Context::catch_name() {
+  DCHECK(IsCatchContext());
+  return String::cast(extension());
+}
+
+
+JSGlobalObject* Context::global_object() {
+  return JSGlobalObject::cast(native_context()->extension());
 }
 
 
@@ -84,17 +138,6 @@ Context* Context::script_context() {
     current = current->previous();
   }
   return current;
-}
-
-
-Context* Context::native_context() {
-  // Fast case: the receiver context is already a native context.
-  if (IsNativeContext()) return this;
-  // The global object has a direct pointer to the native context. If the
-  // following DCHECK fails, the native context is probably being accessed
-  // indirectly during bootstrapping. This is unsupported.
-  DCHECK(global_object()->IsGlobalObject());
-  return global_object()->native_context();
 }
 
 
@@ -112,30 +155,24 @@ void Context::set_global_proxy(JSObject* object) {
  * Lookups a property in an object environment, taking the unscopables into
  * account. This is used For HasBinding spec algorithms for ObjectEnvironment.
  */
-static Maybe<PropertyAttributes> UnscopableLookup(LookupIterator* it) {
+static Maybe<bool> UnscopableLookup(LookupIterator* it) {
   Isolate* isolate = it->isolate();
 
-  Maybe<PropertyAttributes> attrs = JSReceiver::GetPropertyAttributes(it);
-  DCHECK(attrs.IsJust() || isolate->has_pending_exception());
-  if (!attrs.IsJust() || attrs.FromJust() == ABSENT) return attrs;
+  Maybe<bool> found = JSReceiver::HasProperty(it);
+  if (!found.IsJust() || !found.FromJust()) return found;
 
-  Handle<Symbol> unscopables_symbol = isolate->factory()->unscopables_symbol();
-  Handle<Object> receiver = it->GetReceiver();
   Handle<Object> unscopables;
-  MaybeHandle<Object> maybe_unscopables =
-      Object::GetProperty(receiver, unscopables_symbol);
-  if (!maybe_unscopables.ToHandle(&unscopables)) {
-    return Nothing<PropertyAttributes>();
-  }
-  if (!unscopables->IsSpecObject()) return attrs;
+  ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, unscopables,
+      Object::GetProperty(it->GetReceiver(),
+                          isolate->factory()->unscopables_symbol()),
+      Nothing<bool>());
+  if (!unscopables->IsJSReceiver()) return Just(true);
   Handle<Object> blacklist;
-  MaybeHandle<Object> maybe_blacklist =
-      Object::GetProperty(unscopables, it->name());
-  if (!maybe_blacklist.ToHandle(&blacklist)) {
-    DCHECK(isolate->has_pending_exception());
-    return Nothing<PropertyAttributes>();
-  }
-  return blacklist->BooleanValue() ? Just(ABSENT) : attrs;
+  ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, blacklist,
+                                   Object::GetProperty(unscopables, it->name()),
+                                   Nothing<bool>());
+  return Just(!blacklist->BooleanValue());
 }
 
 static void GetAttributesAndBindingFlags(VariableMode mode,
@@ -194,7 +231,7 @@ Handle<Object> Context::Lookup(Handle<String> name,
   Handle<Context> context(this, isolate);
 
   bool follow_context_chain = (flags & FOLLOW_CONTEXT_CHAIN) != 0;
-  *index = -1;
+  *index = kNotFound;
   *attributes = ABSENT;
   *binding_flags = MISSING_BINDING;
 
@@ -212,13 +249,12 @@ Handle<Object> Context::Lookup(Handle<String> name,
       PrintF("\n");
     }
 
-
     // 1. Check global objects, subjects of with, and extension objects.
-    if (context->IsNativeContext() ||
-        context->IsWithContext() ||
-        (context->IsFunctionContext() && context->has_extension())) {
-      Handle<JSReceiver> object(
-          JSReceiver::cast(context->extension()), isolate);
+    if ((context->IsNativeContext() ||
+         (context->IsWithContext() && ((flags & SKIP_WITH_CONTEXT) == 0)) ||
+         context->IsFunctionContext() || context->IsBlockContext()) &&
+        context->extension_receiver() != nullptr) {
+      Handle<JSReceiver> object(context->extension_receiver());
 
       if (context->IsNativeContext()) {
         if (FLAG_trace_contexts) {
@@ -256,7 +292,15 @@ Handle<Object> Context::Lookup(Handle<String> name,
           maybe = Just(ABSENT);
         } else {
           LookupIterator it(object, name);
-          maybe = UnscopableLookup(&it);
+          Maybe<bool> found = UnscopableLookup(&it);
+          if (found.IsNothing()) {
+            maybe = Nothing<PropertyAttributes>();
+          } else {
+            // Luckily, consumers of |maybe| only care whether the property
+            // was absent or not, so we can return a dummy |NONE| value
+            // for its attributes when it was present.
+            maybe = Just(found.FromJust() ? NONE : ABSENT);
+          }
         }
       } else {
         maybe = JSReceiver::GetPropertyAttributes(object, name);
@@ -280,24 +324,18 @@ Handle<Object> Context::Lookup(Handle<String> name,
         context->IsScriptContext()) {
       // Use serialized scope information of functions and blocks to search
       // for the context index.
-      Handle<ScopeInfo> scope_info;
-      if (context->IsFunctionContext()) {
-        scope_info = Handle<ScopeInfo>(
-            context->closure()->shared()->scope_info(), isolate);
-      } else {
-        scope_info = Handle<ScopeInfo>(
-            ScopeInfo::cast(context->extension()), isolate);
-      }
+      Handle<ScopeInfo> scope_info(context->IsFunctionContext()
+          ? context->closure()->shared()->scope_info()
+          : context->scope_info());
       VariableMode mode;
-      VariableLocation location;
       InitializationFlag init_flag;
       // TODO(sigurds) Figure out whether maybe_assigned_flag should
       // be used to compute binding_flags.
       MaybeAssignedFlag maybe_assigned_flag;
       int slot_index = ScopeInfo::ContextSlotIndex(
-          scope_info, name, &mode, &location, &init_flag, &maybe_assigned_flag);
+          scope_info, name, &mode, &init_flag, &maybe_assigned_flag);
       DCHECK(slot_index < 0 || slot_index >= MIN_CONTEXT_SLOTS);
-      if (slot_index >= 0 && location == VariableLocation::CONTEXT) {
+      if (slot_index >= 0) {
         if (FLAG_trace_contexts) {
           PrintF("=> found local in context slot %d (mode = %d)\n",
                  slot_index, mode);
@@ -329,7 +367,7 @@ Handle<Object> Context::Lookup(Handle<String> name,
 
     } else if (context->IsCatchContext()) {
       // Catch contexts have the variable name in the extension slot.
-      if (String::Equals(name, handle(String::cast(context->extension())))) {
+      if (String::Equals(name, handle(context->catch_name()))) {
         if (FLAG_trace_contexts) {
           PrintF("=> found in catch context\n");
         }
@@ -341,7 +379,9 @@ Handle<Object> Context::Lookup(Handle<String> name,
     }
 
     // 3. Prepare to continue with the previous (next outermost) context.
-    if (context->IsNativeContext()) {
+    if (context->IsNativeContext() ||
+        ((flags & STOP_AT_DECLARATION_SCOPE) != 0 &&
+         context->is_declaration_context())) {
       follow_context_chain = false;
     } else {
       context = Handle<Context>(context->previous(), isolate);
@@ -359,7 +399,7 @@ void Context::InitializeGlobalSlots() {
   DCHECK(IsScriptContext());
   DisallowHeapAllocation no_gc;
 
-  ScopeInfo* scope_info = ScopeInfo::cast(extension());
+  ScopeInfo* scope_info = this->scope_info();
 
   int context_globals = scope_info->ContextGlobalCount();
   if (context_globals > 0) {
@@ -494,7 +534,33 @@ Handle<Object> Context::ErrorMessageForCodeGenerationFromStrings() {
 }
 
 
+#define COMPARE_NAME(index, type, name) \
+  if (string->IsOneByteEqualTo(STATIC_CHAR_VECTOR(#name))) return index;
+
+int Context::ImportedFieldIndexForName(Handle<String> string) {
+  NATIVE_CONTEXT_IMPORTED_FIELDS(COMPARE_NAME)
+  return kNotFound;
+}
+
+
+int Context::IntrinsicIndexForName(Handle<String> string) {
+  NATIVE_CONTEXT_INTRINSIC_FUNCTIONS(COMPARE_NAME);
+  return kNotFound;
+}
+
+#undef COMPARE_NAME
+
+
 #ifdef DEBUG
+
+bool Context::IsBootstrappingOrNativeContext(Isolate* isolate, Object* object) {
+  // During bootstrapping we allow all objects to pass as global
+  // objects. This is necessary to fix circular dependencies.
+  return isolate->heap()->gc_state() != Heap::NOT_IN_GC ||
+         isolate->bootstrapper()->IsActive() || object->IsNativeContext();
+}
+
+
 bool Context::IsBootstrappingOrValidParentContext(
     Object* object, Context* child) {
   // During bootstrapping we allow all objects to pass as
@@ -506,15 +572,18 @@ bool Context::IsBootstrappingOrValidParentContext(
          context->IsModuleContext() || !child->IsModuleContext();
 }
 
-
-bool Context::IsBootstrappingOrGlobalObject(Isolate* isolate, Object* object) {
-  // During bootstrapping we allow all objects to pass as global
-  // objects. This is necessary to fix circular dependencies.
-  return isolate->heap()->gc_state() != Heap::NOT_IN_GC ||
-      isolate->bootstrapper()->IsActive() ||
-      object->IsGlobalObject();
-}
 #endif
+
+
+void Context::IncrementErrorsThrown() {
+  DCHECK(IsNativeContext());
+
+  int previous_value = errors_thrown()->value();
+  set_errors_thrown(Smi::FromInt(previous_value + 1));
+}
+
+
+int Context::GetErrorsThrown() { return errors_thrown()->value(); }
 
 }  // namespace internal
 }  // namespace v8

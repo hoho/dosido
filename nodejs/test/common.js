@@ -57,8 +57,14 @@ function rmdirSync(p, originalEr) {
     if (e.code === 'ENOTDIR')
       throw originalEr;
     if (e.code === 'ENOTEMPTY' || e.code === 'EEXIST' || e.code === 'EPERM') {
-      fs.readdirSync(p).forEach(function(f) {
-        rimrafSync(path.join(p, f));
+      const enc = process.platform === 'linux' ? 'buffer' : 'utf8';
+      fs.readdirSync(p, enc).forEach((f) => {
+        if (f instanceof Buffer) {
+          const buf = Buffer.concat([Buffer.from(p), Buffer.from(path.sep), f]);
+          rimrafSync(buf);
+        } else {
+          rimrafSync(path.join(p, f));
+        }
       });
       fs.rmdirSync(p);
     }
@@ -164,7 +170,7 @@ Object.defineProperty(exports, 'hasCrypto', {
 
 Object.defineProperty(exports, 'hasFipsCrypto', {
   get: function() {
-    return process.config.variables.openssl_fips ? true : false;
+    return exports.hasCrypto && require('crypto').fips;
   }
 });
 
@@ -238,6 +244,9 @@ exports.spawnPwd = function(options) {
 exports.platformTimeout = function(ms) {
   if (process.config.target_defaults.default_configuration === 'Debug')
     ms = 2 * ms;
+
+  if (exports.isAix)
+    return 2 * ms; // default localhost speed is slower on AIX
 
   if (process.arch !== 'arm')
     return ms;

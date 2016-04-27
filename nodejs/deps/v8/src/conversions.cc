@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/conversions.h"
+
 #include <limits.h>
 #include <stdarg.h>
 #include <cmath>
 
-#include "src/v8.h"
-
 #include "src/assert-scope.h"
 #include "src/char-predicates-inl.h"
+#include "src/codegen.h"
 #include "src/conversions-inl.h"
-#include "src/conversions.h"
 #include "src/dtoa.h"
 #include "src/factory.h"
 #include "src/list-inl.h"
@@ -441,7 +441,7 @@ char* DoubleToRadixCString(double value, int radix) {
   // at least one digit.
   int integer_pos = kBufferSize - 2;
   do {
-    double remainder = std::fmod(integer_part, radix);
+    double remainder = modulo(integer_part, radix);
     integer_buffer[integer_pos--] = chars[static_cast<int>(remainder)];
     integer_part -= remainder;
     integer_part /= radix;
@@ -484,6 +484,7 @@ char* DoubleToRadixCString(double value, int radix) {
 }
 
 
+// ES6 18.2.4 parseFloat(string)
 double StringToDouble(UnicodeCache* unicode_cache, Handle<String> string,
                       int flags, double empty_string_val) {
   Handle<String> flattened = String::Flatten(string);
@@ -491,7 +492,6 @@ double StringToDouble(UnicodeCache* unicode_cache, Handle<String> string,
     DisallowHeapAllocation no_gc;
     String::FlatContent flat = flattened->GetFlatContent();
     DCHECK(flat.IsFlat());
-    // ECMA-262 section 15.1.2.3, empty string is NaN
     if (flat.IsOneByte()) {
       return StringToDouble(unicode_cache, flat.ToOneByteVector(), flags,
                             empty_string_val);

@@ -4,12 +4,11 @@
 
 // The common functionality when building with or without snapshots.
 
-#include "src/v8.h"
+#include "src/snapshot/snapshot.h"
 
 #include "src/api.h"
 #include "src/base/platform/platform.h"
 #include "src/full-codegen/full-codegen.h"
-#include "src/snapshot/snapshot.h"
 
 namespace v8 {
 namespace internal {
@@ -20,6 +19,13 @@ bool Snapshot::SnapshotIsValid(v8::StartupData* snapshot_blob) {
          !Snapshot::ExtractContextData(snapshot_blob).is_empty();
 }
 #endif  // DEBUG
+
+
+bool Snapshot::HaveASnapshotToStartFrom(Isolate* isolate) {
+  // Do not use snapshots if the isolate is used to create snapshots.
+  return isolate->snapshot_blob() != NULL &&
+         isolate->snapshot_blob()->data != NULL;
+}
 
 
 bool Snapshot::EmbedsScript(Isolate* isolate) {
@@ -60,8 +66,7 @@ bool Snapshot::Initialize(Isolate* isolate) {
 
 
 MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
-    Isolate* isolate, Handle<JSGlobalProxy> global_proxy,
-    Handle<FixedArray>* outdated_contexts_out) {
+    Isolate* isolate, Handle<JSGlobalProxy> global_proxy) {
   if (!isolate->snapshot_available()) return Handle<Context>();
   base::ElapsedTimer timer;
   if (FLAG_profile_deserialization) timer.Start();
@@ -71,15 +76,11 @@ MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
   SnapshotData snapshot_data(context_data);
   Deserializer deserializer(&snapshot_data);
 
-  MaybeHandle<Object> maybe_context = deserializer.DeserializePartial(
-      isolate, global_proxy, outdated_contexts_out);
+  MaybeHandle<Object> maybe_context =
+      deserializer.DeserializePartial(isolate, global_proxy);
   Handle<Object> result;
   if (!maybe_context.ToHandle(&result)) return MaybeHandle<Context>();
   CHECK(result->IsContext());
-  // If the snapshot does not contain a custom script, we need to update
-  // the global object for exactly two contexts: the builtins context and the
-  // script context that has the global "this" binding.
-  CHECK(EmbedsScript(isolate) || (*outdated_contexts_out)->length() == 2);
   if (FLAG_profile_deserialization) {
     double ms = timer.Elapsed().InMillisecondsF();
     int bytes = context_data.length();

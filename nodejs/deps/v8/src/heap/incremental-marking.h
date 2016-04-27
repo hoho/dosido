@@ -5,13 +5,19 @@
 #ifndef V8_HEAP_INCREMENTAL_MARKING_H_
 #define V8_HEAP_INCREMENTAL_MARKING_H_
 
+#include "src/cancelable-task.h"
 #include "src/execution.h"
-#include "src/heap/mark-compact.h"
+#include "src/heap/heap.h"
+#include "src/heap/incremental-marking-job.h"
+#include "src/heap/spaces.h"
 #include "src/objects.h"
 
 namespace v8 {
 namespace internal {
 
+// Forward declarations.
+class MarkBit;
+class PagedSpace;
 
 class IncrementalMarking {
  public:
@@ -23,7 +29,7 @@ class IncrementalMarking {
 
   enum ForceCompletionAction { FORCE_COMPLETION, DO_NOT_FORCE_COMPLETION };
 
-  enum GCRequestType { COMPLETE_MARKING, OVERAPPROXIMATION };
+  enum GCRequestType { COMPLETE_MARKING, FINALIZATION };
 
   struct StepActions {
     StepActions(CompletionAction complete_action_,
@@ -52,12 +58,12 @@ class IncrementalMarking {
   bool should_hurry() { return should_hurry_; }
   void set_should_hurry(bool val) { should_hurry_ = val; }
 
-  bool weak_closure_was_overapproximated() const {
-    return weak_closure_was_overapproximated_;
+  bool finalize_marking_completed() const {
+    return finalize_marking_completed_;
   }
 
   void SetWeakClosureWasOverApproximatedForTesting(bool val) {
-    weak_closure_was_overapproximated_ = val;
+    finalize_marking_completed_ = val;
   }
 
   inline bool IsStopped() { return state() == STOPPED; }
@@ -69,8 +75,7 @@ class IncrementalMarking {
   inline bool IsComplete() { return state() == COMPLETE; }
 
   inline bool IsReadyToOverApproximateWeakClosure() const {
-    return request_type_ == OVERAPPROXIMATION &&
-           !weak_closure_was_overapproximated_;
+    return request_type_ == FINALIZATION && !finalize_marking_completed_;
   }
 
   GCRequestType request_type() const { return request_type_; }
@@ -81,11 +86,9 @@ class IncrementalMarking {
 
   bool WasActivated();
 
-  void Start(int flags,
-             const GCCallbackFlags gc_callback_flags = kNoGCCallbackFlags,
-             const char* reason = nullptr);
+  void Start(const char* reason = nullptr);
 
-  void MarkObjectGroups();
+  void FinalizeIncrementally();
 
   void UpdateMarkingDequeAfterScavenge();
 
@@ -95,11 +98,20 @@ class IncrementalMarking {
 
   void Stop();
 
-  void OverApproximateWeakClosure(CompletionAction action);
+  void FinalizeMarking(CompletionAction action);
 
   void MarkingComplete(CompletionAction action);
 
   void Epilogue();
+
+  // Performs incremental marking steps of step_size_in_bytes as long as
+  // deadline_ins_ms is not reached. step_size_in_bytes can be 0 to compute
+  // an estimate increment. Returns the remaining time that cannot be used
+  // for incremental marking anymore because a single step would exceed the
+  // deadline.
+  double AdvanceIncrementalMarking(intptr_t step_size_in_bytes,
+                                   double deadline_in_ms,
+                                   StepActions step_actions);
 
   // It's hard to know how much work the incremental marker should do to make
   // progress in the face of the mutator creating new work for it.  We start
@@ -142,13 +154,16 @@ class IncrementalMarking {
   static void RecordWriteFromCode(HeapObject* obj, Object** slot,
                                   Isolate* isolate);
 
+  static void RecordWriteOfCodeEntryFromCode(JSFunction* host, Object** slot,
+                                             Isolate* isolate);
+
   // Record a slot for compaction.  Returns false for objects that are
   // guaranteed to be rescanned or not guaranteed to survive.
   //
   // No slots in white objects should be recorded, as some slots are typed and
   // cannot be interpreted correctly if the underlying object does not survive
   // the incremental cycle (stays white).
-  INLINE(bool BaseRecordWrite(HeapObject* obj, Object** slot, Object* value));
+  INLINE(bool BaseRecordWrite(HeapObject* obj, Object* value));
   INLINE(void RecordWrite(HeapObject* obj, Object** slot, Object* value));
   INLINE(void RecordWriteIntoCode(HeapObject* obj, RelocInfo* rinfo,
                                   Object* value));
@@ -163,17 +178,17 @@ class IncrementalMarking {
   void RecordCodeTargetPatch(Code* host, Address pc, HeapObject* value);
   void RecordCodeTargetPatch(Address pc, HeapObject* value);
 
-  inline void RecordWrites(HeapObject* obj);
+  void RecordWrites(HeapObject* obj);
 
-  inline void BlackToGreyAndUnshift(HeapObject* obj, MarkBit mark_bit);
+  void BlackToGreyAndUnshift(HeapObject* obj, MarkBit mark_bit);
 
-  inline void WhiteToGreyAndPush(HeapObject* obj, MarkBit mark_bit);
+  void WhiteToGreyAndPush(HeapObject* obj, MarkBit mark_bit);
 
   inline void SetOldSpacePageFlags(MemoryChunk* chunk) {
     SetOldSpacePageFlags(chunk, IsMarking(), IsCompacting());
   }
 
-  inline void SetNewSpacePageFlags(NewSpacePage* chunk) {
+  inline void SetNewSpacePageFlags(MemoryChunk* chunk) {
     SetNewSpacePageFlags(chunk, IsMarking());
   }
 
@@ -199,9 +214,26 @@ class IncrementalMarking {
 
   Heap* heap() const { return heap_; }
 
-  GCCallbackFlags CallbackFlags() const { return gc_callback_flags_; }
+  IncrementalMarkingJob* incremental_marking_job() {
+    return &incremental_marking_job_;
+  }
 
  private:
+  class Observer : public AllocationObserver {
+   public:
+    Observer(IncrementalMarking& incremental_marking, intptr_t step_size)
+        : AllocationObserver(step_size),
+          incremental_marking_(incremental_marking) {}
+
+    void Step(int bytes_allocated, Address, size_t) override {
+      incremental_marking_.Step(bytes_allocated,
+                                IncrementalMarking::GC_VIA_STACK_GUARD);
+    }
+
+   private:
+    IncrementalMarking& incremental_marking_;
+  };
+
   int64_t SpaceLeftInOldSpace();
 
   void SpeedUp();
@@ -209,6 +241,13 @@ class IncrementalMarking {
   void ResetStepCounters();
 
   void StartMarking();
+
+  void MarkRoots();
+  void MarkObjectGroups();
+  void ProcessWeakCells();
+  // Retain dying maps for <FLAG_retain_maps_for_n_gc> garbage collections to
+  // increase chances of reusing of map transition tree in future.
+  void RetainMaps();
 
   void ActivateIncrementalWriteBarrier(PagedSpace* space);
   static void ActivateIncrementalWriteBarrier(NewSpace* space);
@@ -221,7 +260,7 @@ class IncrementalMarking {
   static void SetOldSpacePageFlags(MemoryChunk* chunk, bool is_marking,
                                    bool is_compacting);
 
-  static void SetNewSpacePageFlags(NewSpacePage* chunk, bool is_marking);
+  static void SetNewSpacePageFlags(MemoryChunk* chunk, bool is_marking);
 
   INLINE(void ProcessMarkingDeque());
 
@@ -232,6 +271,8 @@ class IncrementalMarking {
   void IncrementIdleMarkingDelayCounter();
 
   Heap* heap_;
+
+  Observer observer_;
 
   State state_;
   bool is_compacting_;
@@ -253,17 +294,17 @@ class IncrementalMarking {
 
   bool was_activated_;
 
-  bool weak_closure_was_overapproximated_;
+  bool finalize_marking_completed_;
 
-  int weak_closure_approximation_rounds_;
+  int incremental_marking_finalization_rounds_;
 
   GCRequestType request_type_;
 
-  GCCallbackFlags gc_callback_flags_;
+  IncrementalMarkingJob incremental_marking_job_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(IncrementalMarking);
 };
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_HEAP_INCREMENTAL_MARKING_H_

@@ -60,19 +60,6 @@ Domain.prototype._disposed = undefined;
 // Called by process._fatalException in case an error was thrown.
 Domain.prototype._errorHandler = function errorHandler(er) {
   var caught = false;
-  var self = this;
-
-  function emitError() {
-    var handled = self.emit('error', er);
-
-    // Exit all domains on the stack.  Uncaught exceptions end the
-    // current tick and no domains should be left on the stack
-    // between ticks.
-    stack.length = 0;
-    exports.active = process.domain = null;
-
-    return handled;
-  }
 
   // ignore errors on disposed domains.
   //
@@ -107,7 +94,7 @@ Domain.prototype._errorHandler = function errorHandler(er) {
         // if technically the top-level domain is still active, it would
         // be ok to abort on an uncaught exception at this point
         process._emittingTopLevelDomainError = true;
-        caught = emitError();
+        caught = this.emit('error', er);
       } finally {
         process._emittingTopLevelDomainError = false;
       }
@@ -123,7 +110,7 @@ Domain.prototype._errorHandler = function errorHandler(er) {
       //
       // If caught is false after this, then there's no need to exit()
       // the domain, because we're going to crash the process anyway.
-      caught = emitError();
+      caught = this.emit('error', er);
     } catch (er2) {
       // The domain error handler threw!  oh no!
       // See if another domain can catch THIS error,
@@ -138,9 +125,15 @@ Domain.prototype._errorHandler = function errorHandler(er) {
       } else {
         caught = false;
       }
-      return caught;
     }
   }
+
+  // Exit all domains on the stack.  Uncaught exceptions end the
+  // current tick and no domains should be left on the stack
+  // between ticks.
+  stack.length = 0;
+  exports.active = process.domain = null;
+
   return caught;
 };
 

@@ -4,12 +4,14 @@ const util = require('util');
 
 const cares = process.binding('cares_wrap');
 const uv = process.binding('uv');
+const internalNet = require('internal/net');
 
 const GetAddrInfoReqWrap = cares.GetAddrInfoReqWrap;
 const GetNameInfoReqWrap = cares.GetNameInfoReqWrap;
 const QueryReqWrap = cares.QueryReqWrap;
 
 const isIP = cares.isIP;
+const isLegalPort = internalNet.isLegalPort;
 
 
 function errnoException(err, syscall, hostname) {
@@ -110,13 +112,13 @@ exports.lookup = function lookup(hostname, options, callback) {
 
   // Parse arguments
   if (hostname && typeof hostname !== 'string') {
-    throw new TypeError('invalid arguments: ' +
+    throw new TypeError('Invalid arguments: ' +
                         'hostname must be a string or falsey');
   } else if (typeof options === 'function') {
     callback = options;
     family = 0;
   } else if (typeof callback !== 'function') {
-    throw new TypeError('invalid arguments: callback must be passed');
+    throw new TypeError('Invalid arguments: callback must be passed');
   } else if (options !== null && typeof options === 'object') {
     hints = options.hints >>> 0;
     family = options.family >>> 0;
@@ -126,14 +128,14 @@ exports.lookup = function lookup(hostname, options, callback) {
         hints !== exports.ADDRCONFIG &&
         hints !== exports.V4MAPPED &&
         hints !== (exports.ADDRCONFIG | exports.V4MAPPED)) {
-      throw new TypeError('invalid argument: hints must use valid flags');
+      throw new TypeError('Invalid argument: hints must use valid flags');
     }
   } else {
     family = options >>> 0;
   }
 
   if (family !== 0 && family !== 4 && family !== 6)
-    throw new TypeError('invalid argument: family must be 4 or 6');
+    throw new TypeError('Invalid argument: family must be 4 or 6');
 
   callback = makeAsync(callback);
 
@@ -184,14 +186,15 @@ function onlookupservice(err, host, service) {
 // lookupService(address, port, callback)
 exports.lookupService = function(host, port, callback) {
   if (arguments.length !== 3)
-    throw new Error('invalid arguments');
+    throw new Error('Invalid arguments');
 
   if (isIP(host) === 0)
-    throw new TypeError('host needs to be a valid IP address');
+    throw new TypeError('"host" argument needs to be a valid IP address');
 
-  if (typeof port !== 'number')
-    throw new TypeError(`port argument must be a number, got "${port}"`);
+  if (port == null || !isLegalPort(port))
+    throw new TypeError(`"port" should be >= 0 and < 65536, got "${port}"`);
 
+  port = +port;
   callback = makeAsync(callback);
 
   var req = new GetNameInfoReqWrap();
@@ -221,9 +224,9 @@ function resolver(bindingName) {
 
   return function query(name, callback) {
     if (typeof name !== 'string') {
-      throw new Error('Name must be a string');
+      throw new Error('"name" argument must be a string');
     } else if (typeof callback !== 'function') {
-      throw new Error('Callback must be a function');
+      throw new Error('"callback" argument must be a function');
     }
 
     callback = makeAsync(callback);
@@ -240,7 +243,7 @@ function resolver(bindingName) {
 }
 
 
-var resolveMap = {};
+var resolveMap = Object.create(null);
 exports.resolve4 = resolveMap.A = resolver('queryA');
 exports.resolve6 = resolveMap.AAAA = resolver('queryAaaa');
 exports.resolveCname = resolveMap.CNAME = resolver('queryCname');
@@ -248,9 +251,10 @@ exports.resolveMx = resolveMap.MX = resolver('queryMx');
 exports.resolveNs = resolveMap.NS = resolver('queryNs');
 exports.resolveTxt = resolveMap.TXT = resolver('queryTxt');
 exports.resolveSrv = resolveMap.SRV = resolver('querySrv');
+exports.resolvePtr = resolveMap.PTR = resolver('queryPtr');
 exports.resolveNaptr = resolveMap.NAPTR = resolver('queryNaptr');
 exports.resolveSoa = resolveMap.SOA = resolver('querySoa');
-exports.reverse = resolveMap.PTR = resolver('getHostByAddr');
+exports.reverse = resolver('getHostByAddr');
 
 
 exports.resolve = function(hostname, type_, callback_) {
@@ -262,7 +266,7 @@ exports.resolve = function(hostname, type_, callback_) {
     resolver = exports.resolve4;
     callback = type_;
   } else {
-    throw new Error('Type must be a string');
+    throw new Error('"type" argument must be a string');
   }
 
   if (typeof resolver === 'function') {
@@ -281,41 +285,37 @@ exports.getServers = function() {
 exports.setServers = function(servers) {
   // cache the original servers because in the event of an error setting the
   // servers cares won't have any servers available for resolution
-  var orig = cares.getServers();
+  const orig = cares.getServers();
 
-  var newSet = [];
+  const newSet = servers.map((serv) => {
+    var ipVersion = isIP(serv);
+    if (ipVersion !== 0)
+      return [ipVersion, serv];
 
-  servers.forEach(function(serv) {
-    var ver = isIP(serv);
-
-    if (ver)
-      return newSet.push([ver, serv]);
-
-    var match = serv.match(/\[(.*)\](:\d+)?/);
-
+    const match = serv.match(/\[(.*)\](:\d+)?/);
     // we have an IPv6 in brackets
     if (match) {
-      ver = isIP(match[1]);
-      if (ver)
-        return newSet.push([ver, match[1]]);
+      ipVersion = isIP(match[1]);
+      if (ipVersion !== 0)
+        return [ipVersion, match[1]];
     }
 
-    var s = serv.split(/:\d+$/)[0];
-    ver = isIP(s);
+    const s = serv.split(/:\d+$/)[0];
+    ipVersion = isIP(s);
 
-    if (ver)
-      return newSet.push([ver, s]);
+    if (ipVersion !== 0)
+      return [ipVersion, s];
 
     throw new Error(`IP address is not properly formatted: ${serv}`);
   });
 
-  var r = cares.setServers(newSet);
+  const errorNumber = cares.setServers(newSet);
 
-  if (r) {
+  if (errorNumber !== 0) {
     // reset the servers to the old servers, because ares probably unset them
     cares.setServers(orig.join(','));
 
-    var err = cares.strerror(r);
+    var err = cares.strerror(errorNumber);
     throw new Error(`c-ares failed to set servers: "${err}" [${servers}]`);
   }
 };

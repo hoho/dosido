@@ -7,18 +7,16 @@
 #include <cstdarg>
 #include <sstream>
 
-#include "src/v8.h"
-
 #include "src/bailout-reason.h"
 #include "src/base/platform/platform.h"
 #include "src/bootstrapper.h"
 #include "src/code-stubs.h"
-#include "src/cpu-profiler.h"
 #include "src/deoptimizer.h"
 #include "src/global-handles.h"
 #include "src/log-inl.h"
 #include "src/log-utils.h"
 #include "src/macro-assembler.h"
+#include "src/profiler/cpu-profiler.h"
 #include "src/runtime-profiler.h"
 #include "src/string-stream.h"
 #include "src/vm-state-inl.h"
@@ -505,6 +503,7 @@ class JitLogger : public CodeEventLogger {
                                  int length);
 
   JitCodeEventHandler code_event_handler_;
+  base::Mutex logger_mutex_;
 };
 
 
@@ -534,6 +533,7 @@ void JitLogger::LogRecordedBuffer(Code* code,
 
 
 void JitLogger::CodeMoveEvent(Address from, Address to) {
+  base::LockGuard<base::Mutex> guard(&logger_mutex_);
   Code* from_code = Code::cast(HeapObject::FromAddress(from));
 
   JitCodeEvent event;
@@ -934,6 +934,7 @@ void Logger::TimerEvent(Logger::StartEnd se, const char* name) {
 
 void Logger::EnterExternal(Isolate* isolate) {
   LOG(isolate, TimerEvent(START, TimerEventExternal::name()));
+  TRACE_EVENT_BEGIN0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.External");
   DCHECK(isolate->current_vm_state() == JS);
   isolate->set_current_vm_state(EXTERNAL);
 }
@@ -941,6 +942,7 @@ void Logger::EnterExternal(Isolate* isolate) {
 
 void Logger::LeaveExternal(Isolate* isolate) {
   LOG(isolate, TimerEvent(END, TimerEventExternal::name()));
+  TRACE_EVENT_END0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.External");
   DCHECK(isolate->current_vm_state() == EXTERNAL);
   isolate->set_current_vm_state(JS);
 }
@@ -1497,7 +1499,7 @@ void Logger::TickEvent(TickSample* sample, bool overflow) {
   msg.Append(",%ld", static_cast<int>(timer_.Elapsed().InMicroseconds()));
   if (sample->has_external_callback) {
     msg.Append(",1,");
-    msg.AppendAddress(sample->external_callback);
+    msg.AppendAddress(sample->external_callback_entry);
   } else {
     msg.Append(",0,");
     msg.AppendAddress(sample->tos);
@@ -1610,8 +1612,7 @@ void Logger::LogCodeObject(Object* object) {
     case Code::COMPARE_NIL_IC:   // fall through
     case Code::TO_BOOLEAN_IC:  // fall through
     case Code::STUB:
-      description =
-          CodeStub::MajorName(CodeStub::GetMajorKey(code_object), true);
+      description = CodeStub::MajorName(CodeStub::GetMajorKey(code_object));
       if (description == NULL)
         description = "A stub from the snapshot";
       tag = Logger::STUB_TAG;
@@ -1647,6 +1648,10 @@ void Logger::LogCodeObject(Object* object) {
     case Code::KEYED_STORE_IC:
       description = "A keyed store IC from the snapshot";
       tag = Logger::KEYED_STORE_IC_TAG;
+      break;
+    case Code::WASM_FUNCTION:
+      description = "A wasm function";
+      tag = Logger::STUB_TAG;
       break;
     case Code::NUMBER_OF_KINDS:
       break;
@@ -1705,6 +1710,9 @@ void Logger::LogExistingFunction(Handle<SharedFunctionInfo> shared,
       CallHandlerInfo* call_data = CallHandlerInfo::cast(raw_call_data);
       Object* callback_obj = call_data->callback();
       Address entry_point = v8::ToCData<Address>(callback_obj);
+#if USES_FUNCTION_DESCRIPTORS
+      entry_point = *FUNCTION_ENTRYPOINT_ADDRESS(entry_point);
+#endif
       PROFILE(isolate_, CallbackEvent(*func_name, entry_point));
     }
   } else {
@@ -1742,16 +1750,22 @@ void Logger::LogAccessorCallbacks() {
   HeapIterator iterator(heap);
   DisallowHeapAllocation no_gc;
   for (HeapObject* obj = iterator.next(); obj != NULL; obj = iterator.next()) {
-    if (!obj->IsExecutableAccessorInfo()) continue;
-    ExecutableAccessorInfo* ai = ExecutableAccessorInfo::cast(obj);
+    if (!obj->IsAccessorInfo()) continue;
+    AccessorInfo* ai = AccessorInfo::cast(obj);
     if (!ai->name()->IsName()) continue;
     Address getter_entry = v8::ToCData<Address>(ai->getter());
     Name* name = Name::cast(ai->name());
     if (getter_entry != 0) {
+#if USES_FUNCTION_DESCRIPTORS
+      getter_entry = *FUNCTION_ENTRYPOINT_ADDRESS(getter_entry);
+#endif
       PROFILE(isolate_, GetterCallbackEvent(name, getter_entry));
     }
     Address setter_entry = v8::ToCData<Address>(ai->setter());
     if (setter_entry != 0) {
+#if USES_FUNCTION_DESCRIPTORS
+      setter_entry = *FUNCTION_ENTRYPOINT_ADDRESS(setter_entry);
+#endif
       PROFILE(isolate_, SetterCallbackEvent(name, setter_entry));
     }
   }

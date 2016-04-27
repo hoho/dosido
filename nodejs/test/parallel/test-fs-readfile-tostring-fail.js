@@ -14,7 +14,7 @@ const stream = fs.createWriteStream(file, {
 });
 
 const size = kStringMaxLength / 200;
-const a = new Buffer(size).fill('a');
+const a = Buffer.alloc(size, 'a');
 
 for (var i = 0; i < 201; i++) {
   stream.write(a);
@@ -25,7 +25,7 @@ stream.on('finish', common.mustCall(function() {
   // make sure that the toString does not throw an error
   fs.readFile(file, 'utf8', common.mustCall(function(err, buf) {
     assert.ok(err instanceof Error);
-    assert.strictEqual('toString failed', err.message);
+    assert.strictEqual('"toString()" failed', err.message);
   }));
 }));
 

@@ -39,6 +39,8 @@
 
     'v8_trace_maps%': 0,
 
+    # Enable the snapshot feature, for fast context creation.
+    # http://v8project.blogspot.com/2015/09/custom-startup-snapshots.html
     'v8_use_snapshot%': 'true',
 
     'v8_enable_verify_predictable%': 0,
@@ -65,8 +67,8 @@
     # Set to 1 to enable DCHECKs in release builds.
     'dcheck_always_on%': 0,
 
-    # Set to 1 to enable building with wasm prototype.
-    'v8_wasm%': 0,
+    # Enable/disable JavaScript API accessors.
+    'v8_js_accessors%': 0,
   },
   'target_defaults': {
     'conditions': [
@@ -105,9 +107,6 @@
       }],
       ['dcheck_always_on!=0', {
         'defines': ['DEBUG',],
-      }],
-      ['v8_wasm!=0', {
-        'defines': ['V8_WASM',],
       }],
     ],  # conditions
     'configurations': {

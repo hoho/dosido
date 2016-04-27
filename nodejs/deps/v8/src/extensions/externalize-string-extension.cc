@@ -36,10 +36,10 @@ typedef SimpleStringResource<char, v8::String::ExternalOneByteStringResource>
 typedef SimpleStringResource<uc16, v8::String::ExternalStringResource>
     SimpleTwoByteStringResource;
 
-
 const char* const ExternalizeStringExtension::kSource =
     "native function externalizeString();"
-    "native function isOneByteString();";
+    "native function isOneByteString();"
+    "function x() { return 1; }";
 
 v8::Local<v8::FunctionTemplate>
 ExternalizeStringExtension::GetNativeFunctionTemplate(
@@ -98,7 +98,7 @@ void ExternalizeStringExtension::Externalize(
     result = string->MakeExternal(resource);
     if (result) {
       i::Isolate* isolate = reinterpret_cast<i::Isolate*>(args.GetIsolate());
-      isolate->heap()->external_string_table()->AddString(*string);
+      isolate->heap()->RegisterExternalString(*string);
     }
     if (!result) delete resource;
   } else {
@@ -109,7 +109,7 @@ void ExternalizeStringExtension::Externalize(
     result = string->MakeExternal(resource);
     if (result) {
       i::Isolate* isolate = reinterpret_cast<i::Isolate*>(args.GetIsolate());
-      isolate->heap()->external_string_table()->AddString(*string);
+      isolate->heap()->RegisterExternalString(*string);
     }
     if (!result) delete resource;
   }

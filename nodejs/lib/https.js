@@ -1,5 +1,7 @@
 'use strict';
 
+require('internal/util').assertCrypto(exports);
+
 const tls = require('tls');
 const url = require('url');
 const http = require('http');
@@ -29,8 +31,9 @@ function Server(opts, requestListener) {
     this.addListener('request', requestListener);
   }
 
-  this.addListener('clientError', function(err, conn) {
-    conn.destroy();
+  this.addListener('tlsClientError', function(err, conn) {
+    if (!this.emit('clientError', err, conn))
+      conn.destroy(err);
   });
 
   this.timeout = 2 * 60 * 1000;

@@ -391,7 +391,7 @@ error:
 
 
 static void
-nodejsDestroyWeakCallback(const v8::WeakCallbackData<Object, nodejsContext>& data)
+nodejsDestroyWeakCallback(const v8::WeakCallbackInfo<nodejsContext>& data)
 {
     nodejsContext *jsCtx = data.GetParameter();
 
@@ -615,7 +615,8 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
         Local<Object> tmp = Object::New(env->isolate());
         Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
 
-        destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback);
+        destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback,
+                         v8::WeakCallbackType::kParameter);
         destroy->MarkIndependent();
 
         jsCtx->_p = destroy;
@@ -952,7 +953,7 @@ nodejsLoadScripts(Environment *env,
 
     HandleScope handle_scope(env->isolate());
 
-    TryCatch try_catch;
+    TryCatch try_catch(env->isolate());
 
     try_catch.SetVerbose(false);
 

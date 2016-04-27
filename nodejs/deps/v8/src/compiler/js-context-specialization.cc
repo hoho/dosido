@@ -10,6 +10,7 @@
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
 #include "src/contexts.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -33,26 +34,7 @@ MaybeHandle<Context> JSContextSpecialization::GetSpecializationContext(
   DCHECK(node->opcode() == IrOpcode::kJSLoadContext ||
          node->opcode() == IrOpcode::kJSStoreContext);
   Node* const object = NodeProperties::GetValueInput(node, 0);
-  switch (object->opcode()) {
-    case IrOpcode::kHeapConstant:
-      return Handle<Context>::cast(
-          OpParameter<Unique<HeapObject>>(object).handle());
-    case IrOpcode::kParameter: {
-      Node* const start = NodeProperties::GetValueInput(object, 0);
-      DCHECK_EQ(IrOpcode::kStart, start->opcode());
-      int const index = ParameterIndexOf(object->op());
-      // The context is always the last parameter to a JavaScript function, and
-      // {Parameter} indices start at -1, so value outputs of {Start} look like
-      // this: closure, receiver, param0, ..., paramN, context.
-      if (index == start->op()->ValueOutputCount() - 2) {
-        return context();
-      }
-      break;
-    }
-    default:
-      break;
-  }
-  return MaybeHandle<Context>();
+  return NodeProperties::GetSpecializationContext(object, context());
 }
 
 
@@ -77,8 +59,8 @@ Reduction JSContextSpecialization::ReduceJSLoadContext(Node* node) {
     }
     const Operator* op = jsgraph_->javascript()->LoadContext(
         0, access.index(), access.immutable());
-    node->set_op(op);
     node->ReplaceInput(0, jsgraph_->Constant(context));
+    NodeProperties::ChangeOp(node, op);
     return Changed(node);
   }
   Handle<Object> value =
@@ -119,8 +101,8 @@ Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
     context = handle(context->previous(), isolate());
   }
 
-  node->set_op(javascript()->StoreContext(0, access.index()));
   node->ReplaceInput(0, jsgraph_->Constant(context));
+  NodeProperties::ChangeOp(node, javascript()->StoreContext(0, access.index()));
   return Changed(node);
 }
 

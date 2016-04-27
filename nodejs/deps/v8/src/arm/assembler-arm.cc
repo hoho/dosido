@@ -34,6 +34,8 @@
 // modified significantly by Google Inc.
 // Copyright 2012 the V8 project authors. All rights reserved.
 
+#include "src/arm/assembler-arm.h"
+
 #if V8_TARGET_ARCH_ARM
 
 #include "src/arm/assembler-arm-inl.h"
@@ -50,6 +52,14 @@ namespace internal {
 // snapshot.
 static unsigned CpuFeaturesImpliedByCompiler() {
   unsigned answer = 0;
+#ifdef CAN_USE_ARMV8_INSTRUCTIONS
+  if (FLAG_enable_armv8) {
+    answer |= 1u << ARMv8;
+    // ARMv8 always features VFP and NEON.
+    answer |= 1u << ARMv7 | 1u << VFP3 | 1u << NEON | 1u << VFP32DREGS;
+    answer |= 1u << SUDIV | 1u << MLS;
+  }
+#endif  // CAN_USE_ARMV8_INSTRUCTIONS
 #ifdef CAN_USE_ARMV7_INSTRUCTIONS
   if (FLAG_enable_armv7) answer |= 1u << ARMv7;
 #endif  // CAN_USE_ARMV7_INSTRUCTIONS
@@ -72,13 +82,20 @@ static unsigned CpuFeaturesImpliedByCompiler() {
 
 void CpuFeatures::ProbeImpl(bool cross_compile) {
   supported_ |= CpuFeaturesImpliedByCompiler();
-  cache_line_size_ = 64;
+  dcache_line_size_ = 64;
 
   // Only use statically determined features for cross compile (snapshot).
   if (cross_compile) return;
 
 #ifndef __arm__
   // For the simulator build, use whatever the flags specify.
+  if (FLAG_enable_armv8) {
+    supported_ |= 1u << ARMv8;
+    // ARMv8 always features VFP and NEON.
+    supported_ |= 1u << ARMv7 | 1u << VFP3 | 1u << NEON | 1u << VFP32DREGS;
+    supported_ |= 1u << SUDIV | 1u << MLS;
+    if (FLAG_enable_movw_movt) supported_ |= 1u << MOVW_MOVT_IMMEDIATE_LOADS;
+  }
   if (FLAG_enable_armv7) {
     supported_ |= 1u << ARMv7;
     if (FLAG_enable_vfp3) supported_ |= 1u << VFP3;
@@ -120,7 +137,7 @@ void CpuFeatures::ProbeImpl(bool cross_compile) {
   if (cpu.implementer() == base::CPU::ARM &&
       (cpu.part() == base::CPU::ARM_CORTEX_A5 ||
        cpu.part() == base::CPU::ARM_CORTEX_A9)) {
-    cache_line_size_ = 32;
+    dcache_line_size_ = 32;
   }
 
   if (FLAG_enable_32dregs && cpu.has_vfp3_d32()) supported_ |= 1u << VFP32DREGS;
@@ -152,7 +169,9 @@ void CpuFeatures::PrintTarget() {
   arm_no_probe = " noprobe";
 #endif
 
-#if defined CAN_USE_ARMV7_INSTRUCTIONS
+#if defined CAN_USE_ARMV8_INSTRUCTIONS
+  arm_arch = "arm v8";
+#elif defined CAN_USE_ARMV7_INSTRUCTIONS
   arm_arch = "arm v7";
 #else
   arm_arch = "arm v6";
@@ -190,13 +209,15 @@ void CpuFeatures::PrintTarget() {
 
 void CpuFeatures::PrintFeatures() {
   printf(
-    "ARMv7=%d VFP3=%d VFP32DREGS=%d NEON=%d SUDIV=%d UNALIGNED_ACCESSES=%d "
-    "MOVW_MOVT_IMMEDIATE_LOADS=%d COHERENT_CACHE=%d",
+    "ARMv8=%d ARMv7=%d VFP3=%d VFP32DREGS=%d NEON=%d SUDIV=%d MLS=%d"
+    "UNALIGNED_ACCESSES=%d MOVW_MOVT_IMMEDIATE_LOADS=%d COHERENT_CACHE=%d",
+    CpuFeatures::IsSupported(ARMv8),
     CpuFeatures::IsSupported(ARMv7),
     CpuFeatures::IsSupported(VFP3),
     CpuFeatures::IsSupported(VFP32DREGS),
     CpuFeatures::IsSupported(NEON),
     CpuFeatures::IsSupported(SUDIV),
+    CpuFeatures::IsSupported(MLS),
     CpuFeatures::IsSupported(UNALIGNED_ACCESSES),
     CpuFeatures::IsSupported(MOVW_MOVT_IMMEDIATE_LOADS),
     CpuFeatures::IsSupported(COHERENT_CACHE));
@@ -208,18 +229,6 @@ void CpuFeatures::PrintFeatures() {
   bool eabi_hardfloat = false;
 #endif
     printf(" USE_EABI_HARDFLOAT=%d\n", eabi_hardfloat);
-}
-
-
-// -----------------------------------------------------------------------------
-// Implementation of DwVfpRegister
-
-const char* DwVfpRegister::AllocationIndexToString(int index) {
-  DCHECK(index >= 0 && index < NumAllocatableRegisters());
-  DCHECK(kScratchDoubleReg.code() - kDoubleRegZero.code() ==
-         kNumReservedRegisters - 1);
-  if (index >= kDoubleRegZero.code()) index += kNumReservedRegisters;
-  return VFPRegisters::Name(index, true);
 }
 
 
@@ -300,6 +309,13 @@ MemOperand::MemOperand(Register rn, int32_t offset, AddrMode am) {
   rm_ = no_reg;
   offset_ = offset;
   am_ = am;
+
+  // Accesses below the stack pointer are not safe, and are prohibited by the
+  // ABI. We can check obvious violations here.
+  if (rn.is(sp)) {
+    if (am == Offset) DCHECK_LE(0, offset);
+    if (am == NegOffset) DCHECK_GE(0, offset);
+  }
 }
 
 
@@ -389,26 +405,26 @@ NeonListOperand::NeonListOperand(DoubleRegister base, int registers_count) {
 // str(r, MemOperand(sp, 4, NegPreIndex), al) instruction (aka push(r))
 // register r is not encoded.
 const Instr kPushRegPattern =
-    al | B26 | 4 | NegPreIndex | kRegister_sp_Code * B16;
+    al | B26 | 4 | NegPreIndex | Register::kCode_sp * B16;
 // ldr(r, MemOperand(sp, 4, PostIndex), al) instruction (aka pop(r))
 // register r is not encoded.
 const Instr kPopRegPattern =
-    al | B26 | L | 4 | PostIndex | kRegister_sp_Code * B16;
+    al | B26 | L | 4 | PostIndex | Register::kCode_sp * B16;
 // ldr rd, [pc, #offset]
 const Instr kLdrPCImmedMask = 15 * B24 | 7 * B20 | 15 * B16;
-const Instr kLdrPCImmedPattern = 5 * B24 | L | kRegister_pc_Code * B16;
+const Instr kLdrPCImmedPattern = 5 * B24 | L | Register::kCode_pc * B16;
 // ldr rd, [pp, #offset]
 const Instr kLdrPpImmedMask = 15 * B24 | 7 * B20 | 15 * B16;
-const Instr kLdrPpImmedPattern = 5 * B24 | L | kRegister_r8_Code * B16;
+const Instr kLdrPpImmedPattern = 5 * B24 | L | Register::kCode_r8 * B16;
 // ldr rd, [pp, rn]
 const Instr kLdrPpRegMask = 15 * B24 | 7 * B20 | 15 * B16;
-const Instr kLdrPpRegPattern = 7 * B24 | L | kRegister_r8_Code * B16;
+const Instr kLdrPpRegPattern = 7 * B24 | L | Register::kCode_r8 * B16;
 // vldr dd, [pc, #offset]
 const Instr kVldrDPCMask = 15 * B24 | 3 * B20 | 15 * B16 | 15 * B8;
-const Instr kVldrDPCPattern = 13 * B24 | L | kRegister_pc_Code * B16 | 11 * B8;
+const Instr kVldrDPCPattern = 13 * B24 | L | Register::kCode_pc * B16 | 11 * B8;
 // vldr dd, [pp, #offset]
 const Instr kVldrDPpMask = 15 * B24 | 3 * B20 | 15 * B16 | 15 * B8;
-const Instr kVldrDPpPattern = 13 * B24 | L | kRegister_r8_Code * B16 | 11 * B8;
+const Instr kVldrDPpPattern = 13 * B24 | L | Register::kCode_r8 * B16 | 11 * B8;
 // blxcc rm
 const Instr kBlxRegMask =
     15 * B24 | 15 * B20 | 15 * B16 | 15 * B12 | 15 * B8 | 15 * B4;
@@ -435,19 +451,21 @@ const Instr kAndBicFlip = 0xe * B21;
 
 // A mask for the Rd register for push, pop, ldr, str instructions.
 const Instr kLdrRegFpOffsetPattern =
-    al | B26 | L | Offset | kRegister_fp_Code * B16;
+    al | B26 | L | Offset | Register::kCode_fp * B16;
 const Instr kStrRegFpOffsetPattern =
-    al | B26 | Offset | kRegister_fp_Code * B16;
+    al | B26 | Offset | Register::kCode_fp * B16;
 const Instr kLdrRegFpNegOffsetPattern =
-    al | B26 | L | NegOffset | kRegister_fp_Code * B16;
+    al | B26 | L | NegOffset | Register::kCode_fp * B16;
 const Instr kStrRegFpNegOffsetPattern =
-    al | B26 | NegOffset | kRegister_fp_Code * B16;
+    al | B26 | NegOffset | Register::kCode_fp * B16;
 const Instr kLdrStrInstrTypeMask = 0xffff0000;
 
 
 Assembler::Assembler(Isolate* isolate, void* buffer, int buffer_size)
     : AssemblerBase(isolate, buffer, buffer_size),
       recorded_ast_id_(TypeFeedbackId::None()),
+      pending_32_bit_constants_(&pending_32_bit_constants_buffer_[0]),
+      pending_64_bit_constants_(&pending_64_bit_constants_buffer_[0]),
       constant_pool_builder_(kLdrMaxReachBits, kVldrMaxReachBits),
       positions_recorder_(this) {
   reloc_info_writer.Reposition(buffer_ + buffer_size_, pc_);
@@ -465,6 +483,12 @@ Assembler::Assembler(Isolate* isolate, void* buffer, int buffer_size)
 
 Assembler::~Assembler() {
   DCHECK(const_pool_blocked_nesting_ == 0);
+  if (pending_32_bit_constants_ != &pending_32_bit_constants_buffer_[0]) {
+    delete[] pending_32_bit_constants_;
+  }
+  if (pending_64_bit_constants_ != &pending_64_bit_constants_buffer_[0]) {
+    delete[] pending_64_bit_constants_;
+  }
 }
 
 
@@ -609,21 +633,21 @@ Instr Assembler::SetAddRegisterImmediateOffset(Instr instr, int offset) {
 
 Register Assembler::GetRd(Instr instr) {
   Register reg;
-  reg.code_ = Instruction::RdValue(instr);
+  reg.reg_code = Instruction::RdValue(instr);
   return reg;
 }
 
 
 Register Assembler::GetRn(Instr instr) {
   Register reg;
-  reg.code_ = Instruction::RnValue(instr);
+  reg.reg_code = Instruction::RnValue(instr);
   return reg;
 }
 
 
 Register Assembler::GetRm(Instr instr) {
   Register reg;
-  reg.code_ = Instruction::RmValue(instr);
+  reg.reg_code = Instruction::RmValue(instr);
   return reg;
 }
 
@@ -819,8 +843,7 @@ void Assembler::target_at_put(int pos, int target_pos) {
     if (is_uint8(target24)) {
       // If the target fits in a byte then only patch with a mov
       // instruction.
-      CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
-                          1,
+      CodePatcher patcher(isolate(), reinterpret_cast<byte*>(buffer_ + pos), 1,
                           CodePatcher::DONT_FLUSH);
       patcher.masm()->mov(dst, Operand(target24));
     } else {
@@ -829,14 +852,12 @@ void Assembler::target_at_put(int pos, int target_pos) {
       if (CpuFeatures::IsSupported(ARMv7)) {
         // Patch with movw/movt.
         if (target16_1 == 0) {
-          CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
-                              1,
-                              CodePatcher::DONT_FLUSH);
+          CodePatcher patcher(isolate(), reinterpret_cast<byte*>(buffer_ + pos),
+                              1, CodePatcher::DONT_FLUSH);
           patcher.masm()->movw(dst, target16_0);
         } else {
-          CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
-                              2,
-                              CodePatcher::DONT_FLUSH);
+          CodePatcher patcher(isolate(), reinterpret_cast<byte*>(buffer_ + pos),
+                              2, CodePatcher::DONT_FLUSH);
           patcher.masm()->movw(dst, target16_0);
           patcher.masm()->movt(dst, target16_1);
         }
@@ -846,15 +867,13 @@ void Assembler::target_at_put(int pos, int target_pos) {
         uint8_t target8_1 = target16_0 >> 8;
         uint8_t target8_2 = target16_1 & kImm8Mask;
         if (target8_2 == 0) {
-          CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
-                              2,
-                              CodePatcher::DONT_FLUSH);
+          CodePatcher patcher(isolate(), reinterpret_cast<byte*>(buffer_ + pos),
+                              2, CodePatcher::DONT_FLUSH);
           patcher.masm()->mov(dst, Operand(target8_0));
           patcher.masm()->orr(dst, dst, Operand(target8_1 << 8));
         } else {
-          CodePatcher patcher(reinterpret_cast<byte*>(buffer_ + pos),
-                              3,
-                              CodePatcher::DONT_FLUSH);
+          CodePatcher patcher(isolate(), reinterpret_cast<byte*>(buffer_ + pos),
+                              3, CodePatcher::DONT_FLUSH);
           patcher.masm()->mov(dst, Operand(target8_0));
           patcher.masm()->orr(dst, dst, Operand(target8_1 << 8));
           patcher.masm()->orr(dst, dst, Operand(target8_2 << 16));
@@ -1928,6 +1947,16 @@ void Assembler::uxtah(Register dst, Register src1, Register src2, int rotate,
 }
 
 
+void Assembler::rbit(Register dst, Register src, Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.144.
+  // cond(31-28) | 011011111111(27-16) | Rd(15-12) | 11110011(11-4) | Rm(3-0)
+  DCHECK(IsEnabled(ARMv7));
+  DCHECK(!dst.is(pc));
+  DCHECK(!src.is(pc));
+  emit(cond | 0x6FF * B16 | dst.code() * B12 | 0xF3 * B4 | src.code());
+}
+
+
 // Status register access instructions.
 void Assembler::mrs(Register dst, SRegister s, Condition cond) {
   DCHECK(!dst.is(pc));
@@ -2113,6 +2142,21 @@ void Assembler::bkpt(uint32_t imm16) {  // v5 and above
 void Assembler::svc(uint32_t imm24, Condition cond) {
   DCHECK(is_uint24(imm24));
   emit(cond | 15*B24 | imm24);
+}
+
+
+void Assembler::dmb(BarrierOption option) {
+  emit(kSpecialCondition | 0x57ff*B12 | 5*B4 | option);
+}
+
+
+void Assembler::dsb(BarrierOption option) {
+  emit(kSpecialCondition | 0x57ff*B12 | 4*B4 | option);
+}
+
+
+void Assembler::isb(BarrierOption option) {
+  emit(kSpecialCondition | 0x57ff*B12 | 6*B4 | option);
 }
 
 
@@ -2904,6 +2948,24 @@ void Assembler::vcvt_f64_u32(const DwVfpRegister dst,
 }
 
 
+void Assembler::vcvt_f32_u32(const SwVfpRegister dst, const SwVfpRegister src,
+                             VFPConversionMode mode, const Condition cond) {
+  emit(EncodeVCVT(F32, dst.code(), U32, src.code(), mode, cond));
+}
+
+
+void Assembler::vcvt_s32_f32(const SwVfpRegister dst, const SwVfpRegister src,
+                             VFPConversionMode mode, const Condition cond) {
+  emit(EncodeVCVT(S32, dst.code(), F32, src.code(), mode, cond));
+}
+
+
+void Assembler::vcvt_u32_f32(const SwVfpRegister dst, const SwVfpRegister src,
+                             VFPConversionMode mode, const Condition cond) {
+  emit(EncodeVCVT(U32, dst.code(), F32, src.code(), mode, cond));
+}
+
+
 void Assembler::vcvt_s32_f64(const SwVfpRegister dst,
                              const DwVfpRegister src,
                              VFPConversionMode mode,
@@ -3338,6 +3400,20 @@ void Assembler::vmrs(Register dst, Condition cond) {
 }
 
 
+void Assembler::vrinta(const SwVfpRegister dst, const SwVfpRegister src) {
+  // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
+  // 10(19-18) | RM=00(17-16) |  Vd(15-12) | 101(11-9) | sz=0(8) | 01(7-6) |
+  // M(5) | 0(4) | Vm(3-0)
+  DCHECK(CpuFeatures::IsSupported(ARMv8));
+  int vd, d;
+  dst.split_code(&vd, &d);
+  int vm, m;
+  src.split_code(&vm, &m);
+  emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | vd * B12 |
+       0x5 * B9 | B6 | m * B5 | vm);
+}
+
+
 void Assembler::vrinta(const DwVfpRegister dst, const DwVfpRegister src) {
   // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
   // 10(19-18) | RM=00(17-16) |  Vd(15-12) | 101(11-9) | sz=1(8) | 01(7-6) |
@@ -3349,6 +3425,20 @@ void Assembler::vrinta(const DwVfpRegister dst, const DwVfpRegister src) {
   src.split_code(&vm, &m);
   emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | vd * B12 |
        0x5 * B9 | B8 | B6 | m * B5 | vm);
+}
+
+
+void Assembler::vrintn(const SwVfpRegister dst, const SwVfpRegister src) {
+  // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
+  // 10(19-18) | RM=01(17-16) |  Vd(15-12) | 101(11-9) | sz=0(8) | 01(7-6) |
+  // M(5) | 0(4) | Vm(3-0)
+  DCHECK(CpuFeatures::IsSupported(ARMv8));
+  int vd, d;
+  dst.split_code(&vd, &d);
+  int vm, m;
+  src.split_code(&vm, &m);
+  emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | 0x1 * B16 |
+       vd * B12 | 0x5 * B9 | B6 | m * B5 | vm);
 }
 
 
@@ -3366,6 +3456,20 @@ void Assembler::vrintn(const DwVfpRegister dst, const DwVfpRegister src) {
 }
 
 
+void Assembler::vrintp(const SwVfpRegister dst, const SwVfpRegister src) {
+  // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
+  // 10(19-18) | RM=10(17-16) |  Vd(15-12) | 101(11-9) | sz=0(8) | 01(7-6) |
+  // M(5) | 0(4) | Vm(3-0)
+  DCHECK(CpuFeatures::IsSupported(ARMv8));
+  int vd, d;
+  dst.split_code(&vd, &d);
+  int vm, m;
+  src.split_code(&vm, &m);
+  emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | 0x2 * B16 |
+       vd * B12 | 0x5 * B9 | B6 | m * B5 | vm);
+}
+
+
 void Assembler::vrintp(const DwVfpRegister dst, const DwVfpRegister src) {
   // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
   // 10(19-18) | RM=10(17-16) |  Vd(15-12) | 101(11-9) | sz=1(8) | 01(7-6) |
@@ -3380,6 +3484,20 @@ void Assembler::vrintp(const DwVfpRegister dst, const DwVfpRegister src) {
 }
 
 
+void Assembler::vrintm(const SwVfpRegister dst, const SwVfpRegister src) {
+  // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
+  // 10(19-18) | RM=11(17-16) |  Vd(15-12) | 101(11-9) | sz=0(8) | 01(7-6) |
+  // M(5) | 0(4) | Vm(3-0)
+  DCHECK(CpuFeatures::IsSupported(ARMv8));
+  int vd, d;
+  dst.split_code(&vd, &d);
+  int vm, m;
+  src.split_code(&vm, &m);
+  emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | 0x3 * B16 |
+       vd * B12 | 0x5 * B9 | B6 | m * B5 | vm);
+}
+
+
 void Assembler::vrintm(const DwVfpRegister dst, const DwVfpRegister src) {
   // cond=kSpecialCondition(31-28) | 11101(27-23)| D(22) | 11(21-20) |
   // 10(19-18) | RM=11(17-16) |  Vd(15-12) | 101(11-9) | sz=1(8) | 01(7-6) |
@@ -3391,6 +3509,20 @@ void Assembler::vrintm(const DwVfpRegister dst, const DwVfpRegister src) {
   src.split_code(&vm, &m);
   emit(kSpecialCondition | 0x1D * B23 | d * B22 | 0x3 * B20 | B19 | 0x3 * B16 |
        vd * B12 | 0x5 * B9 | B8 | B6 | m * B5 | vm);
+}
+
+
+void Assembler::vrintz(const SwVfpRegister dst, const SwVfpRegister src,
+                       const Condition cond) {
+  // cond(31-28) | 11101(27-23)| D(22) | 11(21-20) | 011(19-17) | 0(16) |
+  // Vd(15-12) | 101(11-9) | sz=0(8) | op=1(7) | 1(6) | M(5) | 0(4) | Vm(3-0)
+  DCHECK(CpuFeatures::IsSupported(ARMv8));
+  int vd, d;
+  dst.split_code(&vd, &d);
+  int vm, m;
+  src.split_code(&vm, &m);
+  emit(cond | 0x1D * B23 | d * B22 | 0x3 * B20 | 0x3 * B17 | vd * B12 |
+       0x5 * B9 | B7 | B6 | m * B5 | vm);
 }
 
 
@@ -3570,6 +3702,7 @@ void Assembler::GrowBuffer() {
 
   desc.instr_size = pc_offset();
   desc.reloc_size = (buffer_ + buffer_size_) - reloc_info_writer.pos();
+  desc.origin = this;
 
   // Copy the data.
   int pc_delta = desc.buffer - buffer_;
@@ -3645,7 +3778,7 @@ void Assembler::RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data) {
     data = RecordedAstId().ToInt();
     ClearRecordedAstId();
   }
-  RelocInfo rinfo(pc_, rmode, data, NULL);
+  RelocInfo rinfo(isolate(), pc_, rmode, data, NULL);
   reloc_info_writer.Write(&rinfo);
 }
 
@@ -3664,6 +3797,15 @@ ConstantPoolEntry::Access Assembler::ConstantPoolAddEntry(int position,
     DCHECK(num_pending_32_bit_constants_ < kMaxNumPending32Constants);
     if (num_pending_32_bit_constants_ == 0) {
       first_const_pool_32_use_ = position;
+    } else if (num_pending_32_bit_constants_ == kMinNumPendingConstants &&
+               pending_32_bit_constants_ ==
+                   &pending_32_bit_constants_buffer_[0]) {
+      // Inline buffer is full, switch to dynamically allocated buffer.
+      pending_32_bit_constants_ =
+          new ConstantPoolEntry[kMaxNumPending32Constants];
+      std::copy(&pending_32_bit_constants_buffer_[0],
+                &pending_32_bit_constants_buffer_[kMinNumPendingConstants],
+                &pending_32_bit_constants_[0]);
     }
     ConstantPoolEntry entry(position, value, sharing_ok);
     pending_32_bit_constants_[num_pending_32_bit_constants_++] = entry;
@@ -3684,6 +3826,15 @@ ConstantPoolEntry::Access Assembler::ConstantPoolAddEntry(int position,
     DCHECK(num_pending_64_bit_constants_ < kMaxNumPending64Constants);
     if (num_pending_64_bit_constants_ == 0) {
       first_const_pool_64_use_ = position;
+    } else if (num_pending_64_bit_constants_ == kMinNumPendingConstants &&
+               pending_64_bit_constants_ ==
+                   &pending_64_bit_constants_buffer_[0]) {
+      // Inline buffer is full, switch to dynamically allocated buffer.
+      pending_64_bit_constants_ =
+          new ConstantPoolEntry[kMaxNumPending64Constants];
+      std::copy(&pending_64_bit_constants_buffer_[0],
+                &pending_64_bit_constants_buffer_[kMinNumPendingConstants],
+                &pending_64_bit_constants_[0]);
     }
     ConstantPoolEntry entry(position, value);
     pending_64_bit_constants_[num_pending_64_bit_constants_++] = entry;

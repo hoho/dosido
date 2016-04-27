@@ -1,5 +1,7 @@
 'use strict';
 
+require('internal/util').assertCrypto(exports);
+
 const assert = require('assert');
 const EventEmitter = require('events');
 const stream = require('stream');
@@ -9,12 +11,7 @@ const common = require('_tls_common');
 const debug = util.debuglog('tls-legacy');
 const Buffer = require('buffer').Buffer;
 const Timer = process.binding('timer_wrap').Timer;
-var Connection = null;
-try {
-  Connection = process.binding('crypto').Connection;
-} catch (e) {
-  throw new Error('node.js not compiled with openssl crypto support.');
-}
+const Connection = process.binding('crypto').Connection;
 
 function SlabBuffer() {
   this.create();
@@ -23,7 +20,7 @@ function SlabBuffer() {
 
 SlabBuffer.prototype.create = function create() {
   this.isFull = false;
-  this.pool = new Buffer(tls.SLAB_BUFFER_SIZE);
+  this.pool = Buffer.allocUnsafe(tls.SLAB_BUFFER_SIZE);
   this.offset = 0;
   this.remaining = this.pool.length;
 };
@@ -590,7 +587,7 @@ function onhandshakestart() {
     // state machine and OpenSSL is not re-entrant. We cannot allow the user's
     // callback to destroy the connection right now, it would crash and burn.
     setImmediate(function() {
-      var err = new Error('TLS session renegotiation attack detected.');
+      var err = new Error('TLS session renegotiation attack detected');
       if (self.cleartext) self.cleartext.emit('error', err);
     });
   }

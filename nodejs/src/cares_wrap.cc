@@ -310,7 +310,7 @@ class QueryWrap : public AsyncWrap {
       Integer::New(env()->isolate(), 0),
       answer
     };
-    MakeCallback(env()->oncomplete_string(), ARRAY_SIZE(argv), argv);
+    MakeCallback(env()->oncomplete_string(), arraysize(argv), argv);
   }
 
   void CallOnComplete(Local<Value> answer, Local<Value> family) {
@@ -321,7 +321,7 @@ class QueryWrap : public AsyncWrap {
       answer,
       family
     };
-    MakeCallback(env()->oncomplete_string(), ARRAY_SIZE(argv), argv);
+    MakeCallback(env()->oncomplete_string(), arraysize(argv), argv);
   }
 
   void ParseError(int status) {
@@ -698,6 +698,49 @@ class QuerySrvWrap: public QueryWrap {
   }
 };
 
+class QueryPtrWrap: public QueryWrap {
+ public:
+  explicit QueryPtrWrap(Environment* env, Local<Object> req_wrap_obj)
+      : QueryWrap(env, req_wrap_obj) {
+  }
+
+  int Send(const char* name) override {
+    ares_query(env()->cares_channel(),
+               name,
+               ns_c_in,
+               ns_t_ptr,
+               Callback,
+               GetQueryArg());
+    return 0;
+  }
+
+  size_t self_size() const override { return sizeof(*this); }
+
+ protected:
+  void Parse(unsigned char* buf, int len) override {
+    HandleScope handle_scope(env()->isolate());
+    Context::Scope context_scope(env()->context());
+
+    struct hostent* host;
+
+    int status = ares_parse_ptr_reply(buf, len, NULL, 0, AF_INET, &host);
+    if (status != ARES_SUCCESS) {
+      ParseError(status);
+      return;
+    }
+
+    Local<Array> aliases = Array::New(env()->isolate());
+
+    for (uint32_t i = 0; host->h_aliases[i] != NULL; i++) {
+      aliases->Set(i, OneByteString(env()->isolate(), host->h_aliases[i]));
+    }
+
+    ares_free_hostent(host);
+
+    this->CallOnComplete(aliases);
+  }
+};
+
 class QueryNaptrWrap: public QueryWrap {
  public:
   explicit QueryNaptrWrap(Environment* env, Local<Object> req_wrap_obj)
@@ -994,7 +1037,7 @@ void AfterGetAddrInfo(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
   uv_freeaddrinfo(res);
 
   // Make the callback into JavaScript
-  req_wrap->MakeCallback(env->oncomplete_string(), ARRAY_SIZE(argv), argv);
+  req_wrap->MakeCallback(env->oncomplete_string(), arraysize(argv), argv);
 
   delete req_wrap;
 }
@@ -1025,7 +1068,7 @@ void AfterGetNameInfo(uv_getnameinfo_t* req,
   }
 
   // Make the callback into JavaScript
-  req_wrap->MakeCallback(env->oncomplete_string(), ARRAY_SIZE(argv), argv);
+  req_wrap->MakeCallback(env->oncomplete_string(), arraysize(argv), argv);
 
   delete req_wrap;
 }
@@ -1297,6 +1340,7 @@ static void Initialize(Local<Object> target,
   env->SetMethod(target, "queryNs", Query<QueryNsWrap>);
   env->SetMethod(target, "queryTxt", Query<QueryTxtWrap>);
   env->SetMethod(target, "querySrv", Query<QuerySrvWrap>);
+  env->SetMethod(target, "queryPtr", Query<QueryPtrWrap>);
   env->SetMethod(target, "queryNaptr", Query<QueryNaptrWrap>);
   env->SetMethod(target, "querySoa", Query<QuerySoaWrap>);
   env->SetMethod(target, "getHostByAddr", Query<GetHostByAddrWrap>);

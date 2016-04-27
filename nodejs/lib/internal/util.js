@@ -1,37 +1,43 @@
 'use strict';
 
 const binding = process.binding('util');
-const prefix = '(node) ';
+const prefix = `(${process.release.name}:${process.pid}) `;
+const noDeprecation = process.noDeprecation;
 
 exports.getHiddenValue = binding.getHiddenValue;
+exports.setHiddenValue = binding.setHiddenValue;
 
 // All the internal deprecations have to use this function only, as this will
 // prepend the prefix to the actual message.
 exports.deprecate = function(fn, msg) {
-  return exports._deprecate(fn, `${prefix}${msg}`);
+  return exports._deprecate(fn, msg);
 };
 
 // All the internal deprecations have to use this function only, as this will
 // prepend the prefix to the actual message.
-exports.printDeprecationMessage = function(msg, warned) {
-  return exports._printDeprecationMessage(`${prefix}${msg}`, warned);
+exports.printDeprecationMessage = function(msg, warned, ctor) {
+  if (warned || noDeprecation)
+    return true;
+  process.emitWarning(msg, 'DeprecationWarning',
+                      ctor || exports.printDeprecationMessage);
+  return true;
 };
 
-exports._printDeprecationMessage = function(msg, warned) {
-  if (process.noDeprecation)
-    return true;
+exports.error = function(msg) {
+  const fmt = `${prefix}${msg}`;
+  if (arguments.length > 1) {
+    const args = new Array(arguments.length);
+    args[0] = fmt;
+    for (let i = 1; i < arguments.length; ++i)
+      args[i] = arguments[i];
+    console.error.apply(console, args);
+  } else {
+    console.error(fmt);
+  }
+};
 
-  if (warned)
-    return warned;
-
-  if (process.throwDeprecation)
-    throw new Error(msg);
-  else if (process.traceDeprecation)
-    console.trace(msg.startsWith(prefix) ? msg.replace(prefix, '') : msg);
-  else
-    console.error(msg);
-
-  return true;
+exports.trace = function(msg) {
+  console.trace(`${prefix}${msg}`);
 };
 
 // Mark that a method should not be used.
@@ -51,7 +57,7 @@ exports._deprecate = function(fn, msg) {
 
   var warned = false;
   function deprecated() {
-    warned = exports._printDeprecationMessage(msg, warned);
+    warned = exports.printDeprecationMessage(msg, warned, deprecated);
     return fn.apply(this, arguments);
   }
 
@@ -59,13 +65,16 @@ exports._deprecate = function(fn, msg) {
 };
 
 exports.decorateErrorStack = function decorateErrorStack(err) {
-  if (!(exports.isError(err) && err.stack))
+  if (!(exports.isError(err) && err.stack) ||
+      exports.getHiddenValue(err, 'node:decorated') === true)
     return;
 
-  const arrow = exports.getHiddenValue(err, 'arrowMessage');
+  const arrow = exports.getHiddenValue(err, 'node:arrowMessage');
 
-  if (arrow)
+  if (arrow) {
     err.stack = arrow + err.stack;
+    exports.setHiddenValue(err, 'node:decorated', true);
+  }
 };
 
 exports.isError = function isError(e) {
@@ -74,4 +83,10 @@ exports.isError = function isError(e) {
 
 exports.objectToString = function objectToString(o) {
   return Object.prototype.toString.call(o);
+};
+
+const noCrypto = !process.versions.openssl;
+exports.assertCrypto = function(exports) {
+  if (noCrypto)
+    throw new Error('Node.js is not compiled with openssl crypto support');
 };

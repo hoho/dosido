@@ -13,7 +13,14 @@ namespace v8 { class StartupData; }  // Forward declaration.
 namespace v8 {
 namespace internal {
 
-enum NativeType { CORE, CODE_STUB, EXPERIMENTAL, EXTRAS, D8, TEST };
+enum NativeType {
+  CORE,
+  EXPERIMENTAL,
+  EXTRAS,
+  EXPERIMENTAL_EXTRAS,
+  D8,
+  TEST
+};
 
 template <NativeType type>
 class NativesCollection {
@@ -41,9 +48,9 @@ class NativesCollection {
 };
 
 typedef NativesCollection<CORE> Natives;
-typedef NativesCollection<CODE_STUB> CodeStubNatives;
 typedef NativesCollection<EXPERIMENTAL> ExperimentalNatives;
 typedef NativesCollection<EXTRAS> ExtraNatives;
+typedef NativesCollection<EXPERIMENTAL_EXTRAS> ExperimentalExtraNatives;
 
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
@@ -53,6 +60,7 @@ void ReadNatives();
 void DisposeNatives();
 #endif
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_SNAPSHOT_NATIVES_H_

@@ -17,7 +17,6 @@ using v8::Local;
 using v8::Message;
 using v8::StackFrame;
 using v8::StackTrace;
-using v8::TryCatch;
 using v8::Value;
 
 void Environment::PrintSyncTrace() const {
@@ -28,7 +27,7 @@ void Environment::PrintSyncTrace() const {
   Local<v8::StackTrace> stack =
       StackTrace::CurrentStackTrace(isolate(), 10, StackTrace::kDetailed);
 
-  fprintf(stderr, "WARNING: Detected use of sync API\n");
+  fprintf(stderr, "(node:%d) WARNING: Detected use of sync API\n", getpid());
 
   for (int i = 0; i < stack->GetFrameCount() - 1; i++) {
     Local<StackFrame> stack_frame = stack->GetFrame(i);
@@ -62,29 +61,6 @@ void Environment::PrintSyncTrace() const {
     }
   }
   fflush(stderr);
-}
-
-
-bool Environment::KickNextTick(Environment::AsyncCallbackScope* scope) {
-  TickInfo* info = tick_info();
-
-  if (scope->in_makecallback()) {
-    return true;
-  }
-
-  if (info->length() == 0) {
-    isolate()->RunMicrotasks();
-  }
-
-  if (info->length() == 0) {
-    info->set_index(0);
-    return true;
-  }
-
-  Local<Value> ret =
-    tick_callback_function()->Call(process_object(), 0, nullptr);
-
-  return !ret.IsEmpty();
 }
 
 }  // namespace node

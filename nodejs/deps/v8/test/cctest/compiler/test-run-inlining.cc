@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/frames-inl.h"
 #include "test/cctest/compiler/function-tester.h"
 
-using namespace v8::internal;
-using namespace v8::internal::compiler;
+namespace v8 {
+namespace internal {
+namespace compiler {
 
 namespace {
 
@@ -30,7 +29,11 @@ void AssertInlineCount(const v8::FunctionCallbackInfo<v8::Value>& args) {
   }
   List<JSFunction*> functions(2);
   topmost->GetFunctions(&functions);
-  CHECK_EQ(args[0]->ToInt32(args.GetIsolate())->Value(), functions.length());
+  CHECK_EQ(args[0]
+               ->ToInt32(args.GetIsolate()->GetCurrentContext())
+               .ToLocalChecked()
+               ->Value(),
+           functions.length());
 }
 
 
@@ -38,15 +41,19 @@ void InstallAssertInlineCountHelper(v8::Isolate* isolate) {
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   v8::Local<v8::FunctionTemplate> t =
       v8::FunctionTemplate::New(isolate, AssertInlineCount);
-  context->Global()->Set(v8_str("AssertInlineCount"), t->GetFunction());
+  CHECK(context->Global()
+            ->Set(context, v8_str("AssertInlineCount"),
+                  t->GetFunction(context).ToLocalChecked())
+            .FromJust());
 }
 
 
 const uint32_t kRestrictedInliningFlags =
-    CompilationInfo::kContextSpecializing | CompilationInfo::kTypingEnabled;
+    CompilationInfo::kFunctionContextSpecializing |
+    CompilationInfo::kTypingEnabled;
 
 const uint32_t kInlineFlags = CompilationInfo::kInliningEnabled |
-                              CompilationInfo::kContextSpecializing |
+                              CompilationInfo::kFunctionContextSpecializing |
                               CompilationInfo::kTypingEnabled;
 
 }  // namespace
@@ -161,12 +168,29 @@ TEST(InlineOmitArguments) {
       "(function () {"
       "  var x = 42;"
       "  function bar(s, t, u, v) { AssertInlineCount(2); return x + s; };"
-      "  return (function (s,t) { return bar(s); });"
+      "  function foo(s, t) { return bar(s); };"
+      "  return foo;"
       "})();",
       kInlineFlags);
 
   InstallAssertInlineCountHelper(CcTest::isolate());
   T.CheckCall(T.Val(42 + 12), T.Val(12), T.undefined());
+}
+
+
+TEST(InlineOmitArgumentsObject) {
+  FunctionTester T(
+      "(function () {"
+      "  function bar(s, t, u, v) { AssertInlineCount(2); return arguments; };"
+      "  function foo(s, t) { var args = bar(s);"
+      "                       return args.length == 1 &&"
+      "                              args[0] == 11; };"
+      "  return foo;"
+      "})();",
+      kInlineFlags);
+
+  InstallAssertInlineCountHelper(CcTest::isolate());
+  T.CheckCall(T.true_value(), T.Val(11), T.undefined());
 }
 
 
@@ -192,13 +216,31 @@ TEST(InlineSurplusArguments) {
       "(function () {"
       "  var x = 42;"
       "  function foo(s) { AssertInlineCount(2); return x + s; };"
-      "  function bar(s,t) { return foo(s,t,13); };"
+      "  function bar(s, t) { return foo(s, t, 13); };"
       "  return bar;"
       "})();",
       kInlineFlags);
 
   InstallAssertInlineCountHelper(CcTest::isolate());
   T.CheckCall(T.Val(42 + 12), T.Val(12), T.undefined());
+}
+
+
+TEST(InlineSurplusArgumentsObject) {
+  FunctionTester T(
+      "(function () {"
+      "  function foo(s) { AssertInlineCount(2); return arguments; };"
+      "  function bar(s, t) { var args = foo(s, t, 13);"
+      "                       return args.length == 3 &&"
+      "                              args[0] == 11 &&"
+      "                              args[1] == 12 &&"
+      "                              args[2] == 13; };"
+      "  return bar;"
+      "})();",
+      kInlineFlags);
+
+  InstallAssertInlineCountHelper(CcTest::isolate());
+  T.CheckCall(T.true_value(), T.Val(11), T.Val(12));
 }
 
 
@@ -415,20 +457,6 @@ TEST(InlineIntrinsicIsSmi) {
 }
 
 
-TEST(InlineIntrinsicIsNonNegativeSmi) {
-  FunctionTester T(
-      "(function () {"
-      "  var x = 42;"
-      "  function bar(s,t) { return %_IsNonNegativeSmi(x); };"
-      "  return bar;"
-      "})();",
-      kInlineFlags);
-
-  InstallAssertInlineCountHelper(CcTest::isolate());
-  T.CheckCall(T.true_value(), T.Val(12), T.Val(4));
-}
-
-
 TEST(InlineIntrinsicIsArray) {
   FunctionTester T(
       "(function () {"
@@ -573,3 +601,7 @@ TEST(InlineMutuallyRecursive) {
   InstallAssertInlineCountHelper(CcTest::isolate());
   T.CheckCall(T.Val(42), T.Val(1));
 }
+
+}  // namespace compiler
+}  // namespace internal
+}  // namespace v8

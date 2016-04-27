@@ -10,10 +10,13 @@
 #include "src/compilation-cache.h"
 #include "src/execution.h"
 #include "src/factory.h"
+#include "src/field-type.h"
 #include "src/global-handles.h"
+#include "src/heap/slots-buffer.h"
 #include "src/ic/ic.h"
 #include "src/macro-assembler.h"
 #include "test/cctest/cctest.h"
+#include "test/cctest/heap/utils-inl.h"
 
 using namespace v8::base;
 using namespace v8::internal;
@@ -49,8 +52,12 @@ static Handle<String> MakeName(const char* str, int suffix) {
 
 
 Handle<JSObject> GetObject(const char* name) {
-  return v8::Utils::OpenHandle(
-      *v8::Handle<v8::Object>::Cast(CcTest::global()->Get(v8_str(name))));
+  return Handle<JSObject>::cast(
+      v8::Utils::OpenHandle(*v8::Local<v8::Object>::Cast(
+          CcTest::global()
+              ->Get(v8::Isolate::GetCurrent()->GetCurrentContext(),
+                    v8_str(name))
+              .ToLocalChecked())));
 }
 
 
@@ -59,7 +66,7 @@ static double GetDoubleFieldValue(JSObject* obj, FieldIndex field_index) {
     return obj->RawFastDoublePropertyAt(field_index);
   } else {
     Object* value = obj->RawFastPropertyAt(field_index);
-    DCHECK(value->IsMutableHeapNumber());
+    CHECK(value->IsMutableHeapNumber());
     return HeapNumber::cast(value)->value();
   }
 }
@@ -735,22 +742,41 @@ TEST(LayoutDescriptorAppendAllDoubles) {
 static Handle<LayoutDescriptor> TestLayoutDescriptorAppendIfFastOrUseFull(
     Isolate* isolate, int inobject_properties,
     Handle<DescriptorArray> descriptors, int number_of_descriptors) {
-  Handle<Map> map = Map::Create(isolate, inobject_properties);
+  Handle<Map> initial_map = Map::Create(isolate, inobject_properties);
 
   Handle<LayoutDescriptor> full_layout_descriptor = LayoutDescriptor::New(
-      map, descriptors, descriptors->number_of_descriptors());
+      initial_map, descriptors, descriptors->number_of_descriptors());
 
   int nof = 0;
   bool switched_to_slow_mode = false;
 
+  // This method calls LayoutDescriptor::AppendIfFastOrUseFull() internally
+  // and does all the required map-descriptors related book keeping.
+  Handle<Map> last_map = Map::AddMissingTransitionsForTesting(
+      initial_map, descriptors, full_layout_descriptor);
+
+  // Follow back pointers to construct a sequence of maps from |map|
+  // to |last_map|.
+  int descriptors_length = descriptors->number_of_descriptors();
+  std::vector<Handle<Map>> maps(descriptors_length);
+  {
+    CHECK(last_map->is_stable());
+    Map* map = *last_map;
+    for (int i = 0; i < descriptors_length; i++) {
+      maps[descriptors_length - 1 - i] = handle(map, isolate);
+      Object* maybe_map = map->GetBackPointer();
+      CHECK(maybe_map->IsMap());
+      map = Map::cast(maybe_map);
+      CHECK(!map->is_stable());
+    }
+    CHECK_EQ(1, maps[0]->NumberOfOwnDescriptors());
+  }
+
+  Handle<Map> map;
+  // Now check layout descriptors of all intermediate maps.
   for (int i = 0; i < number_of_descriptors; i++) {
     PropertyDetails details = descriptors->GetDetails(i);
-
-    // This method calls LayoutDescriptor::AppendIfFastOrUseFull() internally
-    // and does all the required map-descriptors related book keeping.
-    map = Map::CopyInstallDescriptorsForTesting(map, i, descriptors,
-                                                full_layout_descriptor);
-
+    map = maps[i];
     LayoutDescriptor* layout_desc = map->layout_descriptor();
 
     if (layout_desc->IsSlowLayout()) {
@@ -922,7 +948,7 @@ TEST(DescriptorArrayTrimming) {
   const int kSplitFieldIndex = 32;
   const int kTrimmedLayoutDescriptorLength = 64;
 
-  Handle<HeapType> any_type = HeapType::Any(isolate);
+  Handle<FieldType> any_type = FieldType::Any(isolate);
   Handle<Map> map = Map::Create(isolate, kFieldCount);
   for (int i = 0; i < kSplitFieldIndex; i++) {
     map = Map::CopyWithField(map, MakeName("prop", i), any_type, NONE,
@@ -1010,7 +1036,7 @@ TEST(DoScavenge) {
   // a pointer to "from space" pointer. Do scavenge one more time and ensure
   // that it didn't crash or corrupt the double value stored in the object.
 
-  Handle<HeapType> any_type = HeapType::Any(isolate);
+  Handle<FieldType> any_type = FieldType::Any(isolate);
   Handle<Map> map = Map::Create(isolate, 10);
   map = Map::CopyWithField(map, MakeName("prop", 0), any_type, NONE,
                            Representation::Double(),
@@ -1035,7 +1061,7 @@ TEST(DoScavenge) {
   CcTest::heap()->CollectGarbage(i::NEW_SPACE);
 
   // Create temp object in the new space.
-  Handle<JSArray> temp = factory->NewJSArray(FAST_ELEMENTS);
+  Handle<JSArray> temp = factory->NewJSArray(0, FAST_ELEMENTS);
   CHECK(isolate->heap()->new_space()->Contains(*temp));
 
   // Construct a double value that looks like a pointer to the new space object
@@ -1072,7 +1098,7 @@ TEST(DoScavengeWithIncrementalWriteBarrier) {
   // scavenges to promote |obj| to old space, a GC in old space and ensure that
   // the tagged value was properly updated after candidates evacuation.
 
-  Handle<HeapType> any_type = HeapType::Any(isolate);
+  Handle<FieldType> any_type = FieldType::Any(isolate);
   Handle<Map> map = Map::Create(isolate, 10);
   map = Map::CopyWithField(map, MakeName("prop", 0), any_type, NONE,
                            Representation::Double(),
@@ -1296,7 +1322,7 @@ TEST(LayoutDescriptorSharing) {
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
   Isolate* isolate = CcTest::i_isolate();
-  Handle<HeapType> any_type = HeapType::Any(isolate);
+  Handle<FieldType> any_type = FieldType::Any(isolate);
 
   Handle<Map> split_map;
   {
@@ -1335,147 +1361,6 @@ TEST(LayoutDescriptorSharing) {
   CHECK(map2->owns_descriptors());
   CHECK_NE(*split_layout_descriptor, map2->layout_descriptor());
   CHECK(map2->layout_descriptor()->IsConsistentWithMap(*map2, true));
-}
-
-
-TEST(StoreBufferScanOnScavenge) {
-  CcTest::InitializeVM();
-  Isolate* isolate = CcTest::i_isolate();
-  Factory* factory = isolate->factory();
-  v8::HandleScope scope(CcTest::isolate());
-
-  Handle<HeapType> any_type = HeapType::Any(isolate);
-  Handle<Map> map = Map::Create(isolate, 10);
-  map = Map::CopyWithField(map, MakeName("prop", 0), any_type, NONE,
-                           Representation::Double(),
-                           INSERT_TRANSITION).ToHandleChecked();
-
-  // Create object in new space.
-  Handle<JSObject> obj = factory->NewJSObjectFromMap(map, NOT_TENURED);
-
-  Handle<HeapNumber> heap_number = factory->NewHeapNumber(42.5);
-  obj->WriteToField(0, *heap_number);
-
-  {
-    // Ensure the object is properly set up.
-    DescriptorArray* descriptors = map->instance_descriptors();
-    CHECK(descriptors->GetDetails(0).representation().IsDouble());
-    FieldIndex field_index = FieldIndex::ForDescriptor(*map, 0);
-    CHECK(field_index.is_inobject() && field_index.is_double());
-    CHECK_EQ(FLAG_unbox_double_fields, map->IsUnboxedDoubleField(field_index));
-    CHECK_EQ(42.5, GetDoubleFieldValue(*obj, field_index));
-  }
-  CHECK(isolate->heap()->new_space()->Contains(*obj));
-
-  // Trigger GCs so that the newly allocated object moves to old gen.
-  CcTest::heap()->CollectGarbage(i::NEW_SPACE);  // in survivor space now
-  CcTest::heap()->CollectGarbage(i::NEW_SPACE);  // in old gen now
-
-  CHECK(isolate->heap()->old_space()->Contains(*obj));
-
-  // Create temp object in the new space.
-  Handle<JSArray> temp = factory->NewJSArray(FAST_ELEMENTS);
-  CHECK(isolate->heap()->new_space()->Contains(*temp));
-
-  // Construct a double value that looks like a pointer to the new space object
-  // and store it into the obj.
-  Address fake_object = reinterpret_cast<Address>(*temp) + kPointerSize;
-  double boom_value = bit_cast<double>(fake_object);
-
-  FieldIndex field_index = FieldIndex::ForDescriptor(obj->map(), 0);
-  Handle<HeapNumber> boom_number = factory->NewHeapNumber(boom_value, MUTABLE);
-  obj->FastPropertyAtPut(field_index, *boom_number);
-
-  // Enforce scan on scavenge for the obj's page.
-  MemoryChunk* chunk = MemoryChunk::FromAddress(obj->address());
-  chunk->set_scan_on_scavenge(true);
-
-  // Trigger GCs and force evacuation. Should not crash there.
-  CcTest::heap()->CollectAllGarbage();
-
-  CHECK_EQ(boom_value, GetDoubleFieldValue(*obj, field_index));
-}
-
-
-static int LenFromSize(int size) {
-  return (size - FixedArray::kHeaderSize) / kPointerSize;
-}
-
-
-TEST(WriteBarriersInCopyJSObject) {
-  FLAG_max_semi_space_size = 1;  // Ensure new space is not growing.
-  CcTest::InitializeVM();
-  Isolate* isolate = CcTest::i_isolate();
-  TestHeap* heap = CcTest::test_heap();
-
-  v8::HandleScope scope(CcTest::isolate());
-
-  // The plan: create JSObject which contains unboxed double value that looks
-  // like a reference to an object in new space.
-  // Then clone this object (forcing it to go into old space) and check
-  // that the value of the unboxed double property of the cloned object has
-  // was not corrupted by GC.
-
-  // Step 1: prepare a map for the object. We add unboxed double property to it.
-  // Create a map with single inobject property.
-  Handle<Map> my_map = Map::Create(isolate, 1);
-  Handle<String> name = isolate->factory()->InternalizeUtf8String("foo");
-  my_map = Map::CopyWithField(my_map, name, HeapType::Any(isolate), NONE,
-                              Representation::Double(),
-                              INSERT_TRANSITION).ToHandleChecked();
-
-  int object_size = my_map->instance_size();
-
-  // Step 2: allocate a lot of objects so to almost fill new space: we need
-  // just enough room to allocate JSObject and thus fill the newspace.
-
-  int allocation_amount =
-      Min(FixedArray::kMaxSize, Page::kMaxRegularHeapObjectSize + kPointerSize);
-  int allocation_len = LenFromSize(allocation_amount);
-  NewSpace* new_space = heap->new_space();
-  Address* top_addr = new_space->allocation_top_address();
-  Address* limit_addr = new_space->allocation_limit_address();
-  while ((*limit_addr - *top_addr) > allocation_amount) {
-    CHECK(!heap->always_allocate());
-    Object* array = heap->AllocateFixedArray(allocation_len).ToObjectChecked();
-    CHECK(new_space->Contains(array));
-  }
-
-  // Step 3: now allocate fixed array and JSObject to fill the whole new space.
-  int to_fill = static_cast<int>(*limit_addr - *top_addr - object_size);
-  int fixed_array_len = LenFromSize(to_fill);
-  CHECK(fixed_array_len < FixedArray::kMaxLength);
-
-  CHECK(!heap->always_allocate());
-  Object* array = heap->AllocateFixedArray(fixed_array_len).ToObjectChecked();
-  CHECK(new_space->Contains(array));
-
-  Object* object = heap->AllocateJSObjectFromMap(*my_map).ToObjectChecked();
-  CHECK(new_space->Contains(object));
-  JSObject* jsobject = JSObject::cast(object);
-  CHECK_EQ(0, FixedArray::cast(jsobject->elements())->length());
-  CHECK_EQ(0, jsobject->properties()->length());
-
-  // Construct a double value that looks like a pointer to the new space object
-  // and store it into the obj.
-  Address fake_object = reinterpret_cast<Address>(array) + kPointerSize;
-  double boom_value = bit_cast<double>(fake_object);
-  FieldIndex index = FieldIndex::ForDescriptor(*my_map, 0);
-  jsobject->RawFastDoublePropertyAtPut(index, boom_value);
-
-  CHECK_EQ(0, static_cast<int>(*limit_addr - *top_addr));
-
-  // Step 4: clone jsobject, but force always allocate first to create a clone
-  // in old pointer space.
-  AlwaysAllocateScope aa_scope(isolate);
-  Object* clone_obj = heap->CopyJSObject(jsobject).ToObjectChecked();
-  Handle<JSObject> clone(JSObject::cast(clone_obj));
-  CHECK(heap->old_space()->Contains(clone->address()));
-
-  CcTest::heap()->CollectGarbage(NEW_SPACE, "boom");
-
-  // The value in cloned object should not be corrupted by GC.
-  CHECK_EQ(boom_value, clone->RawFastDoublePropertyAt(index));
 }
 
 
@@ -1545,7 +1430,6 @@ static void TestIncrementalWriteBarrier(Handle<Map> map, Handle<Map> new_map,
                                         int double_descriptor,
                                         bool check_tagged_value = true) {
   if (FLAG_never_compact || !FLAG_incremental_marking) return;
-  FLAG_stress_compaction = true;
   FLAG_manual_evacuation_candidates_selection = true;
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
@@ -1638,7 +1522,7 @@ static void TestWriteBarrierObjectShiftFieldsRight(
   Isolate* isolate = CcTest::i_isolate();
   v8::HandleScope scope(CcTest::isolate());
 
-  Handle<HeapType> any_type = HeapType::Any(isolate);
+  Handle<FieldType> any_type = FieldType::Any(isolate);
 
   CompileRun("function func() { return 1; }");
 
@@ -1666,9 +1550,7 @@ static void TestWriteBarrierObjectShiftFieldsRight(
   }
 }
 
-
-// TODO(ishell): enable when this issue is fixed.
-DISABLED_TEST(WriteBarrierObjectShiftFieldsRight) {
+TEST(WriteBarrierObjectShiftFieldsRight) {
   TestWriteBarrierObjectShiftFieldsRight(OLD_TO_NEW_WRITE_BARRIER);
 }
 

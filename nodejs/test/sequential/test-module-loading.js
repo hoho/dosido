@@ -172,7 +172,7 @@ assert.equal(child.loaded, parent.loaded);
 
 // #1357 Loading JSON files with require()
 var json = require('../fixtures/packages/main/package.json');
-assert.deepEqual(json, {
+assert.deepStrictEqual(json, {
   name: 'package-name',
   version: '1.2.3',
   main: 'package-main-module'
@@ -190,7 +190,7 @@ var children = module.children.reduce(function red(set, child) {
   return set;
 }, {});
 
-assert.deepEqual(children, {
+assert.deepStrictEqual(children, {
   'common.js': {},
   'fixtures/not-main-module.js': {},
   'fixtures/a.js': {
@@ -247,12 +247,12 @@ assert.deepEqual(children, {
 assert.throws(function() {
   console.error('require non-string');
   require({ foo: 'bar' });
-}, 'path must be a string');
+}, /path must be a string/);
 
 assert.throws(function() {
   console.error('require empty string');
   require('');
-}, 'missing path');
+}, /missing path/);
 
 process.on('exit', function() {
   assert.ok(a.A instanceof Function);

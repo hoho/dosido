@@ -11,15 +11,19 @@
 #include "src/codegen.h"
 #include "src/conversions.h"
 #include "src/execution.h"
+#include "src/field-type.h"
 #include "src/frames-inl.h"
 #include "src/ic/call-optimization.h"
 #include "src/ic/handler-compiler.h"
 #include "src/ic/ic-inl.h"
 #include "src/ic/ic-compiler.h"
 #include "src/ic/stub-cache.h"
+#include "src/isolate-inl.h"
 #include "src/macro-assembler.h"
 #include "src/prototype.h"
 #include "src/runtime/runtime.h"
+#include "src/runtime/runtime-utils.h"
+#include "src/tracing/trace-event.h"
 
 namespace v8 {
 namespace internal {
@@ -45,9 +49,6 @@ char IC::TransitionMarkFromState(IC::State state) {
     // computed from the original code - not the patched code. Let
     // these cases fall through to the unreachable code below.
     case DEBUG_STUB:
-      break;
-    // Type-vector-based ICs resolve state to one of the above.
-    case DEFAULT:
       break;
   }
   UNREACHABLE();
@@ -119,11 +120,11 @@ void IC::TraceIC(const char* type, Handle<Object> name, State old_state,
                                               stdout, true);
     }
 
-    ExtraICState extra_state = new_target->extra_ic_state();
     const char* modifier = "";
     if (new_target->kind() == Code::KEYED_STORE_IC) {
-      modifier = GetTransitionMarkModifier(
-          KeyedStoreIC::GetKeyedAccessStoreMode(extra_state));
+      KeyedAccessStoreMode mode =
+          casted_nexus<KeyedStoreICNexus>()->GetKeyedAccessStoreMode();
+      modifier = GetTransitionMarkModifier(mode);
     }
     PrintF(" (%c->%c%s) ", TransitionMarkFromState(old_state),
            TransitionMarkFromState(new_state), modifier);
@@ -196,6 +197,11 @@ SharedFunctionInfo* IC::GetSharedFunctionInfo() const {
   // corresponding to the frame.
   StackFrameIterator it(isolate());
   while (it.frame()->fp() != this->fp()) it.Advance();
+  if (FLAG_ignition && it.frame()->type() == StackFrame::STUB) {
+    // Advance over bytecode handler frame.
+    // TODO(rmcilroy): Remove this once bytecode handlers don't need a frame.
+    it.Advance();
+  }
   JavaScriptFrame* frame = JavaScriptFrame::cast(it.frame());
   // Find the function on the stack and both the active code for the
   // function and the original code.
@@ -271,11 +277,8 @@ bool IC::TryRemoveInvalidPrototypeDependentStub(Handle<Object> receiver,
     if (first_map == NULL) return false;
     Handle<Map> old_map(first_map);
     if (old_map->is_deprecated()) return true;
-    if (IsMoreGeneralElementsKindTransition(old_map->elements_kind(),
-                                            receiver_map()->elements_kind())) {
-      return true;
-    }
-    return false;
+    return IsMoreGeneralElementsKindTransition(old_map->elements_kind(),
+                                               receiver_map()->elements_kind());
   }
 
   CacheHolderFlag flag;
@@ -292,8 +295,8 @@ bool IC::TryRemoveInvalidPrototypeDependentStub(Handle<Object> receiver,
     }
   }
 
-  if (receiver->IsGlobalObject()) {
-    Handle<GlobalObject> global = Handle<GlobalObject>::cast(receiver);
+  if (receiver->IsJSGlobalObject()) {
+    Handle<JSGlobalObject> global = Handle<JSGlobalObject>::cast(receiver);
     LookupIterator it(global, name, LookupIterator::OWN_SKIP_INTERCEPTOR);
     if (it.state() == LookupIterator::ACCESS_CHECK) return false;
     if (!it.IsFound()) return false;
@@ -331,14 +334,6 @@ void IC::UpdateState(Handle<Object> receiver, Handle<Object> name) {
     MarkPrototypeFailure(name);
     return;
   }
-
-  // The builtins object is special.  It only changes when JavaScript
-  // builtins are loaded lazily.  It is important to keep inline
-  // caches for the builtins object monomorphic.  Therefore, if we get
-  // an inline cache miss for the builtins object after lazily loading
-  // JavaScript builtins, we return uninitialized as the state to
-  // force the inline cache back to monomorphic state.
-  if (receiver->IsJSBuiltinsObject()) state_ = PREMONOMORPHIC;
 }
 
 
@@ -387,7 +382,6 @@ static void ComputeTypeInfoCountDelta(IC::State old_state, IC::State new_state,
       break;
     case PROTOTYPE_FAILURE:
     case DEBUG_STUB:
-    case DEFAULT:
       UNREACHABLE();
   }
 }
@@ -424,19 +418,9 @@ void IC::OnTypeFeedbackChanged(Isolate* isolate, Address address,
 
 
 // static
-void IC::OnTypeFeedbackChanged(Isolate* isolate, Code* host,
-                               TypeFeedbackVector* vector, State old_state,
-                               State new_state) {
+void IC::OnTypeFeedbackChanged(Isolate* isolate, Code* host) {
   if (host->kind() != Code::FUNCTION) return;
 
-  if (FLAG_type_info_threshold > 0) {
-    int polymorphic_delta = 0;  // "Polymorphic" here includes monomorphic.
-    int generic_delta = 0;      // "Generic" here includes megamorphic.
-    ComputeTypeInfoCountDelta(old_state, new_state, &polymorphic_delta,
-                              &generic_delta);
-    vector->change_ic_with_type_info_count(polymorphic_delta);
-    vector->change_ic_generic_count(generic_delta);
-  }
   TypeFeedbackInfo* info = TypeFeedbackInfo::cast(host->type_feedback_info());
   info->change_own_type_change_checksum();
   host->set_profiler_ticks(0);
@@ -476,13 +460,9 @@ void IC::Clear(Isolate* isolate, Address address, Address constant_pool) {
   switch (target->kind()) {
     case Code::LOAD_IC:
     case Code::KEYED_LOAD_IC:
-      return;
     case Code::STORE_IC:
-      if (FLAG_vector_stores) return;
-      return StoreIC::Clear(isolate, address, target, constant_pool);
     case Code::KEYED_STORE_IC:
-      if (FLAG_vector_stores) return;
-      return KeyedStoreIC::Clear(isolate, address, target, constant_pool);
+      return;
     case Code::COMPARE_IC:
       return CompareIC::Clear(isolate, address, target, constant_pool);
     case Code::COMPARE_NIL_IC:
@@ -504,9 +484,8 @@ void KeyedLoadIC::Clear(Isolate* isolate, Code* host, KeyedLoadICNexus* nexus) {
   // Make sure to also clear the map used in inline fast cases.  If we
   // do not clear these maps, cached code can keep objects alive
   // through the embedded maps.
-  State state = nexus->StateFromFeedback();
   nexus->ConfigurePremonomorphic();
-  OnTypeFeedbackChanged(isolate, host, nexus->vector(), state, PREMONOMORPHIC);
+  OnTypeFeedbackChanged(isolate, host);
 }
 
 
@@ -518,16 +497,15 @@ void CallIC::Clear(Isolate* isolate, Code* host, CallICNexus* nexus) {
   if (state != UNINITIALIZED && !feedback->IsAllocationSite()) {
     nexus->ConfigureUninitialized();
     // The change in state must be processed.
-    OnTypeFeedbackChanged(isolate, host, nexus->vector(), state, UNINITIALIZED);
+    OnTypeFeedbackChanged(isolate, host);
   }
 }
 
 
 void LoadIC::Clear(Isolate* isolate, Code* host, LoadICNexus* nexus) {
   if (IsCleared(nexus)) return;
-  State state = nexus->StateFromFeedback();
   nexus->ConfigurePremonomorphic();
-  OnTypeFeedbackChanged(isolate, host, nexus->vector(), state, PREMONOMORPHIC);
+  OnTypeFeedbackChanged(isolate, host);
 }
 
 
@@ -542,9 +520,8 @@ void StoreIC::Clear(Isolate* isolate, Address address, Code* target,
 
 void StoreIC::Clear(Isolate* isolate, Code* host, StoreICNexus* nexus) {
   if (IsCleared(nexus)) return;
-  State state = nexus->StateFromFeedback();
   nexus->ConfigurePremonomorphic();
-  OnTypeFeedbackChanged(isolate, host, nexus->vector(), state, PREMONOMORPHIC);
+  OnTypeFeedbackChanged(isolate, host);
 }
 
 
@@ -560,9 +537,8 @@ void KeyedStoreIC::Clear(Isolate* isolate, Address address, Code* target,
 void KeyedStoreIC::Clear(Isolate* isolate, Code* host,
                          KeyedStoreICNexus* nexus) {
   if (IsCleared(nexus)) return;
-  State state = nexus->StateFromFeedback();
   nexus->ConfigurePremonomorphic();
-  OnTypeFeedbackChanged(isolate, host, nexus->vector(), state, PREMONOMORPHIC);
+  OnTypeFeedbackChanged(isolate, host);
 }
 
 
@@ -571,11 +547,10 @@ void CompareIC::Clear(Isolate* isolate, Address address, Code* target,
   DCHECK(CodeStub::GetMajorKey(target) == CodeStub::CompareIC);
   CompareICStub stub(target->stub_key(), isolate);
   // Only clear CompareICs that can retain objects.
-  if (stub.state() != CompareICState::KNOWN_OBJECT) return;
-  SetTargetAtAddress(address,
-                     GetRawUninitialized(isolate, stub.op(), stub.strength()),
+  if (stub.state() != CompareICState::KNOWN_RECEIVER) return;
+  SetTargetAtAddress(address, GetRawUninitialized(isolate, stub.op()),
                      constant_pool);
-  PatchInlinedSmiCode(address, DISABLE_INLINED_SMI_CHECK);
+  PatchInlinedSmiCode(isolate, address, DISABLE_INLINED_SMI_CHECK);
 }
 
 
@@ -585,9 +560,7 @@ Handle<Code> KeyedLoadIC::ChooseMegamorphicStub(Isolate* isolate,
   if (FLAG_compiled_keyed_generic_loads) {
     return KeyedLoadGenericStub(isolate, LoadICState(extra_state)).GetCode();
   } else {
-    return is_strong(LoadICState::GetLanguageMode(extra_state))
-               ? isolate->builtins()->KeyedLoadIC_Megamorphic_Strong()
-               : isolate->builtins()->KeyedLoadIC_Megamorphic();
+    return isolate->builtins()->KeyedLoadIC_Megamorphic();
   }
 }
 
@@ -612,8 +585,7 @@ void IC::ConfigureVectorState(IC::State new_state) {
   }
 
   vector_set_ = true;
-  OnTypeFeedbackChanged(isolate(), get_host(), *vector(), saved_state(),
-                        new_state);
+  OnTypeFeedbackChanged(isolate(), get_host());
 }
 
 
@@ -636,8 +608,7 @@ void IC::ConfigureVectorState(Handle<Name> name, Handle<Map> map,
   }
 
   vector_set_ = true;
-  OnTypeFeedbackChanged(isolate(), get_host(), *vector(), saved_state(),
-                        MONOMORPHIC);
+  OnTypeFeedbackChanged(isolate(), get_host());
 }
 
 
@@ -660,8 +631,20 @@ void IC::ConfigureVectorState(Handle<Name> name, MapHandleList* maps,
   }
 
   vector_set_ = true;
-  OnTypeFeedbackChanged(isolate(), get_host(), *vector(), saved_state(),
-                        POLYMORPHIC);
+  OnTypeFeedbackChanged(isolate(), get_host());
+}
+
+
+void IC::ConfigureVectorState(MapHandleList* maps,
+                              MapHandleList* transitioned_maps,
+                              CodeHandleList* handlers) {
+  DCHECK(UseVector());
+  DCHECK(kind() == Code::KEYED_STORE_IC);
+  KeyedStoreICNexus* nexus = casted_nexus<KeyedStoreICNexus>();
+  nexus->ConfigurePolymorphic(maps, transitioned_maps, handlers);
+
+  vector_set_ = true;
+  OnTypeFeedbackChanged(isolate(), get_host());
 }
 
 
@@ -684,27 +667,27 @@ MaybeHandle<Object> LoadIC::Load(Handle<Object> object, Handle<Name> name) {
       TRACE_GENERIC_IC(isolate(), "LoadIC", "name as array index");
     }
     Handle<Object> result;
-    ASSIGN_RETURN_ON_EXCEPTION(
-        isolate(), result,
-        Object::GetElement(isolate(), object, index, language_mode()), Object);
+    ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                               Object::GetElement(isolate(), object, index),
+                               Object);
     return result;
   }
 
   bool use_ic = MigrateDeprecated(object) ? false : FLAG_use_ic;
 
-  if (object->IsGlobalObject() && name->IsString()) {
+  if (object->IsJSGlobalObject() && name->IsString()) {
     // Look up in script context table.
     Handle<String> str_name = Handle<String>::cast(name);
-    Handle<GlobalObject> global = Handle<GlobalObject>::cast(object);
+    Handle<JSGlobalObject> global = Handle<JSGlobalObject>::cast(object);
     Handle<ScriptContextTable> script_contexts(
         global->native_context()->script_context_table());
 
     ScriptContextTable::LookupResult lookup_result;
     if (ScriptContextTable::Lookup(script_contexts, str_name, &lookup_result)) {
       Handle<Object> result =
-          FixedArray::get(ScriptContextTable::GetContext(
+          FixedArray::get(*ScriptContextTable::GetContext(
                               script_contexts, lookup_result.context_index),
-                          lookup_result.slot_index);
+                          lookup_result.slot_index, isolate());
       if (*result == *isolate()->factory()->the_hole_value()) {
         // Do not install stubs and stay pre-monomorphic for
         // uninitialized accesses.
@@ -730,8 +713,8 @@ MaybeHandle<Object> LoadIC::Load(Handle<Object> object, Handle<Name> name) {
     // Get the property.
     Handle<Object> result;
 
-    ASSIGN_RETURN_ON_EXCEPTION(
-        isolate(), result, Object::GetProperty(&it, language_mode()), Object);
+    ASSIGN_RETURN_ON_EXCEPTION(isolate(), result, Object::GetProperty(&it),
+                               Object);
     if (it.IsFound()) {
       return result;
     } else if (!ShouldThrowReferenceError(object)) {
@@ -802,12 +785,7 @@ bool IC::UpdatePolymorphicIC(Handle<Name> name, Handle<Code> code) {
   if (number_of_valid_maps > 1 && target()->is_keyed_stub()) return false;
   Handle<Code> ic;
   if (number_of_valid_maps == 1) {
-    if (UseVector()) {
-      ConfigureVectorState(name, receiver_map(), code);
-    } else {
-      ic = PropertyICCompiler::ComputeMonomorphic(kind(), name, map, code,
-                                                  extra_ic_state());
-    }
+    ConfigureVectorState(name, receiver_map(), code);
   } else {
     if (handler_to_overwrite >= 0) {
       handlers.Set(handler_to_overwrite, code);
@@ -819,13 +797,7 @@ bool IC::UpdatePolymorphicIC(Handle<Name> name, Handle<Code> code) {
       handlers.Add(code);
     }
 
-    if (UseVector()) {
-      ConfigureVectorState(name, &maps, &handlers);
-    } else {
-      ic = PropertyICCompiler::ComputePolymorphic(kind(), &maps, &handlers,
-                                                  number_of_valid_maps, name,
-                                                  extra_ic_state());
-    }
+    ConfigureVectorState(name, &maps, &handlers);
   }
 
   if (!UseVector()) set_target(*ic);
@@ -835,13 +807,7 @@ bool IC::UpdatePolymorphicIC(Handle<Name> name, Handle<Code> code) {
 
 void IC::UpdateMonomorphicIC(Handle<Code> handler, Handle<Name> name) {
   DCHECK(handler->is_handler());
-  if (UseVector()) {
-    ConfigureVectorState(name, receiver_map(), handler);
-  } else {
-    Handle<Code> ic = PropertyICCompiler::ComputeMonomorphic(
-        kind(), name, receiver_map(), handler, extra_ic_state());
-    set_target(*ic);
-  }
+  ConfigureVectorState(name, receiver_map(), handler);
 }
 
 
@@ -903,7 +869,6 @@ void IC::PatchCache(Handle<Name> name, Handle<Code> code) {
       break;
     case DEBUG_STUB:
       break;
-    case DEFAULT:
     case GENERIC:
       UNREACHABLE();
       break;
@@ -934,9 +899,7 @@ Handle<Code> KeyedLoadIC::initialize_stub_in_optimized_code(
   if (initialization_state != MEGAMORPHIC) {
     return KeyedLoadICStub(isolate, LoadICState(extra_state)).GetCode();
   }
-  return is_strong(LoadICState::GetLanguageMode(extra_state))
-             ? isolate->builtins()->KeyedLoadIC_Megamorphic_Strong()
-             : isolate->builtins()->KeyedLoadIC_Megamorphic();
+  return isolate->builtins()->KeyedLoadIC_Megamorphic();
 }
 
 
@@ -966,7 +929,7 @@ static Handle<Code> KeyedStoreICInitializeStubHelper(
 Handle<Code> KeyedStoreIC::initialize_stub(Isolate* isolate,
                                            LanguageMode language_mode,
                                            State initialization_state) {
-  if (FLAG_vector_stores) {
+  if (initialization_state != MEGAMORPHIC) {
     VectorKeyedStoreICTrampolineStub stub(isolate, StoreICState(language_mode));
     return stub.GetCode();
   }
@@ -978,13 +941,20 @@ Handle<Code> KeyedStoreIC::initialize_stub(Isolate* isolate,
 
 Handle<Code> KeyedStoreIC::initialize_stub_in_optimized_code(
     Isolate* isolate, LanguageMode language_mode, State initialization_state) {
-  if (FLAG_vector_stores && initialization_state != MEGAMORPHIC) {
+  if (initialization_state != MEGAMORPHIC) {
     VectorKeyedStoreICStub stub(isolate, StoreICState(language_mode));
     return stub.GetCode();
   }
 
   return KeyedStoreICInitializeStubHelper(isolate, language_mode,
                                           initialization_state);
+}
+
+
+Handle<Code> KeyedStoreIC::ChooseMegamorphicStub(Isolate* isolate,
+                                                 ExtraICState extra_state) {
+  LanguageMode mode = StoreICState::GetLanguageMode(extra_state);
+  return KeyedStoreICInitializeStubHelper(isolate, mode, MEGAMORPHIC);
 }
 
 
@@ -997,6 +967,44 @@ Handle<Code> LoadIC::megamorphic_stub() {
 Handle<Code> LoadIC::SimpleFieldLoad(FieldIndex index) {
   LoadFieldStub stub(isolate(), index);
   return stub.GetCode();
+}
+
+
+bool IsCompatibleReceiver(LookupIterator* lookup, Handle<Map> receiver_map) {
+  DCHECK(lookup->state() == LookupIterator::ACCESSOR);
+  Isolate* isolate = lookup->isolate();
+  Handle<Object> accessors = lookup->GetAccessors();
+  if (accessors->IsAccessorInfo()) {
+    Handle<AccessorInfo> info = Handle<AccessorInfo>::cast(accessors);
+    if (info->getter() != NULL &&
+        !AccessorInfo::IsCompatibleReceiverMap(isolate, info, receiver_map)) {
+      return false;
+    }
+  } else if (accessors->IsAccessorPair()) {
+    Handle<Object> getter(Handle<AccessorPair>::cast(accessors)->getter(),
+                          isolate);
+    if (!getter->IsJSFunction() && !getter->IsFunctionTemplateInfo())
+      return false;
+    Handle<JSObject> holder = lookup->GetHolder<JSObject>();
+    Handle<Object> receiver = lookup->GetReceiver();
+    if (holder->HasFastProperties()) {
+      if (getter->IsJSFunction()) {
+        Handle<JSFunction> function = Handle<JSFunction>::cast(getter);
+        if (!receiver->IsJSObject() && !function->shared()->IsBuiltin() &&
+            is_sloppy(function->shared()->language_mode())) {
+          // Calling sloppy non-builtins with a value as the receiver
+          // requires boxing.
+          return false;
+        }
+      }
+      CallOptimization call_optimization(getter);
+      if (call_optimization.is_simple_api_call() &&
+          !call_optimization.IsCompatibleReceiverMap(receiver_map, holder)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 
@@ -1014,7 +1022,7 @@ void LoadIC::UpdateCaches(LookupIterator* lookup) {
       lookup->state() == LookupIterator::ACCESS_CHECK) {
     code = slow_stub();
   } else if (!lookup->IsFound()) {
-    if (kind() == Code::LOAD_IC && !is_strong(language_mode())) {
+    if (kind() == Code::LOAD_IC) {
       code = NamedLoadHandlerCompiler::ComputeLoadNonexistent(lookup->name(),
                                                               receiver_map());
       // TODO(jkummerow/verwaest): Introduce a builtin that handles this case.
@@ -1024,35 +1032,20 @@ void LoadIC::UpdateCaches(LookupIterator* lookup) {
     }
   } else {
     if (lookup->state() == LookupIterator::ACCESSOR) {
-      Handle<Object> accessors = lookup->GetAccessors();
-      Handle<Map> map = receiver_map();
-      if (accessors->IsExecutableAccessorInfo()) {
-        Handle<ExecutableAccessorInfo> info =
-            Handle<ExecutableAccessorInfo>::cast(accessors);
-        if ((v8::ToCData<Address>(info->getter()) != 0) &&
-            !ExecutableAccessorInfo::IsCompatibleReceiverMap(isolate(), info,
-                                                             map)) {
-          TRACE_GENERIC_IC(isolate(), "LoadIC", "incompatible receiver type");
-          code = slow_stub();
-        }
-      } else if (accessors->IsAccessorPair()) {
-        Handle<Object> getter(Handle<AccessorPair>::cast(accessors)->getter(),
-                              isolate());
-        Handle<JSObject> holder = lookup->GetHolder<JSObject>();
-        Handle<Object> receiver = lookup->GetReceiver();
-        if (getter->IsJSFunction() && holder->HasFastProperties()) {
-          Handle<JSFunction> function = Handle<JSFunction>::cast(getter);
-          if (receiver->IsJSObject() || function->IsBuiltin() ||
-              !is_sloppy(function->shared()->language_mode())) {
-            CallOptimization call_optimization(function);
-            if (call_optimization.is_simple_api_call() &&
-                !call_optimization.IsCompatibleReceiver(receiver, holder)) {
-              TRACE_GENERIC_IC(isolate(), "LoadIC",
-                               "incompatible receiver type");
-              code = slow_stub();
-            }
-          }
-        }
+      if (!IsCompatibleReceiver(lookup, receiver_map())) {
+        TRACE_GENERIC_IC(isolate(), "LoadIC", "incompatible receiver type");
+        code = slow_stub();
+      }
+    } else if (lookup->state() == LookupIterator::INTERCEPTOR) {
+      // Perform a lookup behind the interceptor. Copy the LookupIterator since
+      // the original iterator will be used to fetch the value.
+      LookupIterator it = *lookup;
+      it.Next();
+      LookupForRead(&it);
+      if (it.state() == LookupIterator::ACCESSOR &&
+          !IsCompatibleReceiver(&it, receiver_map())) {
+        TRACE_GENERIC_IC(isolate(), "LoadIC", "incompatible receiver type");
+        code = slow_stub();
       }
     }
     if (code.is_null()) code = ComputeHandler(lookup);
@@ -1137,7 +1130,7 @@ Handle<Code> LoadIC::CompileHandler(LookupIterator* lookup,
   // Use specialized code for getting prototype of functions.
   if (receiver->IsJSFunction() &&
       Name::Equals(isolate()->factory()->prototype_string(), lookup->name()) &&
-      Handle<JSFunction>::cast(receiver)->should_have_prototype() &&
+      receiver->IsConstructor() &&
       !Handle<JSFunction>::cast(receiver)
            ->map()
            ->has_non_instance_prototype()) {
@@ -1178,50 +1171,39 @@ Handle<Code> LoadIC::CompileHandler(LookupIterator* lookup,
         return stub.GetCode();
       }
 
-      Handle<Object> accessors = lookup->GetAccessors();
-      if (accessors->IsExecutableAccessorInfo()) {
-        Handle<ExecutableAccessorInfo> info =
-            Handle<ExecutableAccessorInfo>::cast(accessors);
-        if (v8::ToCData<Address>(info->getter()) == 0) break;
-        if (!ExecutableAccessorInfo::IsCompatibleReceiverMap(isolate(), info,
-                                                             map)) {
-          // This case should be already handled in LoadIC::UpdateCaches.
-          UNREACHABLE();
-          break;
-        }
-        if (!holder->HasFastProperties()) break;
-        NamedLoadHandlerCompiler compiler(isolate(), map, holder, cache_holder);
-        return compiler.CompileLoadCallback(lookup->name(), info);
-      }
-      if (accessors->IsAccessorPair()) {
-        Handle<Object> getter(Handle<AccessorPair>::cast(accessors)->getter(),
-                              isolate());
-        if (!getter->IsJSFunction()) break;
-        if (!holder->HasFastProperties()) break;
-        // When debugging we need to go the slow path to flood the accessor.
-        if (GetSharedFunctionInfo()->HasDebugInfo()) break;
-        Handle<JSFunction> function = Handle<JSFunction>::cast(getter);
-        if (!receiver->IsJSObject() && !function->IsBuiltin() &&
-            is_sloppy(function->shared()->language_mode())) {
-          // Calling sloppy non-builtins with a value as the receiver
-          // requires boxing.
-          break;
-        }
-        CallOptimization call_optimization(function);
-        NamedLoadHandlerCompiler compiler(isolate(), map, holder, cache_holder);
-        if (call_optimization.is_simple_api_call()) {
-          if (call_optimization.IsCompatibleReceiver(receiver, holder)) {
+      if (IsCompatibleReceiver(lookup, map)) {
+        Handle<Object> accessors = lookup->GetAccessors();
+        if (accessors->IsAccessorPair()) {
+          if (!holder->HasFastProperties()) break;
+          // When debugging we need to go the slow path to flood the accessor.
+          if (GetSharedFunctionInfo()->HasDebugInfo()) break;
+          Handle<Object> getter(Handle<AccessorPair>::cast(accessors)->getter(),
+                                isolate());
+          CallOptimization call_optimization(getter);
+          NamedLoadHandlerCompiler compiler(isolate(), map, holder,
+                                            cache_holder);
+          if (call_optimization.is_simple_api_call()) {
             return compiler.CompileLoadCallback(
                 lookup->name(), call_optimization, lookup->GetAccessorIndex());
-          } else {
+          }
+          int expected_arguments = Handle<JSFunction>::cast(getter)
+                                       ->shared()
+                                       ->internal_formal_parameter_count();
+          return compiler.CompileLoadViaGetter(
+              lookup->name(), lookup->GetAccessorIndex(), expected_arguments);
+        } else if (accessors->IsAccessorInfo()) {
+          Handle<AccessorInfo> info = Handle<AccessorInfo>::cast(accessors);
+          if (v8::ToCData<Address>(info->getter()) == 0) break;
+          if (!AccessorInfo::IsCompatibleReceiverMap(isolate(), info, map)) {
             // This case should be already handled in LoadIC::UpdateCaches.
             UNREACHABLE();
+            break;
           }
+          if (!holder->HasFastProperties()) break;
+          NamedLoadHandlerCompiler compiler(isolate(), map, holder,
+                                            cache_holder);
+          return compiler.CompileLoadCallback(lookup->name(), info);
         }
-        int expected_arguments =
-            function->shared()->internal_formal_parameter_count();
-        return compiler.CompileLoadViaGetter(
-            lookup->name(), lookup->GetAccessorIndex(), expected_arguments);
       }
       break;
     }
@@ -1229,7 +1211,7 @@ Handle<Code> LoadIC::CompileHandler(LookupIterator* lookup,
     case LookupIterator::DATA: {
       if (lookup->is_dictionary_holder()) {
         if (kind() != Code::LOAD_IC) break;
-        if (holder->IsGlobalObject()) {
+        if (holder->IsJSGlobalObject()) {
           NamedLoadHandlerCompiler compiler(isolate(), map, holder,
                                             cache_holder);
           Handle<PropertyCell> cell = lookup->GetPropertyCell();
@@ -1247,9 +1229,7 @@ Handle<Code> LoadIC::CompileHandler(LookupIterator* lookup,
         // property must be found in the object for the stub to be
         // applicable.
         if (!receiver_is_holder) break;
-        return is_strong(language_mode())
-                   ? isolate()->builtins()->LoadIC_Normal_Strong()
-                   : isolate()->builtins()->LoadIC_Normal();
+        return isolate()->builtins()->LoadIC_Normal();
       }
 
       // -------------- Fields --------------
@@ -1359,8 +1339,7 @@ Handle<Code> KeyedLoadIC::LoadElementStub(Handle<HeapObject> receiver) {
 
   CodeHandleList handlers(target_receiver_maps.length());
   ElementHandlerCompiler compiler(isolate());
-  compiler.CompileElementHandlers(&target_receiver_maps, &handlers,
-                                  language_mode());
+  compiler.CompileElementHandlers(&target_receiver_maps, &handlers);
   ConfigureVectorState(Handle<Name>::null(), &target_receiver_maps, &handlers);
   return null_handle;
 }
@@ -1371,8 +1350,7 @@ MaybeHandle<Object> KeyedLoadIC::Load(Handle<Object> object,
   if (MigrateDeprecated(object)) {
     Handle<Object> result;
     ASSIGN_RETURN_ON_EXCEPTION(
-        isolate(), result,
-        Runtime::GetObjectProperty(isolate(), object, key, language_mode()),
+        isolate(), result, Runtime::GetObjectProperty(isolate(), object, key),
         Object);
     return result;
   }
@@ -1388,7 +1366,8 @@ MaybeHandle<Object> KeyedLoadIC::Load(Handle<Object> object,
     ASSIGN_RETURN_ON_EXCEPTION(isolate(), load_handle,
                                LoadIC::Load(object, Handle<Name>::cast(key)),
                                Object);
-  } else if (FLAG_use_ic && !object->IsAccessCheckNeeded()) {
+  } else if (FLAG_use_ic && !object->IsAccessCheckNeeded() &&
+             !object->IsJSValue()) {
     if (object->IsJSObject() || (object->IsString() && key->IsNumber())) {
       Handle<HeapObject> receiver = Handle<HeapObject>::cast(object);
       if (object->IsString() || key->IsSmi()) stub = LoadElementStub(receiver);
@@ -1409,10 +1388,9 @@ MaybeHandle<Object> KeyedLoadIC::Load(Handle<Object> object,
   if (!load_handle.is_null()) return load_handle;
 
   Handle<Object> result;
-  ASSIGN_RETURN_ON_EXCEPTION(
-      isolate(), result,
-      Runtime::GetObjectProperty(isolate(), object, key, language_mode()),
-      Object);
+  ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                             Runtime::GetObjectProperty(isolate(), object, key),
+                             Object);
   return result;
 }
 
@@ -1420,9 +1398,10 @@ MaybeHandle<Object> KeyedLoadIC::Load(Handle<Object> object,
 bool StoreIC::LookupForWrite(LookupIterator* it, Handle<Object> value,
                              JSReceiver::StoreFromKeyed store_mode) {
   // Disable ICs for non-JSObjects for now.
-  Handle<Object> receiver = it->GetReceiver();
-  if (!receiver->IsJSObject()) return false;
-  DCHECK(!Handle<JSObject>::cast(receiver)->map()->is_deprecated());
+  Handle<Object> object = it->GetReceiver();
+  if (!object->IsJSObject()) return false;
+  Handle<JSObject> receiver = Handle<JSObject>::cast(object);
+  DCHECK(!receiver->map()->is_deprecated());
 
   for (; it->IsFound(); it->Next()) {
     switch (it->state()) {
@@ -1461,19 +1440,24 @@ bool StoreIC::LookupForWrite(LookupIterator* it, Handle<Object> value,
         }
 
         // Receiver != holder.
-        PrototypeIterator iter(it->isolate(), receiver);
         if (receiver->IsJSGlobalProxy()) {
+          PrototypeIterator iter(it->isolate(), receiver);
           return it->GetHolder<Object>().is_identical_to(
               PrototypeIterator::GetCurrent(iter));
         }
 
-        it->PrepareTransitionToDataProperty(value, NONE, store_mode);
+        if (it->HolderIsReceiverOrHiddenPrototype()) return false;
+
+        if (it->ExtendingNonExtensible(receiver)) return false;
+        it->PrepareTransitionToDataProperty(receiver, value, NONE, store_mode);
         return it->IsCacheableTransition();
       }
     }
   }
 
-  it->PrepareTransitionToDataProperty(value, NONE, store_mode);
+  receiver = it->GetStoreTarget();
+  if (it->ExtendingNonExtensible(receiver)) return false;
+  it->PrepareTransitionToDataProperty(receiver, value, NONE, store_mode);
   return it->IsCacheableTransition();
 }
 
@@ -1502,10 +1486,10 @@ MaybeHandle<Object> StoreIC::Store(Handle<Object> object, Handle<Name> name,
     return result;
   }
 
-  if (object->IsGlobalObject() && name->IsString()) {
+  if (object->IsJSGlobalObject() && name->IsString()) {
     // Look up in script context table.
     Handle<String> str_name = Handle<String>::cast(name);
-    Handle<GlobalObject> global = Handle<GlobalObject>::cast(object);
+    Handle<JSGlobalObject> global = Handle<JSGlobalObject>::cast(object);
     Handle<ScriptContextTable> script_contexts(
         global->native_context()->script_context_table());
 
@@ -1518,7 +1502,7 @@ MaybeHandle<Object> StoreIC::Store(Handle<Object> object, Handle<Name> name,
       }
 
       Handle<Object> previous_value =
-          FixedArray::get(script_context, lookup_result.slot_index);
+          FixedArray::get(*script_context, lookup_result.slot_index, isolate());
 
       if (*previous_value == *isolate()->factory()->the_hole_value()) {
         // Do not install stubs and stay pre-monomorphic for
@@ -1567,26 +1551,23 @@ MaybeHandle<Object> StoreIC::Store(Handle<Object> object, Handle<Name> name,
   LookupIterator it(object, name);
   if (FLAG_use_ic) UpdateCaches(&it, value, store_mode);
 
-  // Set the property.
-  Handle<Object> result;
-  ASSIGN_RETURN_ON_EXCEPTION(
-      isolate(), result,
-      Object::SetProperty(&it, value, language_mode(), store_mode), Object);
-  return result;
+  MAYBE_RETURN_NULL(
+      Object::SetProperty(&it, value, language_mode(), store_mode));
+  return value;
 }
 
-
 Handle<Code> CallIC::initialize_stub(Isolate* isolate, int argc,
-                                     CallICState::CallType call_type) {
-  CallICTrampolineStub stub(isolate, CallICState(argc, call_type));
+                                     ConvertReceiverMode mode,
+                                     TailCallMode tail_call_mode) {
+  CallICTrampolineStub stub(isolate, CallICState(argc, mode, tail_call_mode));
   Handle<Code> code = stub.GetCode();
   return code;
 }
 
-
 Handle<Code> CallIC::initialize_stub_in_optimized_code(
-    Isolate* isolate, int argc, CallICState::CallType call_type) {
-  CallICStub stub(isolate, CallICState(argc, call_type));
+    Isolate* isolate, int argc, ConvertReceiverMode mode,
+    TailCallMode tail_call_mode) {
+  CallICStub stub(isolate, CallICState(argc, mode, tail_call_mode));
   Handle<Code> code = stub.GetCode();
   return code;
 }
@@ -1607,13 +1588,8 @@ Handle<Code> StoreIC::initialize_stub(Isolate* isolate,
   DCHECK(initialization_state == UNINITIALIZED ||
          initialization_state == PREMONOMORPHIC ||
          initialization_state == MEGAMORPHIC);
-  if (FLAG_vector_stores) {
-    VectorStoreICTrampolineStub stub(isolate, StoreICState(language_mode));
-    return stub.GetCode();
-  }
-
-  return StoreICInitializeStubHelper(
-      isolate, ComputeExtraICState(language_mode), initialization_state);
+  VectorStoreICTrampolineStub stub(isolate, StoreICState(language_mode));
+  return stub.GetCode();
 }
 
 
@@ -1622,7 +1598,7 @@ Handle<Code> StoreIC::initialize_stub_in_optimized_code(
   DCHECK(initialization_state == UNINITIALIZED ||
          initialization_state == PREMONOMORPHIC ||
          initialization_state == MEGAMORPHIC);
-  if (FLAG_vector_stores && initialization_state != MEGAMORPHIC) {
+  if (initialization_state != MEGAMORPHIC) {
     VectorStoreICStub stub(isolate, StoreICState(language_mode));
     return stub.GetCode();
   }
@@ -1669,11 +1645,7 @@ void StoreIC::UpdateCaches(LookupIterator* lookup, Handle<Object> value,
   if (state() == UNINITIALIZED) {
     // This is the first time we execute this inline cache. Set the target to
     // the pre monomorphic stub to delay setting the monomorphic state.
-    if (FLAG_vector_stores) {
-      ConfigureVectorState(PREMONOMORPHIC);
-    } else {
-      set_target(*pre_monomorphic_stub());
-    }
+    ConfigureVectorState(PREMONOMORPHIC);
     TRACE_IC("StoreIC", lookup->name());
     return;
   }
@@ -1690,7 +1662,7 @@ void StoreIC::UpdateCaches(LookupIterator* lookup, Handle<Object> value,
 
 
 static Handle<Code> PropertyCellStoreHandler(
-    Isolate* isolate, Handle<JSObject> receiver, Handle<GlobalObject> holder,
+    Isolate* isolate, Handle<JSObject> receiver, Handle<JSGlobalObject> holder,
     Handle<Name> name, Handle<PropertyCell> cell, PropertyCellType type) {
   auto constant_type = Nothing<PropertyCellConstantType>();
   if (type == PropertyCellType::kConstantType) {
@@ -1713,18 +1685,17 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
   // This is currently guaranteed by checks in StoreIC::Store.
   Handle<JSObject> receiver = Handle<JSObject>::cast(lookup->GetReceiver());
   Handle<JSObject> holder = lookup->GetHolder<JSObject>();
-  DCHECK(!receiver->IsAccessCheckNeeded() ||
-         isolate()->IsInternallyUsedPropertyName(lookup->name()));
+  DCHECK(!receiver->IsAccessCheckNeeded() || lookup->name()->IsPrivate());
 
   switch (lookup->state()) {
     case LookupIterator::TRANSITION: {
       auto store_target = lookup->GetStoreTarget();
-      if (store_target->IsGlobalObject()) {
+      if (store_target->IsJSGlobalObject()) {
         // TODO(dcarney): this currently just deopts. Use the transition cell.
         auto cell = isolate()->factory()->NewPropertyCell();
         cell->set_value(*value);
         auto code = PropertyCellStoreHandler(
-            isolate(), store_target, Handle<GlobalObject>::cast(store_target),
+            isolate(), store_target, Handle<JSGlobalObject>::cast(store_target),
             lookup->name(), cell, PropertyCellType::kConstant);
         cell->set_value(isolate()->heap()->the_hole_value());
         return code;
@@ -1753,9 +1724,8 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
         break;
       }
       Handle<Object> accessors = lookup->GetAccessors();
-      if (accessors->IsExecutableAccessorInfo()) {
-        Handle<ExecutableAccessorInfo> info =
-            Handle<ExecutableAccessorInfo>::cast(accessors);
+      if (accessors->IsAccessorInfo()) {
+        Handle<AccessorInfo> info = Handle<AccessorInfo>::cast(accessors);
         if (v8::ToCData<Address>(info->setter()) == 0) {
           TRACE_GENERIC_IC(isolate(), "StoreIC", "setter == 0");
           break;
@@ -1766,13 +1736,14 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
                            "special data property in prototype chain");
           break;
         }
-        if (!ExecutableAccessorInfo::IsCompatibleReceiverMap(isolate(), info,
-                                                             receiver_map())) {
+        if (!AccessorInfo::IsCompatibleReceiverMap(isolate(), info,
+                                                   receiver_map())) {
           TRACE_GENERIC_IC(isolate(), "StoreIC", "incompatible receiver type");
           break;
         }
         NamedStoreHandlerCompiler compiler(isolate(), receiver_map(), holder);
-        return compiler.CompileStoreCallback(receiver, lookup->name(), info);
+        return compiler.CompileStoreCallback(receiver, lookup->name(), info,
+                                             language_mode());
       } else if (accessors->IsAccessorPair()) {
         Handle<Object> setter(Handle<AccessorPair>::cast(accessors)->setter(),
                               isolate());
@@ -1780,8 +1751,6 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
           TRACE_GENERIC_IC(isolate(), "StoreIC", "setter not a function");
           break;
         }
-        // When debugging we need to go the slow path to flood the accessor.
-        if (GetSharedFunctionInfo()->HasDebugInfo()) break;
         Handle<JSFunction> function = Handle<JSFunction>::cast(setter);
         CallOptimization call_optimization(function);
         NamedStoreHandlerCompiler compiler(isolate(), receiver_map(), holder);
@@ -1802,14 +1771,14 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
 
     case LookupIterator::DATA: {
       if (lookup->is_dictionary_holder()) {
-        if (holder->IsGlobalObject()) {
+        if (holder->IsJSGlobalObject()) {
           DCHECK(holder.is_identical_to(receiver) ||
                  receiver->map()->prototype() == *holder);
           auto cell = lookup->GetPropertyCell();
           auto updated_type = PropertyCell::UpdatedType(
               cell, value, lookup->property_details());
           auto code = PropertyCellStoreHandler(
-              isolate(), receiver, Handle<GlobalObject>::cast(holder),
+              isolate(), receiver, Handle<JSGlobalObject>::cast(holder),
               lookup->name(), cell, updated_type);
           return code;
         }
@@ -1822,9 +1791,8 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
         bool use_stub = true;
         if (lookup->representation().IsHeapObject()) {
           // Only use a generic stub if no types need to be tracked.
-          Handle<HeapType> field_type = lookup->GetFieldType();
-          HeapType::Iterator<Map> it = field_type->Classes();
-          use_stub = it.Done();
+          Handle<FieldType> field_type = lookup->GetFieldType();
+          use_stub = !field_type->IsClass();
         }
         if (use_stub) {
           StoreFieldStub stub(isolate(), lookup->GetFieldIndex(),
@@ -1851,8 +1819,9 @@ Handle<Code> StoreIC::CompileHandler(LookupIterator* lookup,
 }
 
 
-Handle<Code> KeyedStoreIC::StoreElementStub(Handle<JSObject> receiver,
+Handle<Code> KeyedStoreIC::StoreElementStub(Handle<Map> receiver_map,
                                             KeyedAccessStoreMode store_mode) {
+  Handle<Code> null_handle;
   // Don't handle megamorphic property accesses for INTERCEPTORS or
   // ACCESSOR_CONSTANT
   // via megamorphic stubs, since they don't have a map in their relocation info
@@ -1862,23 +1831,24 @@ Handle<Code> KeyedStoreIC::StoreElementStub(Handle<JSObject> receiver,
     return megamorphic_stub();
   }
 
-  Handle<Map> receiver_map(receiver->map(), isolate());
   MapHandleList target_receiver_maps;
   TargetMaps(&target_receiver_maps);
   if (target_receiver_maps.length() == 0) {
     Handle<Map> monomorphic_map =
         ComputeTransitionedMap(receiver_map, store_mode);
     store_mode = GetNonTransitioningStoreMode(store_mode);
-    return PropertyICCompiler::ComputeKeyedStoreMonomorphic(
-        monomorphic_map, language_mode(), store_mode);
+    Handle<Code> handler =
+        PropertyICCompiler::ComputeKeyedStoreMonomorphicHandler(
+            monomorphic_map, language_mode(), store_mode);
+    ConfigureVectorState(Handle<Name>::null(), monomorphic_map, handler);
+    return null_handle;
   }
 
   // There are several special cases where an IC that is MONOMORPHIC can still
   // transition to a different GetNonTransitioningStoreMode IC that handles a
   // superset of the original IC. Handle those here if the receiver map hasn't
   // changed or it has transitioned to a more general kind.
-  KeyedAccessStoreMode old_store_mode =
-      KeyedStoreIC::GetKeyedAccessStoreMode(target()->extra_ic_state());
+  KeyedAccessStoreMode old_store_mode = GetKeyedAccessStoreMode();
   Handle<Map> previous_receiver_map = target_receiver_maps.at(0);
   if (state() == MONOMORPHIC) {
     Handle<Map> transitioned_receiver_map = receiver_map;
@@ -1894,9 +1864,13 @@ Handle<Code> KeyedStoreIC::StoreElementStub(Handle<JSObject> receiver,
       // if they at least come from the same origin for a transitioning store,
       // stay MONOMORPHIC and use the map for the most generic ElementsKind.
       store_mode = GetNonTransitioningStoreMode(store_mode);
-      return PropertyICCompiler::ComputeKeyedStoreMonomorphic(
-          transitioned_receiver_map, language_mode(), store_mode);
-    } else if (*previous_receiver_map == receiver->map() &&
+      Handle<Code> handler =
+          PropertyICCompiler::ComputeKeyedStoreMonomorphicHandler(
+              transitioned_receiver_map, language_mode(), store_mode);
+      ConfigureVectorState(Handle<Name>::null(), transitioned_receiver_map,
+                           handler);
+      return null_handle;
+    } else if (receiver_map.is_identical_to(previous_receiver_map) &&
                old_store_mode == STANDARD_STORE &&
                (store_mode == STORE_AND_GROW_NO_TRANSITION ||
                 store_mode == STORE_NO_TRANSITION_IGNORE_OUT_OF_BOUNDS ||
@@ -1904,8 +1878,11 @@ Handle<Code> KeyedStoreIC::StoreElementStub(Handle<JSObject> receiver,
       // A "normal" IC that handles stores can switch to a version that can
       // grow at the end of the array, handle OOB accesses or copy COW arrays
       // and still stay MONOMORPHIC.
-      return PropertyICCompiler::ComputeKeyedStoreMonomorphic(
-          receiver_map, language_mode(), store_mode);
+      Handle<Code> handler =
+          PropertyICCompiler::ComputeKeyedStoreMonomorphicHandler(
+              receiver_map, language_mode(), store_mode);
+      ConfigureVectorState(Handle<Name>::null(), receiver_map, handler);
+      return null_handle;
     }
   }
 
@@ -1964,30 +1941,33 @@ Handle<Code> KeyedStoreIC::StoreElementStub(Handle<JSObject> receiver,
     }
   }
 
-  return PropertyICCompiler::ComputeKeyedStorePolymorphic(
-      &target_receiver_maps, store_mode, language_mode());
+  MapHandleList transitioned_maps(target_receiver_maps.length());
+  CodeHandleList handlers(target_receiver_maps.length());
+  PropertyICCompiler::ComputeKeyedStorePolymorphicHandlers(
+      &target_receiver_maps, &transitioned_maps, &handlers, store_mode,
+      language_mode());
+  ConfigureVectorState(&target_receiver_maps, &transitioned_maps, &handlers);
+  return null_handle;
 }
 
 
 Handle<Map> KeyedStoreIC::ComputeTransitionedMap(
     Handle<Map> map, KeyedAccessStoreMode store_mode) {
   switch (store_mode) {
-    case STORE_TRANSITION_SMI_TO_OBJECT:
-    case STORE_TRANSITION_DOUBLE_TO_OBJECT:
-    case STORE_AND_GROW_TRANSITION_SMI_TO_OBJECT:
-    case STORE_AND_GROW_TRANSITION_DOUBLE_TO_OBJECT:
-      return Map::TransitionElementsTo(map, FAST_ELEMENTS);
-    case STORE_TRANSITION_SMI_TO_DOUBLE:
-    case STORE_AND_GROW_TRANSITION_SMI_TO_DOUBLE:
-      return Map::TransitionElementsTo(map, FAST_DOUBLE_ELEMENTS);
-    case STORE_TRANSITION_HOLEY_SMI_TO_OBJECT:
-    case STORE_TRANSITION_HOLEY_DOUBLE_TO_OBJECT:
-    case STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_OBJECT:
-    case STORE_AND_GROW_TRANSITION_HOLEY_DOUBLE_TO_OBJECT:
-      return Map::TransitionElementsTo(map, FAST_HOLEY_ELEMENTS);
-    case STORE_TRANSITION_HOLEY_SMI_TO_DOUBLE:
-    case STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_DOUBLE:
-      return Map::TransitionElementsTo(map, FAST_HOLEY_DOUBLE_ELEMENTS);
+    case STORE_TRANSITION_TO_OBJECT:
+    case STORE_AND_GROW_TRANSITION_TO_OBJECT: {
+      ElementsKind kind = IsFastHoleyElementsKind(map->elements_kind())
+                              ? FAST_HOLEY_ELEMENTS
+                              : FAST_ELEMENTS;
+      return Map::TransitionElementsTo(map, kind);
+    }
+    case STORE_TRANSITION_TO_DOUBLE:
+    case STORE_AND_GROW_TRANSITION_TO_DOUBLE: {
+      ElementsKind kind = IsFastHoleyElementsKind(map->elements_kind())
+                              ? FAST_HOLEY_DOUBLE_ELEMENTS
+                              : FAST_DOUBLE_ELEMENTS;
+      return Map::TransitionElementsTo(map, kind);
+    }
     case STORE_NO_TRANSITION_IGNORE_OUT_OF_BOUNDS:
       DCHECK(map->has_fixed_typed_array_elements());
     // Fall through
@@ -2023,26 +2003,14 @@ static KeyedAccessStoreMode GetStoreMode(Handle<JSObject> receiver,
     // Handle growing array in stub if necessary.
     if (receiver->HasFastSmiElements()) {
       if (value->IsHeapNumber()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_DOUBLE;
-        } else {
-          return STORE_AND_GROW_TRANSITION_SMI_TO_DOUBLE;
-        }
+        return STORE_AND_GROW_TRANSITION_TO_DOUBLE;
       }
       if (value->IsHeapObject()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_AND_GROW_TRANSITION_HOLEY_SMI_TO_OBJECT;
-        } else {
-          return STORE_AND_GROW_TRANSITION_SMI_TO_OBJECT;
-        }
+        return STORE_AND_GROW_TRANSITION_TO_OBJECT;
       }
     } else if (receiver->HasFastDoubleElements()) {
       if (!value->IsSmi() && !value->IsHeapNumber()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_AND_GROW_TRANSITION_HOLEY_DOUBLE_TO_OBJECT;
-        } else {
-          return STORE_AND_GROW_TRANSITION_DOUBLE_TO_OBJECT;
-        }
+        return STORE_AND_GROW_TRANSITION_TO_OBJECT;
       }
     }
     return STORE_AND_GROW_NO_TRANSITION;
@@ -2050,25 +2018,13 @@ static KeyedAccessStoreMode GetStoreMode(Handle<JSObject> receiver,
     // Handle only in-bounds elements accesses.
     if (receiver->HasFastSmiElements()) {
       if (value->IsHeapNumber()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_TRANSITION_HOLEY_SMI_TO_DOUBLE;
-        } else {
-          return STORE_TRANSITION_SMI_TO_DOUBLE;
-        }
+        return STORE_TRANSITION_TO_DOUBLE;
       } else if (value->IsHeapObject()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_TRANSITION_HOLEY_SMI_TO_OBJECT;
-        } else {
-          return STORE_TRANSITION_SMI_TO_OBJECT;
-        }
+        return STORE_TRANSITION_TO_OBJECT;
       }
     } else if (receiver->HasFastDoubleElements()) {
       if (!value->IsSmi() && !value->IsHeapNumber()) {
-        if (receiver->HasFastHoleyElements()) {
-          return STORE_TRANSITION_HOLEY_DOUBLE_TO_OBJECT;
-        } else {
-          return STORE_TRANSITION_DOUBLE_TO_OBJECT;
-        }
+        return STORE_TRANSITION_TO_OBJECT;
       }
     }
     if (!FLAG_trace_external_array_abuse &&
@@ -2115,20 +2071,11 @@ MaybeHandle<Object> KeyedStoreIC::Store(Handle<Object> object,
         StoreIC::Store(object, Handle<Name>::cast(key), value,
                        JSReceiver::MAY_BE_STORE_FROM_KEYED),
         Object);
-    if (FLAG_vector_stores) {
-      if (!is_vector_set()) {
-        ConfigureVectorState(MEGAMORPHIC);
-        TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
-                         "unhandled internalized string key");
-        TRACE_IC("StoreIC", key);
-      }
-    } else {
-      if (!is_target_set()) {
-        TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
-                         "unhandled internalized string key");
-        TRACE_IC("StoreIC", key);
-        set_target(*stub);
-      }
+    if (!is_vector_set()) {
+      ConfigureVectorState(MEGAMORPHIC);
+      TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
+                       "unhandled internalized string key");
+      TRACE_IC("StoreIC", key);
     }
     return store_handle;
   }
@@ -2148,25 +2095,46 @@ MaybeHandle<Object> KeyedStoreIC::Store(Handle<Object> object,
     }
   }
 
-  if (use_ic) {
-    if (object->IsJSObject()) {
-      Handle<JSObject> receiver = Handle<JSObject>::cast(object);
-      if (receiver->elements()->map() ==
-              isolate()->heap()->sloppy_arguments_elements_map() &&
-          !is_sloppy(language_mode())) {
-        TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "arguments receiver");
-      } else if (key->IsSmi() && Smi::cast(*key)->value() >= 0) {
+  Handle<Map> old_receiver_map;
+  bool sloppy_arguments_elements = false;
+  bool key_is_valid_index = false;
+  KeyedAccessStoreMode store_mode = STANDARD_STORE;
+  if (use_ic && object->IsJSObject()) {
+    Handle<JSObject> receiver = Handle<JSObject>::cast(object);
+    old_receiver_map = handle(receiver->map(), isolate());
+    sloppy_arguments_elements =
+        !is_sloppy(language_mode()) &&
+        receiver->elements()->map() ==
+            isolate()->heap()->sloppy_arguments_elements_map();
+    if (!sloppy_arguments_elements) {
+      key_is_valid_index = key->IsSmi() && Smi::cast(*key)->value() >= 0;
+      if (key_is_valid_index) {
         uint32_t index = static_cast<uint32_t>(Smi::cast(*key)->value());
+        store_mode = GetStoreMode(receiver, index, value);
+      }
+    }
+  }
+
+  DCHECK(store_handle.is_null());
+  ASSIGN_RETURN_ON_EXCEPTION(isolate(), store_handle,
+                             Runtime::SetObjectProperty(isolate(), object, key,
+                                                        value, language_mode()),
+                             Object);
+
+  if (use_ic) {
+    if (!old_receiver_map.is_null()) {
+      if (sloppy_arguments_elements) {
+        TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "arguments receiver");
+      } else if (key_is_valid_index) {
         // We should go generic if receiver isn't a dictionary, but our
         // prototype chain does have dictionary elements. This ensures that
         // other non-dictionary receivers in the polymorphic case benefit
         // from fast path keyed stores.
-        if (!receiver->map()->DictionaryElementsInPrototypeChainOnly()) {
-          KeyedAccessStoreMode store_mode =
-              GetStoreMode(receiver, index, value);
-          stub = StoreElementStub(receiver, store_mode);
+        if (!old_receiver_map->DictionaryElementsInPrototypeChainOnly()) {
+          stub = StoreElementStub(old_receiver_map, store_mode);
         } else {
-          TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "dictionary prototype");
+          TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
+                           "dictionary or proxy prototype");
         }
       } else {
         TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "non-smi-like key");
@@ -2176,35 +2144,12 @@ MaybeHandle<Object> KeyedStoreIC::Store(Handle<Object> object,
     }
   }
 
-  if (store_handle.is_null()) {
-    ASSIGN_RETURN_ON_EXCEPTION(
-        isolate(), store_handle,
-        Runtime::SetObjectProperty(isolate(), object, key, value,
-                                   language_mode()),
-        Object);
-  }
-
-  if (FLAG_vector_stores) {
-    if (!is_vector_set() || stub.is_null()) {
-      Code* megamorphic = *megamorphic_stub();
-      if (!stub.is_null() && (*stub == megamorphic || *stub == *slow_stub())) {
-        ConfigureVectorState(MEGAMORPHIC);
-        TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
-                         *stub == megamorphic ? "set generic" : "slow stub");
-      }
-    }
-  } else {
-    DCHECK(!is_target_set());
+  if (!is_vector_set() || stub.is_null()) {
     Code* megamorphic = *megamorphic_stub();
-    if (*stub == megamorphic) {
-      TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "set generic");
-    } else if (*stub == *slow_stub()) {
-      TRACE_GENERIC_IC(isolate(), "KeyedStoreIC", "slow stub");
-    }
-
-    DCHECK(!stub.is_null());
-    if (!AddressIsDeoptimizedCode()) {
-      set_target(*stub);
+    if (!stub.is_null() && (*stub == megamorphic || *stub == *slow_stub())) {
+      ConfigureVectorState(MEGAMORPHIC);
+      TRACE_GENERIC_IC(isolate(), "KeyedStoreIC",
+                       *stub == megamorphic ? "set generic" : "slow stub");
     }
   }
   TRACE_IC("StoreIC", key);
@@ -2213,73 +2158,7 @@ MaybeHandle<Object> KeyedStoreIC::Store(Handle<Object> object,
 }
 
 
-bool CallIC::DoCustomHandler(Handle<Object> function,
-                             const CallICState& callic_state) {
-  DCHECK(FLAG_use_ic && function->IsJSFunction());
-
-  // Are we the array function?
-  Handle<JSFunction> array_function =
-      Handle<JSFunction>(isolate()->native_context()->array_function());
-  if (array_function.is_identical_to(Handle<JSFunction>::cast(function))) {
-    // Alter the slot.
-    CallICNexus* nexus = casted_nexus<CallICNexus>();
-    nexus->ConfigureMonomorphicArray();
-
-    // Vector-based ICs have a different calling convention in optimized code
-    // than full code so the correct stub has to be chosen.
-    if (AddressIsOptimizedCode()) {
-      CallIC_ArrayStub stub(isolate(), callic_state);
-      set_target(*stub.GetCode());
-    } else {
-      CallIC_ArrayTrampolineStub stub(isolate(), callic_state);
-      set_target(*stub.GetCode());
-    }
-
-    Handle<String> name;
-    if (array_function->shared()->name()->IsString()) {
-      name = Handle<String>(String::cast(array_function->shared()->name()),
-                            isolate());
-    }
-    TRACE_IC("CallIC", name);
-    OnTypeFeedbackChanged(isolate(), get_host(), nexus->vector(), state(),
-                          MONOMORPHIC);
-    return true;
-  }
-  return false;
-}
-
-
-void CallIC::PatchMegamorphic(Handle<Object> function) {
-  CallICState callic_state(target()->extra_ic_state());
-
-  // We are going generic.
-  CallICNexus* nexus = casted_nexus<CallICNexus>();
-  nexus->ConfigureMegamorphic();
-
-  // Vector-based ICs have a different calling convention in optimized code
-  // than full code so the correct stub has to be chosen.
-  if (AddressIsOptimizedCode()) {
-    CallICStub stub(isolate(), callic_state);
-    set_target(*stub.GetCode());
-  } else {
-    CallICTrampolineStub stub(isolate(), callic_state);
-    set_target(*stub.GetCode());
-  }
-
-  Handle<Object> name = isolate()->factory()->empty_string();
-  if (function->IsJSFunction()) {
-    Handle<JSFunction> js_function = Handle<JSFunction>::cast(function);
-    name = handle(js_function->shared()->name(), isolate());
-  }
-
-  TRACE_IC("CallIC", name);
-  OnTypeFeedbackChanged(isolate(), get_host(), nexus->vector(), state(),
-                        GENERIC);
-}
-
-
 void CallIC::HandleMiss(Handle<Object> function) {
-  CallICState callic_state(target()->extra_ic_state());
   Handle<Object> name = isolate()->factory()->empty_string();
   CallICNexus* nexus = casted_nexus<CallICNexus>();
   Object* feedback = nexus->GetFeedback();
@@ -2287,25 +2166,28 @@ void CallIC::HandleMiss(Handle<Object> function) {
   // Hand-coded MISS handling is easier if CallIC slots don't contain smis.
   DCHECK(!feedback->IsSmi());
 
-  if (feedback->IsWeakCell() || !function->IsJSFunction()) {
+  if (feedback->IsWeakCell() || !function->IsJSFunction() ||
+      feedback->IsAllocationSite()) {
     // We are going generic.
     nexus->ConfigureMegamorphic();
   } else {
-    // The feedback is either uninitialized or an allocation site.
-    // It might be an allocation site because if we re-compile the full code
-    // to add deoptimization support, we call with the default call-ic, and
-    // merely need to patch the target to match the feedback.
-    // TODO(mvstanton): the better approach is to dispense with patching
-    // altogether, which is in progress.
-    DCHECK(feedback == *TypeFeedbackVector::UninitializedSentinel(isolate()) ||
-           feedback->IsAllocationSite());
+    DCHECK(feedback == *TypeFeedbackVector::UninitializedSentinel(isolate()));
+    Handle<JSFunction> js_function = Handle<JSFunction>::cast(function);
 
-    // Do we want to install a custom handler?
-    if (FLAG_use_ic && DoCustomHandler(function, callic_state)) {
-      return;
+    Handle<JSFunction> array_function =
+        Handle<JSFunction>(isolate()->native_context()->array_function());
+    if (array_function.is_identical_to(js_function)) {
+      // Alter the slot.
+      nexus->ConfigureMonomorphicArray();
+    } else if (js_function->context()->native_context() !=
+               *isolate()->native_context()) {
+      // Don't collect cross-native context feedback for the CallIC.
+      // TODO(bmeurer): We should collect the SharedFunctionInfo as
+      // feedback in this case instead.
+      nexus->ConfigureMegamorphic();
+    } else {
+      nexus->ConfigureMonomorphic(js_function);
     }
-
-    nexus->ConfigureMonomorphic(Handle<JSFunction>::cast(function));
   }
 
   if (function->IsJSFunction()) {
@@ -2313,8 +2195,7 @@ void CallIC::HandleMiss(Handle<Object> function) {
     name = handle(js_function->shared()->name(), isolate());
   }
 
-  IC::State new_state = nexus->StateFromFeedback();
-  OnTypeFeedbackChanged(isolate(), get_host(), *vector(), state(), new_state);
+  OnTypeFeedbackChanged(isolate(), get_host());
   TRACE_IC("CallIC", name);
 }
 
@@ -2329,12 +2210,13 @@ void CallIC::HandleMiss(Handle<Object> function) {
 // Used from ic-<arch>.cc.
 RUNTIME_FUNCTION(Runtime_CallIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   DCHECK(args.length() == 3);
   Handle<Object> function = args.at<Object>(0);
   Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(1);
   Handle<Smi> slot = args.at<Smi>(2);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
   CallICNexus nexus(vector, vector_slot);
   CallIC ic(isolate, &nexus);
   ic.HandleMiss(function);
@@ -2342,25 +2224,10 @@ RUNTIME_FUNCTION(Runtime_CallIC_Miss) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_CallIC_Customization_Miss) {
-  TimerEventScope<TimerEventIcMiss> timer(isolate);
-  HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
-  Handle<Object> function = args.at<Object>(0);
-  Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(1);
-  Handle<Smi> slot = args.at<Smi>(2);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
-  CallICNexus nexus(vector, vector_slot);
-  // A miss on a custom call ic always results in going megamorphic.
-  CallIC ic(isolate, &nexus);
-  ic.PatchMegamorphic(function);
-  return *function;
-}
-
-
 // Used from ic-<arch>.cc.
 RUNTIME_FUNCTION(Runtime_LoadIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Name> key = args.at<Name>(1);
@@ -2369,17 +2236,18 @@ RUNTIME_FUNCTION(Runtime_LoadIC_Miss) {
   DCHECK(args.length() == 4);
   Handle<Smi> slot = args.at<Smi>(2);
   Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(3);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
   // A monomorphic or polymorphic KeyedLoadIC with a string key can call the
   // LoadIC miss handler if the handler misses. Since the vector Nexus is
   // set up outside the IC, handle that here.
-  if (vector->GetKind(vector_slot) == Code::LOAD_IC) {
+  if (vector->GetKind(vector_slot) == FeedbackVectorSlotKind::LOAD_IC) {
     LoadICNexus nexus(vector, vector_slot);
     LoadIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result, ic.Load(receiver, key));
   } else {
-    DCHECK(vector->GetKind(vector_slot) == Code::KEYED_LOAD_IC);
+    DCHECK_EQ(FeedbackVectorSlotKind::KEYED_LOAD_IC,
+              vector->GetKind(vector_slot));
     KeyedLoadICNexus nexus(vector, vector_slot);
     KeyedLoadIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);
@@ -2392,6 +2260,7 @@ RUNTIME_FUNCTION(Runtime_LoadIC_Miss) {
 // Used from ic-<arch>.cc
 RUNTIME_FUNCTION(Runtime_KeyedLoadIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
@@ -2400,7 +2269,7 @@ RUNTIME_FUNCTION(Runtime_KeyedLoadIC_Miss) {
   DCHECK(args.length() == 4);
   Handle<Smi> slot = args.at<Smi>(2);
   Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(3);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
   KeyedLoadICNexus nexus(vector, vector_slot);
   KeyedLoadIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
   ic.UpdateState(receiver, key);
@@ -2411,6 +2280,7 @@ RUNTIME_FUNCTION(Runtime_KeyedLoadIC_Miss) {
 
 RUNTIME_FUNCTION(Runtime_KeyedLoadIC_MissFromStubFailure) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
@@ -2419,7 +2289,7 @@ RUNTIME_FUNCTION(Runtime_KeyedLoadIC_MissFromStubFailure) {
   DCHECK(args.length() == 4);
   Handle<Smi> slot = args.at<Smi>(2);
   Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(3);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
   KeyedLoadICNexus nexus(vector, vector_slot);
   KeyedLoadIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
   ic.UpdateState(receiver, key);
@@ -2432,34 +2302,28 @@ RUNTIME_FUNCTION(Runtime_KeyedLoadIC_MissFromStubFailure) {
 // Used from ic-<arch>.cc.
 RUNTIME_FUNCTION(Runtime_StoreIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Name> key = args.at<Name>(1);
   Handle<Object> value = args.at<Object>(2);
   Handle<Object> result;
 
-  if (FLAG_vector_stores) {
-    DCHECK(args.length() == 5);
-    Handle<Smi> slot = args.at<Smi>(3);
-    Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
-    FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
-    if (vector->GetKind(vector_slot) == Code::STORE_IC) {
-      StoreICNexus nexus(vector, vector_slot);
-      StoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
-      ic.UpdateState(receiver, key);
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                         ic.Store(receiver, key, value));
-    } else {
-      DCHECK(vector->GetKind(vector_slot) == Code::KEYED_STORE_IC);
-      KeyedStoreICNexus nexus(vector, vector_slot);
-      KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
-      ic.UpdateState(receiver, key);
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                         ic.Store(receiver, key, value));
-    }
+  DCHECK(args.length() == 5 || args.length() == 6);
+  Handle<Smi> slot = args.at<Smi>(3);
+  Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
+  if (vector->GetKind(vector_slot) == FeedbackVectorSlotKind::STORE_IC) {
+    StoreICNexus nexus(vector, vector_slot);
+    StoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
+    ic.UpdateState(receiver, key);
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                       ic.Store(receiver, key, value));
   } else {
-    DCHECK(args.length() == 3);
-    StoreIC ic(IC::NO_EXTRA_FRAME, isolate);
+    DCHECK_EQ(FeedbackVectorSlotKind::KEYED_STORE_IC,
+              vector->GetKind(vector_slot));
+    KeyedStoreICNexus nexus(vector, vector_slot);
+    KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
                                        ic.Store(receiver, key, value));
@@ -2470,34 +2334,48 @@ RUNTIME_FUNCTION(Runtime_StoreIC_Miss) {
 
 RUNTIME_FUNCTION(Runtime_StoreIC_MissFromStubFailure) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Name> key = args.at<Name>(1);
   Handle<Object> value = args.at<Object>(2);
   Handle<Object> result;
 
-  if (FLAG_vector_stores) {
-    DCHECK(args.length() == 5 || args.length() == 6);
-    Handle<Smi> slot = args.at<Smi>(3);
-    Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
-    FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
-    if (vector->GetKind(vector_slot) == Code::STORE_IC) {
-      StoreICNexus nexus(vector, vector_slot);
-      StoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
-      ic.UpdateState(receiver, key);
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                         ic.Store(receiver, key, value));
+  int length = args.length();
+  DCHECK(length == 5 || length == 6);
+  // We might have slot and vector, for a normal miss (slot(3), vector(4)).
+  // Or, map and vector for a transitioning store miss (map(3), vector(4)).
+  // In this case, we need to recover the slot from a virtual register.
+  // If length == 6, then a map is included (map(3), slot(4), vector(5)).
+  Handle<Smi> slot;
+  Handle<TypeFeedbackVector> vector;
+  if (length == 5) {
+    if (args.at<Object>(3)->IsMap()) {
+      vector = args.at<TypeFeedbackVector>(4);
+      slot = handle(
+          *reinterpret_cast<Smi**>(isolate->virtual_slot_register_address()),
+          isolate);
     } else {
-      DCHECK(vector->GetKind(vector_slot) == Code::KEYED_STORE_IC);
-      KeyedStoreICNexus nexus(vector, vector_slot);
-      KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
-      ic.UpdateState(receiver, key);
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                         ic.Store(receiver, key, value));
+      vector = args.at<TypeFeedbackVector>(4);
+      slot = args.at<Smi>(3);
     }
   } else {
-    DCHECK(args.length() == 3 || args.length() == 4);
-    StoreIC ic(IC::EXTRA_CALL_FRAME, isolate);
+    vector = args.at<TypeFeedbackVector>(5);
+    slot = args.at<Smi>(4);
+  }
+
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
+  if (vector->GetKind(vector_slot) == FeedbackVectorSlotKind::STORE_IC) {
+    StoreICNexus nexus(vector, vector_slot);
+    StoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
+    ic.UpdateState(receiver, key);
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                       ic.Store(receiver, key, value));
+  } else {
+    DCHECK_EQ(FeedbackVectorSlotKind::KEYED_STORE_IC,
+              vector->GetKind(vector_slot));
+    KeyedStoreICNexus nexus(vector, vector_slot);
+    KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
                                        ic.Store(receiver, key, value));
@@ -2509,70 +2387,58 @@ RUNTIME_FUNCTION(Runtime_StoreIC_MissFromStubFailure) {
 // Used from ic-<arch>.cc.
 RUNTIME_FUNCTION(Runtime_KeyedStoreIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
   Handle<Object> value = args.at<Object>(2);
   Handle<Object> result;
 
-  if (FLAG_vector_stores) {
-    DCHECK(args.length() == 5);
-    Handle<Smi> slot = args.at<Smi>(3);
-    Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
-    FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
-    KeyedStoreICNexus nexus(vector, vector_slot);
-    KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
-    ic.UpdateState(receiver, key);
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                       ic.Store(receiver, key, value));
-  } else {
-    DCHECK(args.length() == 3);
-    KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate);
-    ic.UpdateState(receiver, key);
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                       ic.Store(receiver, key, value));
-  }
+  DCHECK(args.length() == 5);
+  Handle<Smi> slot = args.at<Smi>(3);
+  Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
+  KeyedStoreICNexus nexus(vector, vector_slot);
+  KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
+  ic.UpdateState(receiver, key);
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                     ic.Store(receiver, key, value));
   return *result;
 }
 
 
 RUNTIME_FUNCTION(Runtime_KeyedStoreIC_MissFromStubFailure) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
   Handle<Object> value = args.at<Object>(2);
   Handle<Object> result;
 
-  if (FLAG_vector_stores) {
-    DCHECK(args.length() == 5);
-    Handle<Smi> slot = args.at<Smi>(3);
-    Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
-    FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
-    KeyedStoreICNexus nexus(vector, vector_slot);
-    KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
-    ic.UpdateState(receiver, key);
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                       ic.Store(receiver, key, value));
-  } else {
-    DCHECK(args.length() == 3);
-    KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate);
-    ic.UpdateState(receiver, key);
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-        isolate, result, ic.Store(receiver, key, args.at<Object>(2)));
-  }
+  DCHECK(args.length() == 5);
+  Handle<Smi> slot = args.at<Smi>(3);
+  Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(4);
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
+  KeyedStoreICNexus nexus(vector, vector_slot);
+  KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
+  ic.UpdateState(receiver, key);
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                     ic.Store(receiver, key, value));
   return *result;
 }
 
 
 RUNTIME_FUNCTION(Runtime_StoreIC_Slow) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
-  StoreIC ic(IC::NO_EXTRA_FRAME, isolate);
+  DCHECK(args.length() == 5);
   Handle<Object> object = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
   Handle<Object> value = args.at<Object>(2);
-  LanguageMode language_mode = ic.language_mode();
+  LanguageMode language_mode;
+  StoreICNexus nexus(isolate);
+  StoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
+  language_mode = ic.language_mode();
   Handle<Object> result;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, result,
@@ -2583,12 +2449,14 @@ RUNTIME_FUNCTION(Runtime_StoreIC_Slow) {
 
 RUNTIME_FUNCTION(Runtime_KeyedStoreIC_Slow) {
   HandleScope scope(isolate);
-  DCHECK(args.length() == 3);
-  KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate);
+  DCHECK(args.length() == 5);
   Handle<Object> object = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
   Handle<Object> value = args.at<Object>(2);
-  LanguageMode language_mode = ic.language_mode();
+  LanguageMode language_mode;
+  KeyedStoreICNexus nexus(isolate);
+  KeyedStoreIC ic(IC::NO_EXTRA_FRAME, isolate, &nexus);
+  language_mode = ic.language_mode();
   Handle<Object> result;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, result,
@@ -2599,15 +2467,19 @@ RUNTIME_FUNCTION(Runtime_KeyedStoreIC_Slow) {
 
 RUNTIME_FUNCTION(Runtime_ElementsTransitionAndStoreIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
-  DCHECK(args.length() == 4);
-  KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate);
+  // Length == 5 or 6, depending on whether the vector slot
+  // is passed in a virtual register or not.
+  DCHECK(args.length() == 5 || args.length() == 6);
   Handle<Object> object = args.at<Object>(0);
   Handle<Object> key = args.at<Object>(1);
   Handle<Object> value = args.at<Object>(2);
   Handle<Map> map = args.at<Map>(3);
-
-  LanguageMode language_mode = ic.language_mode();
+  LanguageMode language_mode;
+  KeyedStoreICNexus nexus(isolate);
+  KeyedStoreIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
+  language_mode = ic.language_mode();
   if (object->IsJSObject()) {
     JSObject::TransitionElementsKind(Handle<JSObject>::cast(object),
                                      map->elements_kind());
@@ -2626,13 +2498,59 @@ MaybeHandle<Object> BinaryOpIC::Transition(
   BinaryOpICState state(isolate(), target()->extra_ic_state());
 
   // Compute the actual result using the builtin for the binary operation.
-  Object* builtin = isolate()->js_builtins_object()->javascript_builtin(
-      TokenToJSBuiltin(state.op(), state.strength()));
-  Handle<JSFunction> function = handle(JSFunction::cast(builtin), isolate());
   Handle<Object> result;
-  ASSIGN_RETURN_ON_EXCEPTION(
-      isolate(), result, Execution::Call(isolate(), function, left, 1, &right),
-      Object);
+  switch (state.op()) {
+    default:
+      UNREACHABLE();
+    case Token::ADD:
+      ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                                 Object::Add(isolate(), left, right), Object);
+      break;
+    case Token::SUB:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::Subtract(isolate(), left, right), Object);
+      break;
+    case Token::MUL:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::Multiply(isolate(), left, right), Object);
+      break;
+    case Token::DIV:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::Divide(isolate(), left, right), Object);
+      break;
+    case Token::MOD:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::Modulus(isolate(), left, right), Object);
+      break;
+    case Token::BIT_OR:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::BitwiseOr(isolate(), left, right), Object);
+      break;
+    case Token::BIT_AND:
+      ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                                 Object::BitwiseAnd(isolate(), left, right),
+                                 Object);
+      break;
+    case Token::BIT_XOR:
+      ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                                 Object::BitwiseXor(isolate(), left, right),
+                                 Object);
+      break;
+    case Token::SAR:
+      ASSIGN_RETURN_ON_EXCEPTION(isolate(), result,
+                                 Object::ShiftRight(isolate(), left, right),
+                                 Object);
+      break;
+    case Token::SHR:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::ShiftRightLogical(isolate(), left, right),
+          Object);
+      break;
+    case Token::SHL:
+      ASSIGN_RETURN_ON_EXCEPTION(
+          isolate(), result, Object::ShiftLeft(isolate(), left, right), Object);
+      break;
+  }
 
   // Do not try to update the target if the code was marked for lazy
   // deoptimization. (Since we do not relocate addresses in these
@@ -2686,9 +2604,9 @@ MaybeHandle<Object> BinaryOpIC::Transition(
 
   // Patch the inlined smi code as necessary.
   if (!old_state.UseInlinedSmiCode() && state.UseInlinedSmiCode()) {
-    PatchInlinedSmiCode(address(), ENABLE_INLINED_SMI_CHECK);
+    PatchInlinedSmiCode(isolate(), address(), ENABLE_INLINED_SMI_CHECK);
   } else if (old_state.UseInlinedSmiCode() && !state.UseInlinedSmiCode()) {
-    PatchInlinedSmiCode(address(), DISABLE_INLINED_SMI_CHECK);
+    PatchInlinedSmiCode(isolate(), address(), DISABLE_INLINED_SMI_CHECK);
   }
 
   return result;
@@ -2697,6 +2615,7 @@ MaybeHandle<Object> BinaryOpIC::Transition(
 
 RUNTIME_FUNCTION(Runtime_BinaryOpIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
   Handle<Object> left = args.at<Object>(BinaryOpICStub::kLeft);
@@ -2712,6 +2631,7 @@ RUNTIME_FUNCTION(Runtime_BinaryOpIC_Miss) {
 
 RUNTIME_FUNCTION(Runtime_BinaryOpIC_MissWithAllocationSite) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   DCHECK_EQ(3, args.length());
   Handle<AllocationSite> allocation_site =
@@ -2726,10 +2646,8 @@ RUNTIME_FUNCTION(Runtime_BinaryOpIC_MissWithAllocationSite) {
   return *result;
 }
 
-
-Code* CompareIC::GetRawUninitialized(Isolate* isolate, Token::Value op,
-                                     Strength strength) {
-  CompareICStub stub(isolate, op, strength, CompareICState::UNINITIALIZED,
+Code* CompareIC::GetRawUninitialized(Isolate* isolate, Token::Value op) {
+  CompareICStub stub(isolate, op, CompareICState::UNINITIALIZED,
                      CompareICState::UNINITIALIZED,
                      CompareICState::UNINITIALIZED);
   Code* code = NULL;
@@ -2737,10 +2655,8 @@ Code* CompareIC::GetRawUninitialized(Isolate* isolate, Token::Value op,
   return code;
 }
 
-
-Handle<Code> CompareIC::GetUninitialized(Isolate* isolate, Token::Value op,
-                                         Strength strength) {
-  CompareICStub stub(isolate, op, strength, CompareICState::UNINITIALIZED,
+Handle<Code> CompareIC::GetUninitialized(Isolate* isolate, Token::Value op) {
+  CompareICStub stub(isolate, op, CompareICState::UNINITIALIZED,
                      CompareICState::UNINITIALIZED,
                      CompareICState::UNINITIALIZED);
   return stub.GetCode();
@@ -2757,11 +2673,10 @@ Code* CompareIC::UpdateCaches(Handle<Object> x, Handle<Object> y) {
   CompareICState::State state = CompareICState::TargetState(
       old_stub.state(), old_stub.left(), old_stub.right(), op_,
       HasInlinedSmiCode(address()), x, y);
-  CompareICStub stub(isolate(), op_, old_stub.strength(), new_left, new_right,
-                     state);
-  if (state == CompareICState::KNOWN_OBJECT) {
+  CompareICStub stub(isolate(), op_, new_left, new_right, state);
+  if (state == CompareICState::KNOWN_RECEIVER) {
     stub.set_known_map(
-        Handle<Map>(Handle<JSObject>::cast(x)->map(), isolate()));
+        Handle<Map>(Handle<JSReceiver>::cast(x)->map(), isolate()));
   }
   Handle<Code> new_target = stub.GetCode();
   set_target(*new_target);
@@ -2781,7 +2696,7 @@ Code* CompareIC::UpdateCaches(Handle<Object> x, Handle<Object> y) {
 
   // Activate inlined smi code.
   if (old_stub.state() == CompareICState::UNINITIALIZED) {
-    PatchInlinedSmiCode(address(), ENABLE_INLINED_SMI_CHECK);
+    PatchInlinedSmiCode(isolate(), address(), ENABLE_INLINED_SMI_CHECK);
   }
 
   return *new_target;
@@ -2791,6 +2706,7 @@ Code* CompareIC::UpdateCaches(Handle<Object> x, Handle<Object> y) {
 // Used from CompareICStub::GenerateMiss in code-stubs-<arch>.cc.
 RUNTIME_FUNCTION(Runtime_CompareIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   DCHECK(args.length() == 3);
   CompareIC ic(isolate, static_cast<Token::Value>(args.smi_at(2)));
@@ -2813,15 +2729,6 @@ void CompareNilIC::Clear(Address address, Code* target, Address constant_pool) {
 }
 
 
-Handle<Object> CompareNilIC::DoCompareNilSlow(Isolate* isolate, NilValue nil,
-                                              Handle<Object> object) {
-  if (object->IsNull() || object->IsUndefined()) {
-    return handle(Smi::FromInt(true), isolate);
-  }
-  return handle(Smi::FromInt(object->IsUndetectableObject()), isolate);
-}
-
-
 Handle<Object> CompareNilIC::CompareNil(Handle<Object> object) {
   ExtraICState extra_ic_state = target()->extra_ic_state();
 
@@ -2832,8 +2739,6 @@ Handle<Object> CompareNilIC::CompareNil(Handle<Object> object) {
   bool already_monomorphic = stub.IsMonomorphic();
 
   stub.UpdateStatus(object);
-
-  NilValue nil = stub.nil_value();
 
   // Find or create the specialized stub to support the new set of types.
   Handle<Code> code;
@@ -2846,12 +2751,13 @@ Handle<Object> CompareNilIC::CompareNil(Handle<Object> object) {
     code = stub.GetCode();
   }
   set_target(*code);
-  return DoCompareNilSlow(isolate(), nil, object);
+  return isolate()->factory()->ToBoolean(object->IsUndetectableObject());
 }
 
 
 RUNTIME_FUNCTION(Runtime_CompareNilIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> object = args.at<Object>(0);
   CompareNilIC ic(isolate);
@@ -2866,53 +2772,18 @@ RUNTIME_FUNCTION(Runtime_Unreachable) {
 }
 
 
-Builtins::JavaScript BinaryOpIC::TokenToJSBuiltin(Token::Value op,
-                                                  Strength strength) {
-  if (is_strong(strength)) {
-    switch (op) {
-      default: UNREACHABLE();
-      case Token::ADD: return Builtins::ADD_STRONG;
-      case Token::SUB: return Builtins::SUB_STRONG;
-      case Token::MUL: return Builtins::MUL_STRONG;
-      case Token::DIV: return Builtins::DIV_STRONG;
-      case Token::MOD: return Builtins::MOD_STRONG;
-      case Token::BIT_OR: return Builtins::BIT_OR_STRONG;
-      case Token::BIT_AND: return Builtins::BIT_AND_STRONG;
-      case Token::BIT_XOR: return Builtins::BIT_XOR_STRONG;
-      case Token::SAR: return Builtins::SAR_STRONG;
-      case Token::SHR: return Builtins::SHR_STRONG;
-      case Token::SHL: return Builtins::SHL_STRONG;
-    }
-  } else {
-    switch (op) {
-      default: UNREACHABLE();
-      case Token::ADD: return Builtins::ADD;
-      case Token::SUB: return Builtins::SUB;
-      case Token::MUL: return Builtins::MUL;
-      case Token::DIV: return Builtins::DIV;
-      case Token::MOD: return Builtins::MOD;
-      case Token::BIT_OR: return Builtins::BIT_OR;
-      case Token::BIT_AND: return Builtins::BIT_AND;
-      case Token::BIT_XOR: return Builtins::BIT_XOR;
-      case Token::SAR: return Builtins::SAR;
-      case Token::SHR: return Builtins::SHR;
-      case Token::SHL: return Builtins::SHL;
-    }
-  }
-}
-
-
 Handle<Object> ToBooleanIC::ToBoolean(Handle<Object> object) {
   ToBooleanStub stub(isolate(), target()->extra_ic_state());
   bool to_boolean_value = stub.UpdateStatus(object);
   Handle<Code> code = stub.GetCode();
   set_target(*code);
-  return handle(Smi::FromInt(to_boolean_value ? 1 : 0), isolate());
+  return isolate()->factory()->ToBoolean(to_boolean_value);
 }
 
 
 RUNTIME_FUNCTION(Runtime_ToBooleanIC_Miss) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   DCHECK(args.length() == 1);
   HandleScope scope(isolate);
   Handle<Object> object = args.at<Object>(0);
@@ -2927,13 +2798,13 @@ RUNTIME_FUNCTION(Runtime_StoreCallbackProperty) {
   Handle<HeapObject> callback_or_cell = args.at<HeapObject>(2);
   Handle<Name> name = args.at<Name>(3);
   Handle<Object> value = args.at<Object>(4);
+  CONVERT_LANGUAGE_MODE_ARG_CHECKED(language_mode, 5);
   HandleScope scope(isolate);
 
-  Handle<ExecutableAccessorInfo> callback(
+  Handle<AccessorInfo> callback(
       callback_or_cell->IsWeakCell()
-          ? ExecutableAccessorInfo::cast(
-                WeakCell::cast(*callback_or_cell)->value())
-          : ExecutableAccessorInfo::cast(*callback_or_cell));
+          ? AccessorInfo::cast(WeakCell::cast(*callback_or_cell)->value())
+          : AccessorInfo::cast(*callback_or_cell));
 
   DCHECK(callback->IsCompatibleReceiver(*receiver));
 
@@ -2943,8 +2814,10 @@ RUNTIME_FUNCTION(Runtime_StoreCallbackProperty) {
   DCHECK(fun != NULL);
 
   LOG(isolate, ApiNamedPropertyAccess("store", *receiver, *name));
+  Object::ShouldThrow should_throw =
+      is_sloppy(language_mode) ? Object::DONT_THROW : Object::THROW_ON_ERROR;
   PropertyCallbackArguments custom_args(isolate, callback->data(), *receiver,
-                                        *holder);
+                                        *holder, should_throw);
   custom_args.Call(fun, v8::Utils::ToLocal(name), v8::Utils::ToLocal(value));
   RETURN_FAILURE_IF_SCHEDULED_EXCEPTION(isolate);
   return *value;
@@ -3023,9 +2896,10 @@ RUNTIME_FUNCTION(Runtime_StorePropertyWithInterceptor) {
   Handle<Object> value = args.at<Object>(2);
 #ifdef DEBUG
   PrototypeIterator iter(isolate, receiver,
-                         PrototypeIterator::START_AT_RECEIVER);
+                         PrototypeIterator::START_AT_RECEIVER,
+                         PrototypeIterator::END_AT_NON_HIDDEN);
   bool found = false;
-  for (; !iter.IsAtEnd(PrototypeIterator::END_AT_NON_HIDDEN); iter.Advance()) {
+  for (; !iter.IsAtEnd(); iter.Advance()) {
     Handle<Object> current = PrototypeIterator::GetCurrent(iter);
     if (current->IsJSObject() &&
         Handle<JSObject>::cast(current)->HasNamedInterceptor()) {
@@ -3050,17 +2924,15 @@ RUNTIME_FUNCTION(Runtime_LoadElementWithInterceptor) {
   DCHECK(args.smi_at(1) >= 0);
   uint32_t index = args.smi_at(1);
   Handle<Object> result;
-  // TODO(conradw): Investigate strong mode semantics for this.
-  LanguageMode language_mode = SLOPPY;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, result,
-      Object::GetElement(isolate, receiver, index, language_mode));
+      isolate, result, Object::GetElement(isolate, receiver, index));
   return *result;
 }
 
 
 RUNTIME_FUNCTION(Runtime_LoadIC_MissFromStubFailure) {
   TimerEventScope<TimerEventIcMiss> timer(isolate);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8"), "V8.IcMiss");
   HandleScope scope(isolate);
   Handle<Object> receiver = args.at<Object>(0);
   Handle<Name> key = args.at<Name>(1);
@@ -3069,17 +2941,18 @@ RUNTIME_FUNCTION(Runtime_LoadIC_MissFromStubFailure) {
   DCHECK(args.length() == 4);
   Handle<Smi> slot = args.at<Smi>(2);
   Handle<TypeFeedbackVector> vector = args.at<TypeFeedbackVector>(3);
-  FeedbackVectorICSlot vector_slot = vector->ToICSlot(slot->value());
+  FeedbackVectorSlot vector_slot = vector->ToSlot(slot->value());
   // A monomorphic or polymorphic KeyedLoadIC with a string key can call the
   // LoadIC miss handler if the handler misses. Since the vector Nexus is
   // set up outside the IC, handle that here.
-  if (vector->GetKind(vector_slot) == Code::LOAD_IC) {
+  if (vector->GetKind(vector_slot) == FeedbackVectorSlotKind::LOAD_IC) {
     LoadICNexus nexus(vector, vector_slot);
     LoadIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result, ic.Load(receiver, key));
   } else {
-    DCHECK(vector->GetKind(vector_slot) == Code::KEYED_LOAD_IC);
+    DCHECK_EQ(FeedbackVectorSlotKind::KEYED_LOAD_IC,
+              vector->GetKind(vector_slot));
     KeyedLoadICNexus nexus(vector, vector_slot);
     KeyedLoadIC ic(IC::EXTRA_CALL_FRAME, isolate, &nexus);
     ic.UpdateState(receiver, key);

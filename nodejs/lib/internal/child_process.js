@@ -533,7 +533,7 @@ function setupChannel(target, channel) {
     assert(this.connected || this._channel);
 
     if (message === undefined)
-      throw new TypeError('message cannot be undefined');
+      throw new TypeError('"message" argument cannot be undefined');
 
     // Support legacy function signature
     if (typeof options === 'boolean') {
@@ -560,7 +560,7 @@ function setupChannel(target, channel) {
       } else if (handle instanceof UDP) {
         message.type = 'dgram.Native';
       } else {
-        throw new TypeError("This handle type can't be sent");
+        throw new TypeError('This handle type can\'t be sent');
       }
 
       // Queue-up message and handle if we haven't received ACK yet.

@@ -3,23 +3,23 @@
 
 'use strict';
 
+const internalUtil = require('internal/util');
+internalUtil.assertCrypto(exports);
+
 exports.DEFAULT_ENCODING = 'buffer';
 
-try {
-  var binding = process.binding('crypto');
-  var randomBytes = binding.randomBytes;
-  var getCiphers = binding.getCiphers;
-  var getHashes = binding.getHashes;
-  var getCurves = binding.getCurves;
-} catch (e) {
-  throw new Error('node.js not compiled with openssl crypto support.');
-}
+const binding = process.binding('crypto');
+const randomBytes = binding.randomBytes;
+const getCiphers = binding.getCiphers;
+const getHashes = binding.getHashes;
+const getCurves = binding.getCurves;
+const getFipsCrypto = binding.getFipsCrypto;
+const setFipsCrypto = binding.setFipsCrypto;
 
 const Buffer = require('buffer').Buffer;
 const constants = require('constants');
 const stream = require('stream');
 const util = require('util');
-const internalUtil = require('internal/util');
 const LazyTransform = require('internal/streams/lazy_transform');
 
 const DH_GENERATOR = 2;
@@ -28,11 +28,10 @@ const DH_GENERATOR = 2;
 // any explicit encoding in older versions of node, and we don't want
 // to break them unnecessarily.
 function toBuf(str, encoding) {
-  encoding = encoding || 'binary';
   if (typeof str === 'string') {
-    if (encoding === 'buffer')
-      encoding = 'binary';
-    str = new Buffer(str, encoding);
+    if (encoding === 'buffer' || !encoding)
+      encoding = 'utf8';
+    return Buffer.from(str, encoding);
   }
   return str;
 }
@@ -65,8 +64,6 @@ Hash.prototype._flush = function(callback) {
 
 Hash.prototype.update = function(data, encoding) {
   encoding = encoding || exports.DEFAULT_ENCODING;
-  if (encoding === 'buffer' && typeof data === 'string')
-    encoding = 'binary';
   this._handle.update(data, encoding);
   return this;
 };
@@ -486,7 +483,7 @@ DiffieHellman.prototype.setPrivateKey = function(key, encoding) {
 
 function ECDH(curve) {
   if (typeof curve !== 'string')
-    throw new TypeError('curve should be a string');
+    throw new TypeError('"curve" argument should be a string');
 
   this._handle = new binding.ECDH(curve);
 }
@@ -531,6 +528,11 @@ ECDH.prototype.getPublicKey = function getPublicKey(encoding, format) {
 };
 
 
+const pbkdf2DeprecationWarning =
+    internalUtil.deprecate(() => {}, 'crypto.pbkdf2 without specifying' +
+      ' a digest is deprecated. Please specify a digest');
+
+
 exports.pbkdf2 = function(password,
                           salt,
                           iterations,
@@ -540,6 +542,7 @@ exports.pbkdf2 = function(password,
   if (typeof digest === 'function') {
     callback = digest;
     digest = undefined;
+    pbkdf2DeprecationWarning();
   }
 
   if (typeof callback !== 'function')
@@ -550,6 +553,10 @@ exports.pbkdf2 = function(password,
 
 
 exports.pbkdf2Sync = function(password, salt, iterations, keylen, digest) {
+  if (typeof digest === 'undefined') {
+    digest = undefined;
+    pbkdf2DeprecationWarning();
+  }
   return pbkdf2(password, salt, iterations, keylen, digest);
 };
 
@@ -582,32 +589,30 @@ exports.Certificate = Certificate;
 function Certificate() {
   if (!(this instanceof Certificate))
     return new Certificate();
-
-  this._handle = new binding.Certificate();
 }
 
 
 Certificate.prototype.verifySpkac = function(object) {
-  return this._handle.verifySpkac(object);
+  return binding.certVerifySpkac(object);
 };
 
 
 Certificate.prototype.exportPublicKey = function(object, encoding) {
-  return this._handle.exportPublicKey(toBuf(object, encoding));
+  return binding.certExportPublicKey(toBuf(object, encoding));
 };
 
 
 Certificate.prototype.exportChallenge = function(object, encoding) {
-  return this._handle.exportChallenge(toBuf(object, encoding));
+  return binding.certExportChallenge(toBuf(object, encoding));
 };
 
 
 exports.setEngine = function setEngine(id, flags) {
   if (typeof id !== 'string')
-    throw new TypeError('id should be a string');
+    throw new TypeError('"id" argument should be a string');
 
   if (flags && typeof flags !== 'number')
-    throw new TypeError('flags should be a number, if present');
+    throw new TypeError('"flags" argument should be a number, if present');
   flags = flags >>> 0;
 
   // Use provided engine for everything by default
@@ -635,6 +640,10 @@ exports.getCurves = function() {
   return filterDuplicates(getCurves());
 };
 
+Object.defineProperty(exports, 'fips', {
+  get: getFipsCrypto,
+  set: setFipsCrypto
+});
 
 function filterDuplicates(names) {
   // Drop all-caps names in favor of their lowercase aliases,

@@ -102,6 +102,7 @@ import math
 import optparse
 import os
 import re
+import subprocess
 import sys
 
 from testrunner.local import commands
@@ -120,6 +121,7 @@ SUPPORTED_ARCHS = ["arm",
 GENERIC_RESULTS_RE = re.compile(r"^RESULT ([^:]+): ([^=]+)= ([^ ]+) ([^ ]*)$")
 RESULT_STDDEV_RE = re.compile(r"^\{([^\}]+)\}$")
 RESULT_LIST_RE = re.compile(r"^\[([^\]]+)\]$")
+TOOLS_BASE = os.path.abspath(os.path.dirname(__file__))
 
 
 def LoadAndroidBuildTools(path):  # pragma: no cover
@@ -348,9 +350,9 @@ class Node(object):
 
 class DefaultSentinel(Node):
   """Fake parent node with all default values."""
-  def __init__(self):
+  def __init__(self, binary = "d8"):
     super(DefaultSentinel, self).__init__()
-    self.binary = "d8"
+    self.binary = binary
     self.run_count = 10
     self.timeout = 60
     self.path = []
@@ -457,7 +459,10 @@ class RunnableConfig(GraphConfig):
 
   def GetCommand(self, shell_dir, extra_flags=None):
     # TODO(machenbach): This requires +.exe if run on windows.
+    extra_flags = extra_flags or []
     cmd = [os.path.join(shell_dir, self.binary)]
+    if self.binary != 'd8' and '--prof' in extra_flags:
+      print "Profiler supported only on a benchmark run with d8"
     return cmd + self.GetCommandFlags(extra_flags=extra_flags)
 
   def Run(self, runner, trybot):
@@ -538,11 +543,10 @@ def MakeGraphConfig(suite, arch, parent):
     raise Exception("Invalid suite configuration.")
 
 
-def BuildGraphConfigs(suite, arch, parent=None):
+def BuildGraphConfigs(suite, arch, parent):
   """Builds a tree structure of graph objects that corresponds to the suite
   configuration.
   """
-  parent = parent or DefaultSentinel()
 
   # TODO(machenbach): Implement notion of cpu type?
   if arch not in suite.get("archs", SUPPORTED_ARCHS):
@@ -640,6 +644,13 @@ class DesktopPlatform(Platform):
       print output.stderr
     if output.timed_out:
       print ">>> Test timed out after %ss." % runnable.timeout
+    if '--prof' in self.extra_flags:
+      os_prefix = {"linux": "linux", "macos": "mac"}.get(utils.GuessOS())
+      if os_prefix:
+        tick_tools = os.path.join(TOOLS_BASE, "%s-tick-processor" % os_prefix)
+        subprocess.check_call(tick_tools + " --only-summary", shell=True)
+      else:  # pragma: no cover
+        print "Profiler option currently supported on Linux and Mac OS."
     return output.stdout
 
 
@@ -717,6 +728,12 @@ class AndroidPlatform(Platform):  # pragma: no cover
     self._PushFile(
         shell_dir,
         "snapshot_blob.bin",
+        target_dir,
+        skip_if_missing=True,
+    )
+    self._PushFile(
+        shell_dir,
+        "snapshot_blob_ignition.bin",
         target_dir,
         skip_if_missing=True,
     )
@@ -801,6 +818,11 @@ def Main(args):
                     default="out")
   parser.add_option("--outdir-no-patch",
                     help="Base directory with compile output without patch")
+  parser.add_option("--binary-override-path",
+                    help="JavaScript engine binary. By default, d8 under "
+                    "architecture-specific build dir. "
+                    "Not supported in conjunction with outdir-no-patch.")
+
   (options, args) = parser.parse_args(args)
 
   if len(args) == 0:  # pragma: no cover
@@ -831,7 +853,18 @@ def Main(args):
   else:
     build_config = "%s.release" % options.arch
 
-  options.shell_dir = os.path.join(workspace, options.outdir, build_config)
+  if options.binary_override_path == None:
+    options.shell_dir = os.path.join(workspace, options.outdir, build_config)
+    default_binary_name = "d8"
+  else:
+    if not os.path.isfile(options.binary_override_path):
+      print "binary-override-path must be a file name"
+      return 1
+    if options.outdir_no_patch:
+      print "specify either binary-override-path or outdir-no-patch"
+      return 1
+    options.shell_dir = os.path.dirname(options.binary_override_path)
+    default_binary_name = os.path.basename(options.binary_override_path)
 
   if options.outdir_no_patch:
     options.shell_dir_no_patch = os.path.join(
@@ -860,7 +893,8 @@ def Main(args):
     platform.PreExecution()
 
     # Build the graph/trace tree structure.
-    root = BuildGraphConfigs(suite, options.arch)
+    default_parent = DefaultSentinel(default_binary_name)
+    root = BuildGraphConfigs(suite, options.arch, default_parent)
 
     # Callback to be called on each node on traversal.
     def NodeCB(node):

@@ -42,13 +42,11 @@ static void ProbeTable(Isolate* isolate, MacroAssembler* masm,
   scratch = no_reg;
 
   // Multiply by 3 because there are 3 fields per entry (name, code, map).
-  __ dsll(offset_scratch, offset, 1);
-  __ Daddu(offset_scratch, offset_scratch, offset);
+  __ Dlsa(offset_scratch, offset, offset, 1);
 
   // Calculate the base address of the entry.
   __ li(base_addr, Operand(key_offset));
-  __ dsll(at, offset_scratch, kPointerSizeLog2);
-  __ Daddu(base_addr, base_addr, at);
+  __ Dlsa(base_addr, base_addr, offset_scratch, kPointerSizeLog2);
 
   // Check that the key in the entry matches the name.
   __ ld(at, MemOperand(base_addr, 0));
@@ -119,8 +117,14 @@ void StubCache::GenerateProbe(MacroAssembler* masm, Code::Kind ic_kind,
   // extra3 don't conflict with the vector and slot registers, which need
   // to be preserved for a handler call or miss.
   if (IC::ICUseVector(ic_kind)) {
-    Register vector = LoadWithVectorDescriptor::VectorRegister();
-    Register slot = LoadWithVectorDescriptor::SlotRegister();
+    Register vector, slot;
+    if (ic_kind == Code::STORE_IC || ic_kind == Code::KEYED_STORE_IC) {
+      vector = VectorStoreICDescriptor::VectorRegister();
+      slot = VectorStoreICDescriptor::SlotRegister();
+    } else {
+      vector = LoadWithVectorDescriptor::VectorRegister();
+      slot = LoadWithVectorDescriptor::SlotRegister();
+    }
     DCHECK(!AreAliased(vector, slot, scratch, extra, extra2, extra3));
   }
 #endif

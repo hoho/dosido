@@ -1,10 +1,9 @@
 'use strict';
-var common = require('../common');
-var assert = require('assert');
+const common = require('../common');
+const assert = require('assert');
+const crypto = require('crypto');
 
-try {
-  var crypto = require('crypto');
-} catch (e) {
+if (!common.hasCrypto) {
   console.log('1..0 # Skipped: node compiled without OpenSSL.');
   return;
 }
@@ -50,5 +49,5 @@ for (const name in hashes) {
   group2.generateKeys();
   var key1 = group1.computeSecret(group2.getPublicKey());
   var key2 = group2.computeSecret(group1.getPublicKey());
-  assert.deepEqual(key1, key2);
+  assert.deepStrictEqual(key1, key2);
 }

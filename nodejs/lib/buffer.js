@@ -2,7 +2,6 @@
 'use strict';
 
 const binding = process.binding('buffer');
-const internalUtil = require('internal/util');
 const bindingObj = {};
 
 exports.Buffer = Buffer;
@@ -10,26 +9,73 @@ exports.SlowBuffer = SlowBuffer;
 exports.INSPECT_MAX_BYTES = 50;
 exports.kMaxLength = binding.kMaxLength;
 
+const kFromErrorMsg = 'First argument must be a string, Buffer, ' +
+                      'ArrayBuffer, Array, or array-like object.';
 
 Buffer.poolSize = 8 * 1024;
 var poolSize, poolOffset, allocPool;
 
 
 binding.setupBufferJS(Buffer.prototype, bindingObj);
+
+const swap16n = binding.swap16;
+const swap32n = binding.swap32;
+
+function swap(b, n, m) {
+  const i = b[n];
+  b[n] = b[m];
+  b[m] = i;
+}
+
+Buffer.prototype.swap16 = function swap16() {
+  // For Buffer.length < 512, it's generally faster to
+  // do the swap in javascript. For larger buffers,
+  // dropping down to the native code is faster.
+  const len = this.length;
+  if (len % 2 !== 0)
+    throw new RangeError('Buffer size must be a multiple of 16-bits');
+  if (len < 512) {
+    for (var i = 0; i < len; i += 2)
+      swap(this, i, i + 1);
+    return this;
+  }
+  return swap16n.apply(this);
+};
+
+Buffer.prototype.swap32 = function swap32() {
+  // For Buffer.length < 1024, it's generally faster to
+  // do the swap in javascript. For larger buffers,
+  // dropping down to the native code is faster.
+  const len = this.length;
+  if (len % 4 !== 0)
+    throw new RangeError('Buffer size must be a multiple of 32-bits');
+  if (len < 1024) {
+    for (var i = 0; i < len; i += 4) {
+      swap(this, i, i + 3);
+      swap(this, i + 1, i + 2);
+    }
+    return this;
+  }
+  return swap32n.apply(this);
+};
+
 const flags = bindingObj.flags;
 const kNoZeroFill = 0;
 
-function createBuffer(size) {
-  const ui8 = new Uint8Array(size);
-  Object.setPrototypeOf(ui8, Buffer.prototype);
-  return ui8;
+function createBuffer(size, noZeroFill) {
+  flags[kNoZeroFill] = noZeroFill ? 1 : 0;
+  try {
+    const ui8 = new Uint8Array(size);
+    Object.setPrototypeOf(ui8, Buffer.prototype);
+    return ui8;
+  } finally {
+    flags[kNoZeroFill] = 0;
+  }
 }
 
 function createPool() {
   poolSize = Buffer.poolSize;
-  if (poolSize > 0)
-    flags[kNoZeroFill] = 1;
-  allocPool = createBuffer(poolSize);
+  allocPool = createBuffer(poolSize, true);
   poolOffset = 0;
 }
 createPool();
@@ -43,35 +89,109 @@ function alignPool() {
   }
 }
 
-
-function Buffer(arg, encoding) {
+/**
+ * The Buffer() construtor is "soft deprecated" ... that is, it is deprecated
+ * in the documentation and should not be used moving forward. Rather,
+ * developers should use one of the three new factory APIs: Buffer.from(),
+ * Buffer.allocUnsafe() or Buffer.alloc() based on their specific needs. There
+ * is no hard deprecation because of the extent to which the Buffer constructor
+ * is used in the ecosystem currently -- a hard deprecation would introduce too
+ * much breakage at this time. It's not likely that the Buffer constructors
+ * would ever actually be removed.
+ **/
+function Buffer(arg, encodingOrOffset, length) {
   // Common case.
   if (typeof arg === 'number') {
-    // If less than zero, or NaN.
-    if (arg < 0 || arg !== arg)
-      arg = 0;
-    return allocate(arg);
+    if (typeof encodingOrOffset === 'string') {
+      throw new Error(
+        'If encoding is specified then the first argument must be a string'
+      );
+    }
+    return Buffer.allocUnsafe(arg);
   }
-
-  // Slightly less common case.
-  if (typeof arg === 'string') {
-    return fromString(arg, encoding);
-  }
-
-  // Unusual.
-  return fromObject(arg);
+  return Buffer.from(arg, encodingOrOffset, length);
 }
+
+/**
+ * Functionally equivalent to Buffer(arg, encoding) but throws a TypeError
+ * if value is a number.
+ * Buffer.from(str[, encoding])
+ * Buffer.from(array)
+ * Buffer.from(buffer)
+ * Buffer.from(arrayBuffer[, byteOffset[, length]])
+ **/
+Buffer.from = function(value, encodingOrOffset, length) {
+  if (typeof value === 'number')
+    throw new TypeError('"value" argument must not be a number');
+
+  if (value instanceof ArrayBuffer)
+    return fromArrayBuffer(value, encodingOrOffset, length);
+
+  if (typeof value === 'string')
+    return fromString(value, encodingOrOffset);
+
+  return fromObject(value);
+};
 
 Object.setPrototypeOf(Buffer.prototype, Uint8Array.prototype);
 Object.setPrototypeOf(Buffer, Uint8Array);
 
+function assertSize(size) {
+  if (typeof size !== 'number') {
+    const err = new TypeError('"size" argument must be a number');
+    // The following hides the 'assertSize' method from the
+    // callstack. This is done simply to hide the internal
+    // details of the implementation from bleeding out to users.
+    Error.captureStackTrace(err, assertSize);
+    throw err;
+  }
+}
 
+/**
+ * Creates a new filled Buffer instance.
+ * alloc(size[, fill[, encoding]])
+ **/
+Buffer.alloc = function(size, fill, encoding) {
+  assertSize(size);
+  if (size <= 0)
+    return createBuffer(size);
+  if (fill !== undefined) {
+    // Since we are filling anyway, don't zero fill initially.
+    // Only pay attention to encoding if it's a string. This
+    // prevents accidentally sending in a number that would
+    // be interpretted as a start offset.
+    return typeof encoding === 'string' ?
+        createBuffer(size, true).fill(fill, encoding) :
+        createBuffer(size, true).fill(fill);
+  }
+  return createBuffer(size);
+};
+
+/**
+ * Equivalent to Buffer(num), by default creates a non-zero-filled Buffer
+ * instance. If `--zero-fill-buffers` is set, will zero-fill the buffer.
+ **/
+Buffer.allocUnsafe = function(size) {
+  assertSize(size);
+  return allocate(size);
+};
+
+/**
+ * Equivalent to SlowBuffer(num), by default creates a non-zero-filled
+ * Buffer instance that is not allocated off the pre-initialized pool.
+ * If `--zero-fill-buffers` is set, will zero-fill the buffer.
+ **/
+Buffer.allocUnsafeSlow = function(size) {
+  assertSize(size);
+  return createBuffer(size, true);
+};
+
+// If --zero-fill-buffers command line argument is set, a zero-filled
+// buffer is returned.
 function SlowBuffer(length) {
   if (+length != length)
     length = 0;
-  if (length > 0)
-    flags[kNoZeroFill] = 1;
-  return createBuffer(+length);
+  return createBuffer(+length, true);
 }
 
 Object.setPrototypeOf(SlowBuffer.prototype, Uint8Array.prototype);
@@ -93,9 +213,7 @@ function allocate(size) {
     // Even though this is checked above, the conditional is a safety net and
     // sanity check to prevent any subsequent typed array allocation from not
     // being zero filled.
-    if (size > 0)
-      flags[kNoZeroFill] = 1;
-    return createBuffer(size);
+    return createBuffer(size, true);
   }
 }
 
@@ -104,7 +222,14 @@ function fromString(string, encoding) {
   if (typeof encoding !== 'string' || encoding === '')
     encoding = 'utf8';
 
+  if (!Buffer.isEncoding(encoding))
+    throw new TypeError('"encoding" must be a valid string encoding');
+
   var length = byteLength(string, encoding);
+
+  if (length === 0)
+    return Buffer.alloc(0);
+
   if (length >= (Buffer.poolSize >>> 1))
     return binding.createFromString(string, encoding);
 
@@ -120,9 +245,19 @@ function fromString(string, encoding) {
 function fromArrayLike(obj) {
   const length = obj.length;
   const b = allocate(length);
-  for (let i = 0; i < length; i++)
+  for (var i = 0; i < length; i++)
     b[i] = obj[i] & 255;
   return b;
+}
+
+function fromArrayBuffer(obj, byteOffset, length) {
+  byteOffset >>>= 0;
+
+  if (typeof length === 'undefined')
+    return binding.createFromArrayBuffer(obj, byteOffset);
+
+  length >>>= 0;
+  return binding.createFromArrayBuffer(obj, byteOffset, length);
 }
 
 function fromObject(obj) {
@@ -136,26 +271,20 @@ function fromObject(obj) {
     return b;
   }
 
-  if (obj == null) {
-    throw new TypeError('must start with number, buffer, array or string');
-  }
-
-  if (obj instanceof ArrayBuffer) {
-    return binding.createFromArrayBuffer(obj);
-  }
-
-  if (obj.buffer instanceof ArrayBuffer || 'length' in obj) {
-    if (typeof obj.length !== 'number' || obj.length !== obj.length) {
-      return allocate(0);
+  if (obj) {
+    if (obj.buffer instanceof ArrayBuffer || 'length' in obj) {
+      if (typeof obj.length !== 'number' || obj.length !== obj.length) {
+        return allocate(0);
+      }
+      return fromArrayLike(obj);
     }
-    return fromArrayLike(obj);
+
+    if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
+      return fromArrayLike(obj.data);
+    }
   }
 
-  if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
-    return fromArrayLike(obj.data);
-  }
-
-  throw new TypeError('must start with number, buffer, array or string');
+  throw new TypeError(kFromErrorMsg);
 }
 
 
@@ -207,26 +336,27 @@ Buffer.isEncoding = function(encoding) {
 
 
 Buffer.concat = function(list, length) {
+  var i;
   if (!Array.isArray(list))
-    throw new TypeError('list argument must be an Array of Buffers');
+    throw new TypeError('"list" argument must be an Array of Buffers');
 
   if (list.length === 0)
-    return new Buffer(0);
+    return Buffer.alloc(0);
 
   if (length === undefined) {
     length = 0;
-    for (let i = 0; i < list.length; i++)
+    for (i = 0; i < list.length; i++)
       length += list[i].length;
   } else {
     length = length >>> 0;
   }
 
-  var buffer = new Buffer(length);
+  var buffer = Buffer.allocUnsafe(length);
   var pos = 0;
-  for (let i = 0; i < list.length; i++) {
+  for (i = 0; i < list.length; i++) {
     var buf = list[i];
     if (!Buffer.isBuffer(buf))
-      throw new TypeError('list argument must be an Array of Buffers');
+      throw new TypeError('"list" argument must be an Array of Buffers');
     buf.copy(buffer, pos);
     pos += buf.length;
   }
@@ -248,11 +378,12 @@ function base64ByteLength(str, bytes) {
 
 
 function byteLength(string, encoding) {
-  if (string instanceof Buffer)
-    return string.length;
+  if (typeof string !== 'string') {
+    if (ArrayBuffer.isView(string) || string instanceof ArrayBuffer)
+      return string.byteLength;
 
-  if (typeof string !== 'string')
     string = '' + string;
+  }
 
   var len = string.length;
   if (len === 0)
@@ -394,7 +525,7 @@ Buffer.prototype.toString = function() {
     result = slowToString.apply(this, arguments);
   }
   if (result === undefined)
-    throw new Error('toString failed');
+    throw new Error('"toString()" failed');
   return result;
 };
 
@@ -422,18 +553,88 @@ Buffer.prototype.inspect = function inspect() {
   return '<' + this.constructor.name + ' ' + str + '>';
 };
 
+Buffer.prototype.compare = function compare(target,
+                                            start,
+                                            end,
+                                            thisStart,
+                                            thisEnd) {
 
-Buffer.prototype.compare = function compare(b) {
-  if (!(b instanceof Buffer))
+  if (!(target instanceof Buffer))
     throw new TypeError('Argument must be a Buffer');
 
-  if (this === b)
-    return 0;
+  if (start === undefined)
+    start = 0;
+  if (end === undefined)
+    end = target ? target.length : 0;
+  if (thisStart === undefined)
+    thisStart = 0;
+  if (thisEnd === undefined)
+    thisEnd = this.length;
 
-  return binding.compare(this, b);
+  if (start < 0 ||
+      end > target.length ||
+      thisStart < 0 ||
+      thisEnd > this.length) {
+    throw new RangeError('out of range index');
+  }
+
+  if (thisStart >= thisEnd && start >= end)
+    return 0;
+  if (thisStart >= thisEnd)
+    return -1;
+  if (start >= end)
+    return 1;
+
+  start >>>= 0;
+  end >>>= 0;
+  thisStart >>>= 0;
+  thisEnd >>>= 0;
+
+  return binding.compareOffset(this, target, start, thisStart, end, thisEnd);
 };
 
-function slowIndexOf(buffer, val, byteOffset, encoding) {
+
+// Finds either the first index of `val` in `buffer` at offset >= `byteOffset`,
+// OR the last index of `val` in `buffer` at offset <= `byteOffset`.
+//
+// Arguments:
+// - buffer - a Buffer to search
+// - val - a string, Buffer, or number
+// - byteOffset - an index into `buffer`; will be clamped to an int32
+// - encoding - an optional encoding, relevant is val is a string
+// - dir - true for indexOf, false for lastIndexOf
+function bidirectionalIndexOf(buffer, val, byteOffset, encoding, dir) {
+  if (typeof byteOffset === 'string') {
+    encoding = byteOffset;
+    byteOffset = undefined;
+  } else if (byteOffset > 0x7fffffff) {
+    byteOffset = 0x7fffffff;
+  } else if (byteOffset < -0x80000000) {
+    byteOffset = -0x80000000;
+  }
+  byteOffset = +byteOffset;  // Coerce to Number.
+  if (isNaN(byteOffset)) {
+    // If the offset is undefined, null, NaN, "foo", etc, search whole buffer.
+    byteOffset = dir ? 0 : (buffer.length - 1);
+  }
+  dir = !!dir;  // Cast to bool.
+
+  if (typeof val === 'string') {
+    if (encoding === undefined) {
+      return binding.indexOfString(buffer, val, byteOffset, encoding, dir);
+    }
+    return slowIndexOf(buffer, val, byteOffset, encoding, dir);
+  } else if (val instanceof Buffer) {
+    return binding.indexOfBuffer(buffer, val, byteOffset, encoding, dir);
+  } else if (typeof val === 'number') {
+    return binding.indexOfNumber(buffer, val, byteOffset, dir);
+  }
+
+  throw new TypeError('"val" argument must be string, number or Buffer');
+}
+
+
+function slowIndexOf(buffer, val, byteOffset, encoding, dir) {
   var loweredCase = false;
   for (;;) {
     switch (encoding) {
@@ -444,13 +645,13 @@ function slowIndexOf(buffer, val, byteOffset, encoding) {
       case 'utf16le':
       case 'utf-16le':
       case 'binary':
-        return binding.indexOfString(buffer, val, byteOffset, encoding);
+        return binding.indexOfString(buffer, val, byteOffset, encoding, dir);
 
       case 'base64':
       case 'ascii':
       case 'hex':
         return binding.indexOfBuffer(
-            buffer, Buffer(val, encoding), byteOffset, encoding);
+            buffer, Buffer.from(val, encoding), byteOffset, encoding, dir);
 
       default:
         if (loweredCase) {
@@ -463,29 +664,14 @@ function slowIndexOf(buffer, val, byteOffset, encoding) {
   }
 }
 
+
 Buffer.prototype.indexOf = function indexOf(val, byteOffset, encoding) {
-  if (typeof byteOffset === 'string') {
-    encoding = byteOffset;
-    byteOffset = 0;
-  } else if (byteOffset > 0x7fffffff) {
-    byteOffset = 0x7fffffff;
-  } else if (byteOffset < -0x80000000) {
-    byteOffset = -0x80000000;
-  }
-  byteOffset >>= 0;
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, true);
+};
 
-  if (typeof val === 'string') {
-    if (encoding === undefined) {
-      return binding.indexOfString(this, val, byteOffset, encoding);
-    }
-    return slowIndexOf(this, val, byteOffset, encoding);
-  } else if (val instanceof Buffer) {
-    return binding.indexOfBuffer(this, val, byteOffset, encoding);
-  } else if (typeof val === 'number') {
-    return binding.indexOfNumber(this, val, byteOffset);
-  }
 
-  throw new TypeError('val must be string, number or Buffer');
+Buffer.prototype.lastIndexOf = function lastIndexOf(val, byteOffset, encoding) {
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, false);
 };
 
 
@@ -514,6 +700,11 @@ Buffer.prototype.fill = function fill(val, start, end, encoding) {
       if (code < 256)
         val = code;
     }
+    if (val.length === 0) {
+      // Previously, if val === '', the Buffer would not fill,
+      // which is rather surprising.
+      val = 0;
+    }
     if (encoding !== undefined && typeof encoding !== 'string') {
       throw new TypeError('encoding must be a string');
     }
@@ -527,7 +718,7 @@ Buffer.prototype.fill = function fill(val, start, end, encoding) {
 
   // Invalid ranges are not set to a default, so can range check early.
   if (start < 0 || end > this.length)
-    throw new RangeError('out of range index');
+    throw new RangeError('Out of range index');
 
   if (end <= start)
     return this;
@@ -541,28 +732,6 @@ Buffer.prototype.fill = function fill(val, start, end, encoding) {
 };
 
 
-// XXX remove in v0.13
-Buffer.prototype.get = internalUtil.deprecate(function get(offset) {
-  offset = ~~offset;
-  if (offset < 0 || offset >= this.length)
-    throw new RangeError('index out of range');
-  return this[offset];
-}, 'Buffer.get is deprecated. Use array indexes instead.');
-
-
-// XXX remove in v0.13
-Buffer.prototype.set = internalUtil.deprecate(function set(offset, v) {
-  offset = ~~offset;
-  if (offset < 0 || offset >= this.length)
-    throw new RangeError('index out of range');
-  return this[offset] = v;
-}, 'Buffer.set is deprecated. Use array indexes instead.');
-
-
-var writeWarned = false;
-const writeMsg = 'Buffer.write(string, encoding, offset, length) is ' +
-                 'deprecated. Use write(string[, offset[, length]]' +
-                 '[, encoding]) instead.';
 Buffer.prototype.write = function(string, offset, length, encoding) {
   // Buffer#write(string);
   if (offset === undefined) {
@@ -587,14 +756,12 @@ Buffer.prototype.write = function(string, offset, length, encoding) {
       encoding = length;
       length = undefined;
     }
-
-  // XXX legacy write(string, encoding, offset, length) - remove in v0.13
   } else {
-    writeWarned = internalUtil.printDeprecationMessage(writeMsg, writeWarned);
-    var swap = encoding;
-    encoding = offset;
-    offset = length >>> 0;
-    length = swap;
+    // if someone is still calling the obsolete form of write(), tell them.
+    // we don't want eg buf.write("foo", "utf8", 10) to silently turn into
+    // buf.write("foo", "utf8"), so we can't ignore extra args
+    throw new Error('Buffer.write(string, encoding, offset[, length]) ' +
+                    'is no longer supported');
   }
 
   var remaining = this.length - offset;
@@ -602,7 +769,7 @@ Buffer.prototype.write = function(string, offset, length, encoding) {
     length = remaining;
 
   if (string.length > 0 && (length < 0 || offset < 0))
-    throw new RangeError('attempt to write outside buffer bounds');
+    throw new RangeError('Attempt to write outside buffer bounds');
 
   if (!encoding)
     encoding = 'utf8';
@@ -660,7 +827,7 @@ Buffer.prototype.slice = function slice(start, end) {
 
 function checkOffset(offset, ext, length) {
   if (offset + ext > length)
-    throw new RangeError('index out of range');
+    throw new RangeError('Index out of range');
 }
 
 
@@ -868,11 +1035,11 @@ Buffer.prototype.readDoubleBE = function readDoubleBE(offset, noAssert) {
 
 function checkInt(buffer, value, offset, ext, max, min) {
   if (!(buffer instanceof Buffer))
-    throw new TypeError('buffer must be a Buffer instance');
+    throw new TypeError('"buffer" argument must be a Buffer instance');
   if (value > max || value < min)
-    throw new TypeError('value is out of bounds');
+    throw new TypeError('"value" argument is out of bounds');
   if (offset + ext > buffer.length)
-    throw new RangeError('index out of range');
+    throw new RangeError('Index out of range');
 }
 
 

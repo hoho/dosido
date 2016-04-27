@@ -206,6 +206,7 @@ Conversely, some files are always ignored:
 * `._*`
 * `npm-debug.log`
 * `.npmrc`
+* `node_modules`
 
 ## main
 
@@ -328,6 +329,11 @@ maybe, someday.
 ### directories.example
 
 Put example scripts in here.  Someday, it might be exposed in some clever way.
+
+### directories.test
+
+Put your tests in here. It is currently not exposed, but it might be in the
+future.
 
 ## repository
 
@@ -573,7 +579,31 @@ this. If you depend on features introduced in 1.5.2, use `">= 1.5.2 < 2"`.
 
 ## bundledDependencies
 
-Array of package names that will be bundled when publishing the package.
+This defines an array of package names that will be bundled when publishing
+the package.
+
+In cases where you need to preserve npm packages locally or have them
+available through a single file download, you can bundle the packages in a
+tarball file by specifying the package names in the `bundledDependencies`
+array and executing `npm pack`.
+
+For example:
+
+If we define a package.json like this:
+
+```
+{
+  "name": "awesome-web-framework",
+  "version": "1.0.0",
+  "bundledDependencies": [
+    'renderized', 'super-streams'
+  ]
+}
+```
+we can obtain `awesome-web-framework-1.0.0.tgz` file by running `npm pack`.
+This file contains the dependencies `renderized` and `super-streams` which
+can be installed in a new project by executing `npm install
+awesome-web-framework-1.0.0.tgz`.
 
 If this is spelled `"bundleDependencies"`, then that is also honored.
 
@@ -625,8 +655,8 @@ are capable of properly installing your program.  For example:
 
     { "engines" : { "npm" : "~1.0.20" } }
 
-Note that, unless the user has set the `engine-strict` config flag, this
-field is advisory only.
+Unless the user has set the `engine-strict` config flag, this
+field is advisory only will produce warnings when your package is installed as a dependency.
 
 ## engineStrict
 
@@ -727,7 +757,6 @@ npm will default some values based on package contents.
 * npm-config(1)
 * npm-config(7)
 * npm-help(1)
-* npm-faq(7)
 * npm-install(1)
 * npm-publish(1)
 * npm-uninstall(1)

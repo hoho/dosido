@@ -50,10 +50,10 @@ function ClientRequest(options, cb) {
     // well, and b) possibly too restrictive for real-world usage. That's
     // why it only scans for spaces because those are guaranteed to create
     // an invalid request.
-    throw new TypeError('Request path contains unescaped characters.');
+    throw new TypeError('Request path contains unescaped characters');
   } else if (protocol !== expectedProtocol) {
     throw new Error('Protocol "' + protocol + '" not supported. ' +
-                    'Expected "' + expectedProtocol + '".');
+                    'Expected "' + expectedProtocol + '"');
   }
 
   const defaultPort = options.defaultPort ||
@@ -87,6 +87,17 @@ function ClientRequest(options, cb) {
     }
     if (host && !this.getHeader('host') && setHost) {
       var hostHeader = host;
+      var posColon = -1;
+
+      // For the Host header, ensure that IPv6 addresses are enclosed
+      // in square brackets, as defined by URI formatting
+      // https://tools.ietf.org/html/rfc3986#section-3.2.2
+      if (-1 !== (posColon = hostHeader.indexOf(':')) &&
+          -1 !== (posColon = hostHeader.indexOf(':', posColon)) &&
+          '[' !== hostHeader[0]) {
+        hostHeader = `[${hostHeader}]`;
+      }
+
       if (port && +port !== defaultPort) {
         hostHeader += ':' + port;
       }
@@ -97,7 +108,7 @@ function ClientRequest(options, cb) {
   if (options.auth && !this.getHeader('Authorization')) {
     //basic auth
     this.setHeader('Authorization', 'Basic ' +
-                   new Buffer(options.auth).toString('base64'));
+                   Buffer.from(options.auth).toString('base64'));
   }
 
   if (method === 'GET' ||
@@ -421,7 +432,7 @@ function parserOnIncomingClient(res, shouldKeepAlive) {
   // Responses to CONNECT request is handled as Upgrade.
   if (req.method === 'CONNECT') {
     res.upgrade = true;
-    return true; // skip body
+    return 2; // skip body, and the rest
   }
 
   // Responses to HEAD requests are crazy.

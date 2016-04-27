@@ -50,12 +50,25 @@ inline Environment::IsolateData::IsolateData(v8::Isolate* isolate,
     : event_loop_(loop),
       isolate_(isolate),
 #define V(PropertyName, StringValue)                                          \
-    PropertyName ## _(isolate,                                                \
-                      v8::String::NewFromOneByte(                             \
-                          isolate,                                            \
-                          reinterpret_cast<const uint8_t*>(StringValue),      \
-                          v8::NewStringType::kInternalized,                   \
-                          sizeof(StringValue) - 1).ToLocalChecked()),
+    PropertyName ## _(                                                        \
+        isolate,                                                              \
+        v8::Private::ForApi(                                                  \
+            isolate,                                                          \
+            v8::String::NewFromOneByte(                                       \
+                isolate,                                                      \
+                reinterpret_cast<const uint8_t*>(StringValue),                \
+                v8::NewStringType::kInternalized,                             \
+                sizeof(StringValue) - 1).ToLocalChecked())),
+  PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(V)
+#undef V
+#define V(PropertyName, StringValue)                                          \
+    PropertyName ## _(                                                        \
+        isolate,                                                              \
+        v8::String::NewFromOneByte(                                           \
+            isolate,                                                          \
+            reinterpret_cast<const uint8_t*>(StringValue),                    \
+            v8::NewStringType::kInternalized,                                 \
+            sizeof(StringValue) - 1).ToLocalChecked()),
     PER_ISOLATE_STRING_PROPERTIES(V)
 #undef V
     ref_count_(0) {}
@@ -494,27 +507,25 @@ inline void Environment::SetProtoMethod(v8::Local<v8::FunctionTemplate> that,
                                         const char* name,
                                         v8::FunctionCallback callback) {
   v8::Local<v8::Signature> signature = v8::Signature::New(isolate(), that);
-  v8::Local<v8::Function> function =
-      NewFunctionTemplate(callback, signature)->GetFunction();
+  v8::Local<v8::FunctionTemplate> t = NewFunctionTemplate(callback, signature);
   // kInternalized strings are created in the old space.
   const v8::NewStringType type = v8::NewStringType::kInternalized;
   v8::Local<v8::String> name_string =
       v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->PrototypeTemplate()->Set(name_string, function);
-  function->SetName(name_string);  // NODE_SET_PROTOTYPE_METHOD() compatibility.
+  that->PrototypeTemplate()->Set(name_string, t);
+  t->SetClassName(name_string);  // NODE_SET_PROTOTYPE_METHOD() compatibility.
 }
 
 inline void Environment::SetTemplateMethod(v8::Local<v8::FunctionTemplate> that,
                                            const char* name,
                                            v8::FunctionCallback callback) {
-  v8::Local<v8::Function> function =
-      NewFunctionTemplate(callback)->GetFunction();
+  v8::Local<v8::FunctionTemplate> t = NewFunctionTemplate(callback);
   // kInternalized strings are created in the old space.
   const v8::NewStringType type = v8::NewStringType::kInternalized;
   v8::Local<v8::String> name_string =
       v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->Set(name_string, function);
-  function->SetName(name_string);  // NODE_SET_METHOD() compatibility.
+  that->Set(name_string, t);
+  t->SetClassName(name_string);  // NODE_SET_METHOD() compatibility.
 }
 
 inline v8::Local<v8::Object> Environment::NewInternalFieldObject() {
@@ -523,21 +534,31 @@ inline v8::Local<v8::Object> Environment::NewInternalFieldObject() {
   return m_obj.ToLocalChecked();
 }
 
-#define V(PropertyName, StringValue)                                          \
+#define VP(PropertyName, StringValue) V(v8::Private, PropertyName, StringValue)
+#define VS(PropertyName, StringValue) V(v8::String, PropertyName, StringValue)
+#define V(TypeName, PropertyName, StringValue)                                \
   inline                                                                      \
-  v8::Local<v8::String> Environment::IsolateData::PropertyName() const {      \
+  v8::Local<TypeName> Environment::IsolateData::PropertyName() const {        \
     /* Strings are immutable so casting away const-ness here is okay. */      \
     return const_cast<IsolateData*>(this)->PropertyName ## _.Get(isolate());  \
   }
-  PER_ISOLATE_STRING_PROPERTIES(V)
+  PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
+  PER_ISOLATE_STRING_PROPERTIES(VS)
 #undef V
+#undef VS
+#undef VP
 
-#define V(PropertyName, StringValue)                                          \
-  inline v8::Local<v8::String> Environment::PropertyName() const {            \
+#define VP(PropertyName, StringValue) V(v8::Private, PropertyName, StringValue)
+#define VS(PropertyName, StringValue) V(v8::String, PropertyName, StringValue)
+#define V(TypeName, PropertyName, StringValue)                                \
+  inline v8::Local<TypeName> Environment::PropertyName() const {              \
     return isolate_data()->PropertyName();                                    \
   }
-  PER_ISOLATE_STRING_PROPERTIES(V)
+  PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
+  PER_ISOLATE_STRING_PROPERTIES(VS)
 #undef V
+#undef VS
+#undef VP
 
 #define V(PropertyName, TypeName)                                             \
   inline v8::Local<TypeName> Environment::PropertyName() const {              \
@@ -550,6 +571,7 @@ inline v8::Local<v8::Object> Environment::NewInternalFieldObject() {
 #undef V
 
 #undef ENVIRONMENT_STRONG_PERSISTENT_PROPERTIES
+#undef PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES
 #undef PER_ISOLATE_STRING_PROPERTIES
 
 }  // namespace node

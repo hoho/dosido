@@ -39,6 +39,7 @@ class EntryFrameConstants : public AllStatic {
  public:
   static const int kCallerFPOffset      = -6 * kPointerSize;
 
+  static const int kNewTargetArgOffset  = +2 * kPointerSize;
   static const int kFunctionArgOffset   = +3 * kPointerSize;
   static const int kReceiverArgOffset   = +4 * kPointerSize;
   static const int kArgcOffset          = +5 * kPointerSize;
@@ -79,6 +80,7 @@ class JavaScriptFrameConstants : public AllStatic {
 };
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_IA32_FRAMES_IA32_H_

@@ -304,7 +304,7 @@ function formatValue(ctx, value, recurseTimes) {
       return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
     }
     if (isDate(value)) {
-      return ctx.stylize(Date.prototype.toString.call(value), 'date');
+      return ctx.stylize(Date.prototype.toISOString.call(value), 'date');
     }
     if (isError(value)) {
       return formatError(value);
@@ -322,10 +322,17 @@ function formatValue(ctx, value, recurseTimes) {
       formatted = formatPrimitiveNoColor(ctx, raw);
       return ctx.stylize('[Boolean: ' + formatted + ']', 'boolean');
     }
+    // Fast path for ArrayBuffer.  Can't do the same for DataView because it
+    // has a non-primitive .buffer property that we need to recurse for.
+    if (binding.isArrayBuffer(value)) {
+      return `${getConstructorOf(value).name}` +
+             ` { byteLength: ${formatNumber(ctx, value.byteLength)} }`;
+    }
   }
 
   var constructor = getConstructorOf(value);
-  var base = '', empty = false, braces, formatter;
+  var base = '', empty = false, braces;
+  var formatter = formatObject;
 
   // We can't compare constructors for various objects using a comparison like
   // `constructor === Array` because the object could have come from a different
@@ -355,6 +362,28 @@ function formatValue(ctx, value, recurseTimes) {
       keys.unshift('size');
     empty = value.size === 0;
     formatter = formatMap;
+  } else if (binding.isArrayBuffer(value)) {
+    braces = ['{', '}'];
+    keys.unshift('byteLength');
+    visibleKeys.byteLength = true;
+  } else if (binding.isDataView(value)) {
+    braces = ['{', '}'];
+    // .buffer goes last, it's not a primitive like the others.
+    keys.unshift('byteLength', 'byteOffset', 'buffer');
+    visibleKeys.byteLength = true;
+    visibleKeys.byteOffset = true;
+    visibleKeys.buffer = true;
+  } else if (binding.isTypedArray(value)) {
+    braces = ['[', ']'];
+    formatter = formatTypedArray;
+    if (ctx.showHidden) {
+      // .buffer goes last, it's not a primitive like the others.
+      keys.unshift('BYTES_PER_ELEMENT',
+                   'length',
+                   'byteLength',
+                   'byteOffset',
+                   'buffer');
+    }
   } else {
     var promiseInternals = inspectPromise(value);
     if (promiseInternals) {
@@ -377,7 +406,6 @@ function formatValue(ctx, value, recurseTimes) {
           constructor = null;
         braces = ['{', '}'];
         empty = true;  // No other data than keys.
-        formatter = formatObject;
       }
     }
   }
@@ -397,7 +425,7 @@ function formatValue(ctx, value, recurseTimes) {
 
   // Make dates with properties first say the date
   if (isDate(value)) {
-    base = ' ' + Date.prototype.toUTCString.call(value);
+    base = ' ' + Date.prototype.toISOString.call(value);
   }
 
   // Make error with message first say the error
@@ -449,6 +477,15 @@ function formatValue(ctx, value, recurseTimes) {
 }
 
 
+function formatNumber(ctx, value) {
+  // Format -0 as '-0'. Strict equality won't distinguish 0 from -0,
+  // so instead we use the fact that 1 / -0 < 0 whereas 1 / 0 > 0 .
+  if (value === 0 && 1 / value < 0)
+    return ctx.stylize('-0', 'number');
+  return ctx.stylize('' + value, 'number');
+}
+
+
 function formatPrimitive(ctx, value) {
   if (value === undefined)
     return ctx.stylize('undefined', 'undefined');
@@ -460,18 +497,16 @@ function formatPrimitive(ctx, value) {
   var type = typeof value;
 
   if (type === 'string') {
-    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-        .replace(/'/g, "\\'")
-        .replace(/\\"/g, '"') + '\'';
+    var simple = '\'' +
+                 JSON.stringify(value)
+                     .replace(/^"|"$/g, '')
+                     .replace(/'/g, "\\'")
+                     .replace(/\\"/g, '"') +
+                 '\'';
     return ctx.stylize(simple, 'string');
   }
-  if (type === 'number') {
-    // Format -0 as '-0'. Strict equality won't distinguish 0 from -0,
-    // so instead we use the fact that 1 / -0 < 0 whereas 1 / 0 > 0 .
-    if (value === 0 && 1 / value < 0)
-      return ctx.stylize('-0', 'number');
-    return ctx.stylize('' + value, 'number');
-  }
+  if (type === 'number')
+    return formatNumber(ctx, value);
   if (type === 'boolean')
     return ctx.stylize('' + value, 'boolean');
   // es6 symbol primitive
@@ -490,7 +525,7 @@ function formatPrimitiveNoColor(ctx, value) {
 
 
 function formatError(value) {
-  return '[' + Error.prototype.toString.call(value) + ']';
+  return value.stack || '[' + Error.prototype.toString.call(value) + ']';
 }
 
 
@@ -517,6 +552,20 @@ function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
           key, true));
     }
   });
+  return output;
+}
+
+
+function formatTypedArray(ctx, value, recurseTimes, visibleKeys, keys) {
+  var output = new Array(value.length);
+  for (var i = 0, l = value.length; i < l; ++i)
+    output[i] = formatNumber(ctx, value[i]);
+  for (const key of keys) {
+    if (typeof key === 'symbol' || !key.match(/^\d+$/)) {
+      output.push(
+          formatProperty(ctx, value, recurseTimes, visibleKeys, key, true));
+    }
+  }
   return output;
 }
 
@@ -779,16 +828,16 @@ exports.log = function() {
 exports.inherits = function(ctor, superCtor) {
 
   if (ctor === undefined || ctor === null)
-    throw new TypeError('The constructor to `inherits` must not be ' +
-                        'null or undefined.');
+    throw new TypeError('The constructor to "inherits" must not be ' +
+                        'null or undefined');
 
   if (superCtor === undefined || superCtor === null)
-    throw new TypeError('The super constructor to `inherits` must not ' +
-                        'be null or undefined.');
+    throw new TypeError('The super constructor to "inherits" must not ' +
+                        'be null or undefined');
 
   if (superCtor.prototype === undefined)
-    throw new TypeError('The super constructor to `inherits` must ' +
-                        'have a prototype.');
+    throw new TypeError('The super constructor to "inherits" must ' +
+                        'have a prototype');
 
   ctor.super_ = superCtor;
   Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
@@ -812,11 +861,6 @@ function hasOwnProperty(obj, prop) {
 
 
 // Deprecated old stuff.
-
-exports.exec = internalUtil.deprecate(function() {
-  return require('child_process').exec.apply(this, arguments);
-}, 'util.exec is deprecated. Use child_process.exec instead.');
-
 
 exports.print = internalUtil.deprecate(function() {
   for (var i = 0, len = arguments.length; i < len; ++i) {
@@ -842,44 +886,6 @@ exports.error = internalUtil.deprecate(function(x) {
     process.stderr.write(arguments[i] + '\n');
   }
 }, 'util.error is deprecated. Use console.error instead.');
-
-
-exports.pump = internalUtil.deprecate(function(readStream, writeStream, cb) {
-  var callbackCalled = false;
-
-  function call(a, b, c) {
-    if (cb && !callbackCalled) {
-      cb(a, b, c);
-      callbackCalled = true;
-    }
-  }
-
-  readStream.addListener('data', function(chunk) {
-    if (writeStream.write(chunk) === false) readStream.pause();
-  });
-
-  writeStream.addListener('drain', function() {
-    readStream.resume();
-  });
-
-  readStream.addListener('end', function() {
-    writeStream.end();
-  });
-
-  readStream.addListener('close', function() {
-    call();
-  });
-
-  readStream.addListener('error', function(err) {
-    writeStream.end();
-    call(err);
-  });
-
-  writeStream.addListener('error', function(err) {
-    readStream.destroy();
-    call(err);
-  });
-}, 'util.pump is deprecated. Use readableStream.pipe instead.');
 
 
 exports._errnoException = function(err, syscall, original) {

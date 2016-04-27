@@ -15,7 +15,7 @@ const prompt_npm = 'npm should be run outside of the ' +
                    'node repl, in your normal shell.\n' +
                    '(Press Control-D to exit.)\n';
 const expect_npm = prompt_npm + prompt_unix;
-var server_tcp, server_unix, client_tcp, client_unix, timer, replServer;
+var server_tcp, server_unix, client_tcp, client_unix, replServer;
 
 
 // absolute path to test/fixtures/a.js
@@ -24,7 +24,7 @@ var moduleFilename = require('path').join(common.fixturesDir, 'a');
 console.error('repl test');
 
 // function for REPL to run
-invoke_me = function(arg) {
+global.invoke_me = function(arg) {
   return 'invoked ' + arg;
 };
 
@@ -45,7 +45,6 @@ function send_expect(list) {
 function clean_up() {
   client_tcp.end();
   client_unix.end();
-  clearTimeout(timer);
 }
 
 function strict_mode_error_test() {
@@ -157,7 +156,7 @@ function error_test() {
       expect: /^SyntaxError: Unexpected number/ },
     // should throw
     { client: client_unix, send: 'JSON.parse(\'{\');',
-      expect: /^SyntaxError: Unexpected end of input/ },
+      expect: /^SyntaxError: Unexpected end of JSON input/ },
     // invalid RegExps are a special case of syntax error,
     // should throw
     { client: client_unix, send: '/(/;',
@@ -323,6 +322,8 @@ function error_test() {
     { client: client_unix, send: 'function x(s) {\nreturn s.replace(/.*/,"");\n}',
       expect: prompt_multiline + prompt_multiline +
             'undefined\n' + prompt_unix },
+    { client: client_unix, send: '{ var x = 4; }',
+      expect: 'undefined\n' + prompt_unix },
   ]);
 }
 
@@ -461,7 +462,3 @@ function unix_test() {
 }
 
 unix_test();
-
-timer = setTimeout(function() {
-  assert.fail(null, null, 'Timeout');
-}, 5000);

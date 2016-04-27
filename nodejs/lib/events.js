@@ -2,6 +2,12 @@
 
 var domain;
 
+// This constructor is used to store event handlers. Instantiating this is
+// faster than explicitly calling `Object.create(null)` to get a "clean" empty
+// object (tested with v8 v4.9).
+function EventHandlers() {}
+EventHandlers.prototype = Object.create(null);
+
 function EventEmitter() {
   EventEmitter.init.call(this);
 }
@@ -44,7 +50,7 @@ EventEmitter.init = function() {
   }
 
   if (!this._events || this._events === Object.getPrototypeOf(this)._events) {
-    this._events = {};
+    this._events = new EventHandlers();
     this._eventsCount = 0;
   }
 
@@ -55,7 +61,7 @@ EventEmitter.init = function() {
 // that to be increased. Set to zero for unlimited.
 EventEmitter.prototype.setMaxListeners = function setMaxListeners(n) {
   if (typeof n !== 'number' || n < 0 || isNaN(n))
-    throw new TypeError('n must be a positive number');
+    throw new TypeError('"n" argument must be a positive number');
   this._maxListeners = n;
   return this;
 };
@@ -145,7 +151,7 @@ EventEmitter.prototype.emit = function emit(type) {
     er = arguments[1];
     if (domain) {
       if (!er)
-        er = new Error('Uncaught, unspecified "error" event.');
+        er = new Error('Uncaught, unspecified "error" event');
       er.domainEmitter = this;
       er.domain = domain;
       er.domainThrown = false;
@@ -201,28 +207,28 @@ EventEmitter.prototype.emit = function emit(type) {
   return true;
 };
 
-EventEmitter.prototype.addListener = function addListener(type, listener) {
+function _addListener(target, type, listener, prepend) {
   var m;
   var events;
   var existing;
 
   if (typeof listener !== 'function')
-    throw new TypeError('listener must be a function');
+    throw new TypeError('"listener" argument must be a function');
 
-  events = this._events;
+  events = target._events;
   if (!events) {
-    events = this._events = {};
-    this._eventsCount = 0;
+    events = target._events = new EventHandlers();
+    target._eventsCount = 0;
   } else {
     // To avoid recursion in the case that type === "newListener"! Before
     // adding it to the listeners, first emit "newListener".
     if (events.newListener) {
-      this.emit('newListener', type,
-                listener.listener ? listener.listener : listener);
+      target.emit('newListener', type,
+                  listener.listener ? listener.listener : listener);
 
       // Re-assign `events` because a newListener handler could have caused the
       // this._events to be assigned to a new object
-      events = this._events;
+      events = target._events;
     }
     existing = events[type];
   }
@@ -230,55 +236,74 @@ EventEmitter.prototype.addListener = function addListener(type, listener) {
   if (!existing) {
     // Optimize the case of one listener. Don't need the extra array object.
     existing = events[type] = listener;
-    ++this._eventsCount;
+    ++target._eventsCount;
   } else {
     if (typeof existing === 'function') {
       // Adding the second element, need to change to array.
-      existing = events[type] = [existing, listener];
+      existing = events[type] = prepend ? [listener, existing] :
+                                          [existing, listener];
     } else {
       // If we've already got an array, just append.
-      existing.push(listener);
+      if (prepend) {
+        existing.unshift(listener);
+      } else {
+        existing.push(listener);
+      }
     }
 
     // Check for listener leak
     if (!existing.warned) {
-      m = $getMaxListeners(this);
+      m = $getMaxListeners(target);
       if (m && m > 0 && existing.length > m) {
         existing.warned = true;
-        console.error('(node) warning: possible EventEmitter memory ' +
-                      'leak detected. %d %s listeners added. ' +
-                      'Use emitter.setMaxListeners() to increase limit.',
-                      existing.length, type);
-        console.trace();
+        process.emitWarning('Possible EventEmitter memory leak detected. ' +
+                            `${existing.length} ${type} listeners added. ` +
+                            'Use emitter.setMaxListeners() to increase limit');
       }
     }
   }
 
-  return this;
+  return target;
+}
+
+EventEmitter.prototype.addListener = function addListener(type, listener) {
+  return _addListener(this, type, listener, false);
 };
 
 EventEmitter.prototype.on = EventEmitter.prototype.addListener;
 
-EventEmitter.prototype.once = function once(type, listener) {
-  if (typeof listener !== 'function')
-    throw new TypeError('listener must be a function');
+EventEmitter.prototype.prependListener =
+    function prependListener(type, listener) {
+      return _addListener(this, type, listener, true);
+    };
 
+function _onceWrap(target, type, listener) {
   var fired = false;
-
   function g() {
-    this.removeListener(type, g);
-
+    target.removeListener(type, g);
     if (!fired) {
       fired = true;
-      listener.apply(this, arguments);
+      listener.apply(target, arguments);
     }
   }
-
   g.listener = listener;
-  this.on(type, g);
+  return g;
+}
 
+EventEmitter.prototype.once = function once(type, listener) {
+  if (typeof listener !== 'function')
+    throw new TypeError('"listener" argument must be a function');
+  this.on(type, _onceWrap(this, type, listener));
   return this;
 };
+
+EventEmitter.prototype.prependOnceListener =
+    function prependOnceListener(type, listener) {
+      if (typeof listener !== 'function')
+        throw new TypeError('"listener" argument must be a function');
+      this.prependListener(type, _onceWrap(this, type, listener));
+      return this;
+    };
 
 // emits a 'removeListener' event iff the listener was removed
 EventEmitter.prototype.removeListener =
@@ -286,7 +311,7 @@ EventEmitter.prototype.removeListener =
       var list, events, position, i;
 
       if (typeof listener !== 'function')
-        throw new TypeError('listener must be a function');
+        throw new TypeError('"listener" argument must be a function');
 
       events = this._events;
       if (!events)
@@ -298,7 +323,7 @@ EventEmitter.prototype.removeListener =
 
       if (list === listener || (list.listener && list.listener === listener)) {
         if (--this._eventsCount === 0)
-          this._events = {};
+          this._events = new EventHandlers();
         else {
           delete events[type];
           if (events.removeListener)
@@ -321,7 +346,7 @@ EventEmitter.prototype.removeListener =
         if (list.length === 1) {
           list[0] = undefined;
           if (--this._eventsCount === 0) {
-            this._events = {};
+            this._events = new EventHandlers();
             return this;
           } else {
             delete events[type];
@@ -348,11 +373,11 @@ EventEmitter.prototype.removeAllListeners =
       // not listening for removeListener, no need to emit
       if (!events.removeListener) {
         if (arguments.length === 0) {
-          this._events = {};
+          this._events = new EventHandlers();
           this._eventsCount = 0;
         } else if (events[type]) {
           if (--this._eventsCount === 0)
-            this._events = {};
+            this._events = new EventHandlers();
           else
             delete events[type];
         }
@@ -368,7 +393,7 @@ EventEmitter.prototype.removeAllListeners =
           this.removeAllListeners(key);
         }
         this.removeAllListeners('removeListener');
-        this._events = {};
+        this._events = new EventHandlers();
         this._eventsCount = 0;
         return this;
       }
@@ -431,6 +456,10 @@ function listenerCount(type) {
 
   return 0;
 }
+
+EventEmitter.prototype.eventNames = function eventNames() {
+  return this._eventsCount > 0 ? Reflect.ownKeys(this._events) : [];
+};
 
 // About 1.5x faster than the two-arg version of Array#splice().
 function spliceOne(list, index) {

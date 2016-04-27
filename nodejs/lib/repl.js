@@ -64,14 +64,11 @@ function hasOwnProperty(obj, prop) {
 // This is the default "writer" value if none is passed in the REPL options.
 exports.writer = util.inspect;
 
-exports._builtinLibs = ['assert', 'buffer', 'child_process', 'cluster',
-  'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https', 'net',
-  'os', 'path', 'punycode', 'querystring', 'readline', 'stream',
-  'string_decoder', 'tls', 'tty', 'url', 'util', 'v8', 'vm', 'zlib'];
+exports._builtinLibs = internalModule.builtinLibs;
 
 
-const BLOCK_SCOPED_ERROR = 'Block-scoped declarations (let, ' +
-    'const, function, class) not yet supported outside strict mode';
+const BLOCK_SCOPED_ERROR = 'Block-scoped declarations (let, const, function, ' +
+                           'class) not yet supported outside strict mode';
 
 
 class LineParser {
@@ -205,6 +202,8 @@ function REPLServer(prompt,
   self.useGlobal = !!useGlobal;
   self.ignoreUndefined = !!ignoreUndefined;
   self.replMode = replMode || exports.REPL_MODE_SLOPPY;
+  self.underscoreAssigned = false;
+  self.last = undefined;
 
   self._inTemplateLiteral = false;
 
@@ -220,8 +219,12 @@ function REPLServer(prompt,
   eval_ = eval_ || defaultEval;
 
   function defaultEval(code, context, file, cb) {
-    var err, result, retry = false;
+    var err, result, retry = false, input = code, wrappedErr;
     // first, create the Script object to check the syntax
+
+    if (code === '\n')
+      return cb(null);
+
     while (true) {
       try {
         if (!/^\s*$/.test(code) &&
@@ -238,14 +241,23 @@ function REPLServer(prompt,
         debug('parse error %j', code, e);
         if (self.replMode === exports.REPL_MODE_MAGIC &&
             e.message === BLOCK_SCOPED_ERROR &&
-            !retry) {
-          retry = true;
+            !retry || self.wrappedCmd) {
+          if (self.wrappedCmd) {
+            self.wrappedCmd = false;
+            // unwrap and try again
+            code = `${input.substring(1, input.length - 2)}\n`;
+            wrappedErr = e;
+          } else {
+            retry = true;
+          }
           continue;
         }
-        if (isRecoverableError(e, self))
-          err = new Recoverable(e);
+        // preserve original error for wrapped command
+        const error = wrappedErr || e;
+        if (isRecoverableError(error, self))
+          err = new Recoverable(error);
         else
-          err = e;
+          err = error;
       }
       break;
     }
@@ -387,7 +399,6 @@ function REPLServer(prompt,
   self.on('line', function(cmd) {
     debug('line %j', cmd);
     sawSIGINT = false;
-    var skipCatchall = false;
 
     // leading whitespaces in template literals should not be trimmed.
     if (self._inTemplateLiteral) {
@@ -406,36 +417,35 @@ function REPLServer(prompt,
         return;
       } else if (!self.bufferedCommand) {
         self.outputStream.write('Invalid REPL keyword\n');
-        skipCatchall = true;
+        finish(null);
+        return;
       }
     }
 
-    if (!skipCatchall && (cmd || (!cmd && self.bufferedCommand))) {
-      var evalCmd = self.bufferedCommand + cmd;
-      if (/^\s*\{/.test(evalCmd) && /\}\s*$/.test(evalCmd)) {
-        // It's confusing for `{ a : 1 }` to be interpreted as a block
-        // statement rather than an object literal.  So, we first try
-        // to wrap it in parentheses, so that it will be interpreted as
-        // an expression.
-        evalCmd = '(' + evalCmd + ')\n';
-      } else {
-        // otherwise we just append a \n so that it will be either
-        // terminated, or continued onto the next expression if it's an
-        // unexpected end of input.
-        evalCmd = evalCmd + '\n';
-      }
-
-      debug('eval %j', evalCmd);
-      self.eval(evalCmd, self.context, 'repl', finish);
+    var evalCmd = self.bufferedCommand + cmd;
+    if (/^\s*\{/.test(evalCmd) && /\}\s*$/.test(evalCmd)) {
+      // It's confusing for `{ a : 1 }` to be interpreted as a block
+      // statement rather than an object literal.  So, we first try
+      // to wrap it in parentheses, so that it will be interpreted as
+      // an expression.
+      evalCmd = '(' + evalCmd + ')\n';
+      self.wrappedCmd = true;
     } else {
-      finish(null);
+      // otherwise we just append a \n so that it will be either
+      // terminated, or continued onto the next expression if it's an
+      // unexpected end of input.
+      evalCmd = evalCmd + '\n';
     }
+
+    debug('eval %j', evalCmd);
+    self.eval(evalCmd, self.context, 'repl', finish);
 
     function finish(e, ret) {
       debug('finish', e, ret);
       self.memory(cmd);
 
-      if (e && !self.bufferedCommand && cmd.trim().match(/^npm /)) {
+      self.wrappedCmd = false;
+      if (e && !self.bufferedCommand && cmd.trim().startsWith('npm ')) {
         self.outputStream.write('npm should be run outside of the ' +
                                 'node repl, in your normal shell.\n' +
                                 '(Press Control-D to exit.)\n');
@@ -471,7 +481,9 @@ function REPLServer(prompt,
           // the second argument to this function is there, print it.
           arguments.length === 2 &&
           (!self.ignoreUndefined || ret !== undefined)) {
-        self.context._ = ret;
+        if (!self.underscoreAssigned) {
+          self.last = ret;
+        }
         self.outputStream.write(self.writer(ret) + '\n');
       }
 
@@ -545,25 +557,25 @@ REPLServer.prototype.createContext = function() {
   context.module = module;
   context.require = require;
 
+
+  this.underscoreAssigned = false;
   this.lines = [];
   this.lines.level = [];
 
-  // make built-in modules available directly
-  // (loaded lazily)
-  exports._builtinLibs.forEach(function(name) {
-    Object.defineProperty(context, name, {
-      get: function() {
-        var lib = require(name);
-        context._ = context[name] = lib;
-        return lib;
-      },
-      // allow the creation of other globals with this name
-      set: function(val) {
-        delete context[name];
-        context[name] = val;
-      },
-      configurable: true
-    });
+  internalModule.addBuiltinLibsToObject(context);
+
+  Object.defineProperty(context, '_', {
+    configurable: true,
+    get: () => {
+      return this.last;
+    },
+    set: (value) => {
+      this.last = value;
+      if (!this.underscoreAssigned) {
+        this.underscoreAssigned = true;
+        this.outputStream.write('Expression assignment to _ now disabled.\n');
+      }
+    }
   });
 
   return context;
@@ -633,7 +645,7 @@ function filteredOwnPropertyNames(obj) {
 //
 // Example:
 //  complete('var foo = util.')
-//    -> [['util.print', 'util.debug', 'util.log', 'util.inspect', 'util.pump'],
+//    -> [['util.print', 'util.debug', 'util.log', 'util.inspect'],
 //        'util.' ]
 //
 // Warning: This eval's code like "foo.bar.baz", so it will run property
@@ -794,7 +806,8 @@ REPLServer.prototype.complete = function(line, callback) {
           });
         }
       } else {
-        this.eval(expr, this.context, 'repl', function(e, obj) {
+        const evalExpr = `try { ${expr} } catch (e) {}`;
+        this.eval(evalExpr, this.context, 'repl', function(e, obj) {
           // if (e) console.log(e);
 
           if (obj != null) {
@@ -919,7 +932,7 @@ REPLServer.prototype.defineCommand = function(keyword, cmd) {
   if (typeof cmd === 'function') {
     cmd = {action: cmd};
   } else if (typeof cmd.action !== 'function') {
-    throw new Error('bad argument, action must be a function');
+    throw new Error('Bad argument, "action" command must be a function');
   }
   this.commands[keyword] = cmd;
 };
@@ -991,7 +1004,7 @@ REPLServer.prototype.memory = function memory(cmd) {
     // self.lines.level.length === 0
     // TODO? keep a log of level so that any syntax breaking lines can
     // be cleared on .break and in the case of a syntax error?
-    // TODO? if a log was kept, then I could clear the bufferedComand and
+    // TODO? if a log was kept, then I could clear the bufferedCommand and
     // eval these lines and throw the syntax error
   } else {
     self.lines.level = [];

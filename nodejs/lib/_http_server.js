@@ -187,6 +187,10 @@ ServerResponse.prototype.writeHead = function(statusCode, reason, obj) {
     headers = obj;
   }
 
+  statusCode |= 0;
+  if (statusCode < 100 || statusCode > 999)
+    throw new RangeError(`Invalid status code: ${statusCode}`);
+
   var statusLine = 'HTTP/1.1 ' + statusCode.toString() + ' ' +
                    this.statusMessage + CRLF;
 
@@ -235,10 +239,6 @@ function Server(requestListener) {
   this.httpAllowHalfOpen = false;
 
   this.addListener('connection', connectionListener);
-
-  this.addListener('clientError', function(err, conn) {
-    conn.destroy(err);
-  });
 
   this.timeout = 2 * 60 * 1000;
 
@@ -352,7 +352,12 @@ function connectionListener(socket) {
 
   // TODO(isaacs): Move all these functions out of here
   function socketOnError(e) {
-    self.emit('clientError', e, this);
+    // Ignore further errors
+    this.removeListener('error', socketOnError);
+    this.on('error', () => {});
+
+    if (!self.emit('clientError', e, this))
+      this.destroy(e);
   }
 
   function socketOnData(d) {
@@ -364,6 +369,7 @@ function connectionListener(socket) {
   }
 
   function onParserExecute(ret, d) {
+    socket._unrefTimer();
     debug('SERVER socketOnParserExecute %d', ret);
     onParserExecuteCommon(ret, undefined);
   }
@@ -371,7 +377,7 @@ function connectionListener(socket) {
   function onParserExecuteCommon(ret, d) {
     if (ret instanceof Error) {
       debug('parse error');
-      socket.destroy(ret);
+      socketOnError.call(socket, ret);
     } else if (parser.incoming && parser.incoming.upgrade) {
       // Upgrade or CONNECT
       var bytesParsed = ret;
@@ -417,7 +423,7 @@ function connectionListener(socket) {
 
     if (ret instanceof Error) {
       debug('parse error');
-      socket.destroy(ret);
+      socketOnError.call(socket, ret);
       return;
     }
 

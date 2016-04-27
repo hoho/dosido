@@ -6,8 +6,8 @@ const binding = process.binding('zlib');
 const util = require('util');
 const assert = require('assert').ok;
 const kMaxLength = require('buffer').kMaxLength;
-const kRangeErrorMessage = 'Cannot create final Buffer. ' +
-    'It would be larger than 0x' + kMaxLength.toString(16) + ' bytes.';
+const kRangeErrorMessage = 'Cannot create final Buffer. It would be larger ' +
+                           'than 0x' + kMaxLength.toString(16) + ' bytes';
 
 // zlib doesn't provide these, so kludge them in following the same
 // const naming scheme zlib uses.
@@ -230,11 +230,11 @@ function zlibBuffer(engine, buffer, callback) {
 
 function zlibBufferSync(engine, buffer) {
   if (typeof buffer === 'string')
-    buffer = new Buffer(buffer);
+    buffer = Buffer.from(buffer);
   if (!(buffer instanceof Buffer))
     throw new TypeError('Not a string or buffer');
 
-  var flushFlag = binding.Z_FINISH;
+  var flushFlag = engine._finishFlushFlag;
 
   return engine._processChunk(buffer, flushFlag);
 }
@@ -282,6 +282,14 @@ function Unzip(opts) {
   Zlib.call(this, opts, binding.UNZIP);
 }
 
+function isValidFlushFlag(flag) {
+  return flag === binding.Z_NO_FLUSH ||
+         flag === binding.Z_PARTIAL_FLUSH ||
+         flag === binding.Z_SYNC_FLUSH ||
+         flag === binding.Z_FULL_FLUSH ||
+         flag === binding.Z_FINISH ||
+         flag === binding.Z_BLOCK;
+}
 
 // the Zlib class they all inherit from
 // This thing manages the queue of requests, and returns
@@ -294,17 +302,16 @@ function Zlib(opts, mode) {
 
   Transform.call(this, opts);
 
-  if (opts.flush) {
-    if (opts.flush !== binding.Z_NO_FLUSH &&
-        opts.flush !== binding.Z_PARTIAL_FLUSH &&
-        opts.flush !== binding.Z_SYNC_FLUSH &&
-        opts.flush !== binding.Z_FULL_FLUSH &&
-        opts.flush !== binding.Z_FINISH &&
-        opts.flush !== binding.Z_BLOCK) {
-      throw new Error('Invalid flush flag: ' + opts.flush);
-    }
+  if (opts.flush && !isValidFlushFlag(opts.flush)) {
+    throw new Error('Invalid flush flag: ' + opts.flush);
   }
+  if (opts.finishFlush && !isValidFlushFlag(opts.finishFlush)) {
+    throw new Error('Invalid flush flag: ' + opts.finishFlush);
+  }
+
   this._flushFlag = opts.flush || binding.Z_NO_FLUSH;
+  this._finishFlushFlag = typeof opts.finishFlush !== 'undefined' ?
+    opts.finishFlush : binding.Z_FINISH;
 
   if (opts.chunkSize) {
     if (opts.chunkSize < exports.Z_MIN_CHUNK ||
@@ -378,7 +385,7 @@ function Zlib(opts, mode) {
                     strategy,
                     opts.dictionary);
 
-  this._buffer = new Buffer(this._chunkSize);
+  this._buffer = Buffer.allocUnsafe(this._chunkSize);
   this._offset = 0;
   this._closed = false;
   this._level = level;
@@ -426,7 +433,7 @@ Zlib.prototype.reset = function() {
 // This is the _flush function called by the transform class,
 // internally, when the last chunk has been written.
 Zlib.prototype._flush = function(callback) {
-  this._transform(new Buffer(0), '', callback);
+  this._transform(Buffer.alloc(0), '', callback);
 };
 
 Zlib.prototype.flush = function(kind, callback) {
@@ -449,23 +456,29 @@ Zlib.prototype.flush = function(kind, callback) {
     }
   } else {
     this._flushFlag = kind;
-    this.write(new Buffer(0), '', callback);
+    this.write(Buffer.alloc(0), '', callback);
   }
 };
 
 Zlib.prototype.close = function(callback) {
+  _close(this, callback);
+  process.nextTick(emitCloseNT, this);
+};
+
+function _close(engine, callback) {
   if (callback)
     process.nextTick(callback);
 
-  if (this._closed)
+  if (engine._closed)
     return;
 
-  this._closed = true;
+  engine._closed = true;
 
-  this._handle.close();
-
-  process.nextTick(emitCloseNT, this);
-};
+  // Caller may invoke .close after a zlib error (which will null _handle).
+  if (engine._handle) {
+    engine._handle.close();
+  }
+}
 
 function emitCloseNT(self) {
   self.emit('close');
@@ -483,12 +496,13 @@ Zlib.prototype._transform = function(chunk, encoding, cb) {
   if (this._closed)
     return cb(new Error('zlib binding closed'));
 
-  // If it's the last chunk, or a final flush, we use the Z_FINISH flush flag.
+  // If it's the last chunk, or a final flush, we use the Z_FINISH flush flag
+  // (or whatever flag was provided using opts.finishFlush).
   // If it's explicitly flushing at some other time, then we use
   // Z_FULL_FLUSH. Otherwise, use Z_NO_FLUSH for maximum compression
   // goodness.
   if (last)
-    flushFlag = binding.Z_FINISH;
+    flushFlag = this._finishFlushFlag;
   else {
     flushFlag = this._flushFlag;
     // once we've flushed the last of the queue, stop flushing and
@@ -535,12 +549,12 @@ Zlib.prototype._processChunk = function(chunk, flushFlag, cb) {
     }
 
     if (nread >= kMaxLength) {
-      this.close();
+      _close(this);
       throw new RangeError(kRangeErrorMessage);
     }
 
     var buf = Buffer.concat(buffers, nread);
-    this.close();
+    _close(this);
 
     return buf;
   }
@@ -580,7 +594,7 @@ Zlib.prototype._processChunk = function(chunk, flushFlag, cb) {
     if (availOutAfter === 0 || self._offset >= self._chunkSize) {
       availOutBefore = self._chunkSize;
       self._offset = 0;
-      self._buffer = new Buffer(self._chunkSize);
+      self._buffer = Buffer.allocUnsafe(self._chunkSize);
     }
 
     if (availOutAfter === 0) {

@@ -7,6 +7,7 @@
 
 #include "src/frames.h"
 #include "src/isolate.h"
+#include "src/objects-inl.h"
 #include "src/v8memory.h"
 
 #if V8_TARGET_ARCH_IA32
@@ -233,6 +234,10 @@ inline OptimizedFrame::OptimizedFrame(StackFrameIteratorBase* iterator)
 }
 
 
+inline InterpretedFrame::InterpretedFrame(StackFrameIteratorBase* iterator)
+    : JavaScriptFrame(iterator) {}
+
+
 inline ArgumentsAdaptorFrame::ArgumentsAdaptorFrame(
     StackFrameIteratorBase* iterator) : JavaScriptFrame(iterator) {
 }
@@ -285,6 +290,7 @@ inline StackFrame* SafeStackFrameIterator::frame() const {
 }
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_FRAMES_INL_H_

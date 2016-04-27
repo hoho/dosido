@@ -29,6 +29,7 @@ const compare = process.binding('buffer').compare;
 const util = require('util');
 const Buffer = require('buffer').Buffer;
 const pSlice = Array.prototype.slice;
+const pToString = (obj) => Object.prototype.toString.call(obj);
 
 // 1. The assert module provides functions that throw
 // AssertionError's when particular conditions are not met. The
@@ -170,10 +171,18 @@ function _deepEqual(actual, expected, strict) {
              (expected === null || typeof expected !== 'object')) {
     return strict ? actual === expected : actual == expected;
 
-  // If both values are instances of typed arrays, wrap them in
-  // a Buffer each to increase performance
-  } else if (ArrayBuffer.isView(actual) && ArrayBuffer.isView(expected)) {
-    return compare(new Buffer(actual), new Buffer(expected)) === 0;
+  // If both values are instances of typed arrays, wrap their underlying
+  // ArrayBuffers in a Buffer each to increase performance
+  // This optimization requires the arrays to have the same type as checked by
+  // Object.prototype.toString (aka pToString). Never perform binary
+  // comparisons for Float*Arrays, though, since e.g. +0 === -0 but their
+  // bit patterns are not identical.
+  } else if (ArrayBuffer.isView(actual) && ArrayBuffer.isView(expected) &&
+             pToString(actual) === pToString(expected) &&
+             !(actual instanceof Float32Array ||
+               actual instanceof Float64Array)) {
+    return compare(Buffer.from(actual.buffer),
+                   Buffer.from(expected.buffer)) === 0;
 
   // 7.5 For all other Object pairs, including Array objects, equivalence is
   // determined by having the same number of owned properties (as verified
@@ -304,7 +313,7 @@ function _throws(shouldThrow, block, expected, message) {
   var actual;
 
   if (typeof block !== 'function') {
-    throw new TypeError('block must be a function');
+    throw new TypeError('"block" argument must be a function');
   }
 
   if (typeof expected === 'string') {
@@ -321,7 +330,14 @@ function _throws(shouldThrow, block, expected, message) {
     fail(actual, expected, 'Missing expected exception' + message);
   }
 
-  if (!shouldThrow && expectedException(actual, expected)) {
+  const userProvidedMessage = typeof message === 'string';
+  const isUnwantedException = !shouldThrow && util.isError(actual);
+  const isUnexpectedException = !shouldThrow && actual && !expected;
+
+  if ((isUnwantedException &&
+      userProvidedMessage &&
+      expectedException(actual, expected)) ||
+      isUnexpectedException) {
     fail(actual, expected, 'Got unwanted exception' + message);
   }
 

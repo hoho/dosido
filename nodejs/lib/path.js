@@ -439,57 +439,17 @@ const win32 = {
     if (len === 0)
       return false;
     var code = path.charCodeAt(0);
-    if (len > 1) {
-      if (code === 47/*/*/ || code === 92/*\*/) {
-        // Possible UNC root
-
-        code = path.charCodeAt(1);
-        if (code === 47/*/*/ || code === 92/*\*/) {
-          // Matched double path separator at beginning
-          var j = 2;
-          var last = j;
-          // Match 1 or more non-path separators
-          for (; j < len; ++j) {
-            code = path.charCodeAt(j);
-            if (code === 47/*/*/ || code === 92/*\*/)
-              break;
-          }
-          if (j < len && j !== last) {
-            // Matched!
-            last = j;
-            // Match 1 or more path separators
-            for (; j < len; ++j) {
-              code = path.charCodeAt(j);
-              if (code !== 47/*/*/ && code !== 92/*\*/)
-                break;
-            }
-            if (j < len && j !== last) {
-              // Matched!
-              last = j;
-              // Match 1 or more non-path separators
-              for (; j < len; ++j) {
-                code = path.charCodeAt(j);
-                if (code === 47/*/*/ || code === 92/*\*/)
-                  break;
-              }
-              if (j !== last)
-                return true;
-            }
-          }
-        }
-      } else if ((code >= 65/*A*/ && code <= 90/*Z*/) ||
-                 (code >= 97/*a*/ && code <= 122/*z*/)) {
-        // Possible device root
-
-        code = path.charCodeAt(1);
-        if (path.charCodeAt(1) === 58/*:*/ && len > 2) {
-          code = path.charCodeAt(2);
-          if (code === 47/*/*/ || code === 92/*\*/)
-            return true;
-        }
-      }
-    } else if (code === 47/*/*/ || code === 92/*\*/) {
+    if (code === 47/*/*/ || code === 92/*\*/) {
       return true;
+    } else if ((code >= 65/*A*/ && code <= 90/*Z*/) ||
+               (code >= 97/*a*/ && code <= 122/*z*/)) {
+      // Possible device root
+
+      if (len > 2 && path.charCodeAt(1) === 58/*:*/) {
+        code = path.charCodeAt(2);
+        if (code === 47/*/*/ || code === 92/*\*/)
+          return true;
+      }
     }
     return false;
   },
@@ -734,8 +694,7 @@ const win32 = {
 
 
   dirname: function dirname(path) {
-    if (typeof path !== 'string')
-      path = '' + path;
+    assertPath(path);
     const len = path.length;
     if (len === 0)
       return '.';
@@ -838,9 +797,8 @@ const win32 = {
 
   basename: function basename(path, ext) {
     if (ext !== undefined && typeof ext !== 'string')
-      throw new TypeError('ext must be a string');
-    if (typeof path !== 'string')
-      path = '' + path;
+      throw new TypeError('"ext" argument must be a string');
+    assertPath(path);
     var start = 0;
     var end = -1;
     var matchedSlash = true;
@@ -926,8 +884,7 @@ const win32 = {
 
 
   extname: function extname(path) {
-    if (typeof path !== 'string')
-      path = '' + path;
+    assertPath(path);
     var startDot = -1;
     var startPart = 0;
     var end = -1;
@@ -982,7 +939,7 @@ const win32 = {
   format: function format(pathObject) {
     if (pathObject === null || typeof pathObject !== 'object') {
       throw new TypeError(
-        `Parameter \'pathObject\' must be an object, not ${typeof pathObject}`
+        `Parameter "pathObject" must be an object, not ${typeof pathObject}`
       );
     }
     return _format('\\', pathObject);
@@ -1160,6 +1117,7 @@ const win32 = {
 
     return ret;
   },
+
 
   sep: '\\',
   delimiter: ';',
@@ -1363,8 +1321,7 @@ const posix = {
 
 
   dirname: function dirname(path) {
-    if (typeof path !== 'string')
-      path = '' + path;
+    assertPath(path);
     if (path.length === 0)
       return '.';
     var code = path.charCodeAt(0);
@@ -1394,9 +1351,8 @@ const posix = {
 
   basename: function basename(path, ext) {
     if (ext !== undefined && typeof ext !== 'string')
-      throw new TypeError('ext must be a string');
-    if (typeof path !== 'string')
-      path = '' + path;
+      throw new TypeError('"ext" argument must be a string');
+    assertPath(path);
 
     var start = 0;
     var end = -1;
@@ -1470,8 +1426,7 @@ const posix = {
 
 
   extname: function extname(path) {
-    if (typeof path !== 'string')
-      path = '' + path;
+    assertPath(path);
     var startDot = -1;
     var startPart = 0;
     var end = -1;
@@ -1522,10 +1477,11 @@ const posix = {
     return path.slice(startDot, end);
   },
 
+
   format: function format(pathObject) {
     if (pathObject === null || typeof pathObject !== 'object') {
       throw new TypeError(
-        `Parameter \'pathObject\' must be an object, not ${typeof pathObject}`
+        `Parameter "pathObject" must be an object, not ${typeof pathObject}`
       );
     }
     return _format('/', pathObject);

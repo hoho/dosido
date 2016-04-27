@@ -8,17 +8,16 @@
 #include "src/base/once.h"
 #include "src/base/platform/platform.h"
 #include "src/bootstrapper.h"
+#include "src/crankshaft/lithium-allocator.h"
 #include "src/debug/debug.h"
 #include "src/deoptimizer.h"
 #include "src/elements.h"
 #include "src/frames.h"
-#include "src/heap-profiler.h"
-#include "src/hydrogen.h"
 #include "src/isolate.h"
-#include "src/lithium-allocator.h"
 #include "src/objects.h"
+#include "src/profiler/heap-profiler.h"
+#include "src/profiler/sampler.h"
 #include "src/runtime-profiler.h"
-#include "src/sampler.h"
 #include "src/snapshot/natives.h"
 #include "src/snapshot/serialize.h"
 #include "src/snapshot/snapshot.h"
@@ -55,12 +54,6 @@ void V8::TearDown() {
 }
 
 
-void V8::SetReturnAddressLocationResolver(
-      ReturnAddressLocationResolver resolver) {
-  StackFrame::SetReturnAddressLocationResolver(resolver);
-}
-
-
 void V8::InitializeOncePerProcessImpl() {
   FlagList::EnforceFlagImplications();
 
@@ -86,13 +79,6 @@ void V8::InitializeOncePerProcessImpl() {
 
   Sampler::SetUp();
   CpuFeatures::Probe(false);
-  init_memcopy_functions();
-  // The custom exp implementation needs 16KB of lookup data; initialize it
-  // on demand.
-  init_fast_sqrt_function();
-#ifdef _WIN64
-  init_modulo_function();
-#endif
   ElementsAccessor::InitializeOncePerProcess();
   LOperand::SetUpCaches();
   SetUpJSCallerSavedCodeData();
@@ -123,6 +109,9 @@ v8::Platform* V8::GetCurrentPlatform() {
   DCHECK(platform_);
   return platform_;
 }
+
+
+void V8::SetPlatformForTesting(v8::Platform* platform) { platform_ = platform; }
 
 
 void V8::SetNativesBlob(StartupData* natives_blob) {

@@ -49,5 +49,23 @@ Register* PropertyAccessCompiler::GetCallingConvention(Code::Kind kind) {
   DCHECK(kind == Code::STORE_IC || kind == Code::KEYED_STORE_IC);
   return store_calling_convention();
 }
+
+
+Register PropertyAccessCompiler::slot() const {
+  if (kind() == Code::LOAD_IC || kind() == Code::KEYED_LOAD_IC) {
+    return LoadDescriptor::SlotRegister();
+  }
+  DCHECK(kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC);
+  return VectorStoreICDescriptor::SlotRegister();
+}
+
+
+Register PropertyAccessCompiler::vector() const {
+  if (kind() == Code::LOAD_IC || kind() == Code::KEYED_LOAD_IC) {
+    return LoadWithVectorDescriptor::VectorRegister();
+  }
+  DCHECK(kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC);
+  return VectorStoreICDescriptor::VectorRegister();
+}
 }  // namespace internal
 }  // namespace v8

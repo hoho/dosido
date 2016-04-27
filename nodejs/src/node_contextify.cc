@@ -11,7 +11,6 @@
 
 namespace node {
 
-using v8::AccessType;
 using v8::Array;
 using v8::ArrayBuffer;
 using v8::Boolean;
@@ -30,7 +29,6 @@ using v8::Maybe;
 using v8::MaybeLocal;
 using v8::Name;
 using v8::NamedPropertyHandlerConfiguration;
-using v8::None;
 using v8::Object;
 using v8::ObjectTemplate;
 using v8::Persistent;
@@ -156,14 +154,13 @@ class ContextifyContext {
               "  }\n"
               "})");
 
-          Local<String> fname = FIXED_ONE_BYTE_STRING(env()->isolate(),
-              "binding:script");
-          Local<Script> script = Script::Compile(code, fname);
+          Local<Script> script =
+              Script::Compile(context, code).ToLocalChecked();
           clone_property_method = Local<Function>::Cast(script->Run());
           CHECK(clone_property_method->IsFunction());
         }
         Local<Value> args[] = { global, key, sandbox_obj };
-        clone_property_method->Call(global, ARRAY_SIZE(args), args);
+        clone_property_method->Call(global, arraysize(args), args);
       }
     }
   }
@@ -177,7 +174,8 @@ class ContextifyContext {
   Local<Value> CreateDataWrapper(Environment* env) {
     EscapableHandleScope scope(env->isolate());
     Local<Object> wrapper =
-        env->script_data_constructor_function()->NewInstance();
+        env->script_data_constructor_function()
+            ->NewInstance(env->context()).FromMaybe(Local<Object>());
     if (wrapper.IsEmpty())
       return scope.Escape(Local<Value>::New(env->isolate(), Local<Value>()));
 
@@ -217,9 +215,9 @@ class ContextifyContext {
     // directly in an Object, we instead hold onto the new context's global
     // object instead (which then has a reference to the context).
     ctx->SetEmbedderData(kSandboxObjectIndex, sandbox_obj);
-    sandbox_obj->SetHiddenValue(
-        FIXED_ONE_BYTE_STRING(env->isolate(), "_contextifyHiddenGlobal"),
-        ctx->Global());
+    sandbox_obj->SetPrivate(env->context(),
+                            env->contextify_global_private_symbol(),
+                            ctx->Global());
 
     env->AssignToContext(ctx);
 
@@ -243,12 +241,12 @@ class ContextifyContext {
     Local<String> script_source(args[0]->ToString(args.GetIsolate()));
     if (script_source.IsEmpty())
       return;  // Exception pending.
-    Local<Context> debug_context = Debug::GetDebugContext();
+    Local<Context> debug_context = Debug::GetDebugContext(args.GetIsolate());
     Environment* env = Environment::GetCurrent(args);
     if (debug_context.IsEmpty()) {
       // Force-load the debug context.
       Debug::GetMirror(args.GetIsolate()->GetCurrentContext(), args[0]);
-      debug_context = Debug::GetDebugContext();
+      debug_context = Debug::GetDebugContext(args.GetIsolate());
       CHECK(!debug_context.IsEmpty());
       // Ensure that the debug context has an Environment assigned in case
       // a fatal error is raised.  The fatal exception handler in node.cc
@@ -261,10 +259,10 @@ class ContextifyContext {
     }
 
     Context::Scope context_scope(debug_context);
-    Local<Script> script = Script::Compile(script_source);
+    MaybeLocal<Script> script = Script::Compile(debug_context, script_source);
     if (script.IsEmpty())
       return;  // Exception pending.
-    args.GetReturnValue().Set(script->Run());
+    args.GetReturnValue().Set(script.ToLocalChecked()->Run());
   }
 
 
@@ -276,13 +274,13 @@ class ContextifyContext {
     }
     Local<Object> sandbox = args[0].As<Object>();
 
-    Local<String> hidden_name =
-        FIXED_ONE_BYTE_STRING(env->isolate(), "_contextifyHidden");
-
     // Don't allow contextifying a sandbox multiple times.
-    CHECK(sandbox->GetHiddenValue(hidden_name).IsEmpty());
+    CHECK(
+        !sandbox->HasPrivate(
+            env->context(),
+            env->contextify_context_private_symbol()).FromJust());
 
-    TryCatch try_catch;
+    TryCatch try_catch(env->isolate());
     ContextifyContext* context = new ContextifyContext(env, sandbox);
 
     if (try_catch.HasCaught()) {
@@ -293,8 +291,10 @@ class ContextifyContext {
     if (context->context().IsEmpty())
       return;
 
-    Local<External> hidden_context = External::New(env->isolate(), context);
-    sandbox->SetHiddenValue(hidden_name, hidden_context);
+    sandbox->SetPrivate(
+        env->context(),
+        env->contextify_context_private_symbol(),
+        External::New(env->isolate(), context));
   }
 
 
@@ -307,10 +307,10 @@ class ContextifyContext {
     }
     Local<Object> sandbox = args[0].As<Object>();
 
-    Local<String> hidden_name =
-        FIXED_ONE_BYTE_STRING(env->isolate(), "_contextifyHidden");
-
-    args.GetReturnValue().Set(!sandbox->GetHiddenValue(hidden_name).IsEmpty());
+    auto result =
+        sandbox->HasPrivate(env->context(),
+                            env->contextify_context_private_symbol());
+    args.GetReturnValue().Set(result.FromJust());
   }
 
 
@@ -321,17 +321,18 @@ class ContextifyContext {
 
 
   static ContextifyContext* ContextFromContextifiedSandbox(
-      Isolate* isolate,
+      Environment* env,
       const Local<Object>& sandbox) {
-    Local<String> hidden_name =
-        FIXED_ONE_BYTE_STRING(isolate, "_contextifyHidden");
-    Local<Value> context_external_v = sandbox->GetHiddenValue(hidden_name);
-    if (context_external_v.IsEmpty() || !context_external_v->IsExternal()) {
-      return nullptr;
+    auto maybe_value =
+        sandbox->GetPrivate(env->context(),
+                            env->contextify_context_private_symbol());
+    Local<Value> context_external_v;
+    if (maybe_value.ToLocal(&context_external_v) &&
+        context_external_v->IsExternal()) {
+      Local<External> context_external = context_external_v.As<External>();
+      return static_cast<ContextifyContext*>(context_external->Value());
     }
-    Local<External> context_external = context_external_v.As<External>();
-
-    return static_cast<ContextifyContext*>(context_external->Value());
+    return nullptr;
   }
 
 
@@ -468,7 +469,7 @@ class ContextifyScript : public BaseObject {
     ContextifyScript* contextify_script =
         new ContextifyScript(env, args.This());
 
-    TryCatch try_catch;
+    TryCatch try_catch(env->isolate());
     Local<String> code = args[0]->ToString(env->isolate());
     Local<String> filename = GetFilenameArg(args, 1);
     Local<Integer> lineOffset = GetLineOffsetArg(args, 1);
@@ -500,19 +501,20 @@ class ContextifyScript : public BaseObject {
     else if (produce_cached_data)
       compile_options = ScriptCompiler::kProduceCodeCache;
 
-    Local<UnboundScript> v8_script = ScriptCompiler::CompileUnbound(
+    MaybeLocal<UnboundScript> v8_script = ScriptCompiler::CompileUnboundScript(
         env->isolate(),
         &source,
         compile_options);
 
     if (v8_script.IsEmpty()) {
       if (display_errors) {
-        AppendExceptionLine(env, try_catch.Exception(), try_catch.Message());
+        DecorateErrorStack(env, try_catch);
       }
       try_catch.ReThrow();
       return;
     }
-    contextify_script->script_.Reset(env->isolate(), v8_script);
+    contextify_script->script_.Reset(env->isolate(),
+                                     v8_script.ToLocalChecked());
 
     if (compile_options == ScriptCompiler::kConsumeCodeCache) {
       args.This()->Set(
@@ -544,7 +546,7 @@ class ContextifyScript : public BaseObject {
   // args: [options]
   static void RunInThisContext(const FunctionCallbackInfo<Value>& args) {
     // Assemble arguments
-    TryCatch try_catch;
+    TryCatch try_catch(args.GetIsolate());
     uint64_t timeout = GetTimeoutArg(args, 0);
     bool display_errors = GetDisplayErrorsArg(args, 0);
     if (try_catch.HasCaught()) {
@@ -572,7 +574,7 @@ class ContextifyScript : public BaseObject {
 
     Local<Object> sandbox = args[0].As<Object>();
     {
-      TryCatch try_catch;
+      TryCatch try_catch(env->isolate());
       timeout = GetTimeoutArg(args, 1);
       display_errors = GetDisplayErrorsArg(args, 1);
       if (try_catch.HasCaught()) {
@@ -583,8 +585,7 @@ class ContextifyScript : public BaseObject {
 
     // Get the context from the sandbox
     ContextifyContext* contextify_context =
-        ContextifyContext::ContextFromContextifiedSandbox(env->isolate(),
-                                                          sandbox);
+        ContextifyContext::ContextFromContextifiedSandbox(env, sandbox);
     if (contextify_context == nullptr) {
       return env->ThrowTypeError(
           "sandbox argument must have been converted to a context.");
@@ -594,7 +595,7 @@ class ContextifyScript : public BaseObject {
       return;
 
     {
-      TryCatch try_catch;
+      TryCatch try_catch(env->isolate());
       // Do the eval within the context
       Context::Scope context_scope(contextify_context->context());
       if (EvalMachine(contextify_context->env(),
@@ -610,6 +611,40 @@ class ContextifyScript : public BaseObject {
         return;
       }
     }
+  }
+
+  static void DecorateErrorStack(Environment* env, const TryCatch& try_catch) {
+    Local<Value> exception = try_catch.Exception();
+
+    if (!exception->IsObject())
+      return;
+
+    Local<Object> err_obj = exception.As<Object>();
+
+    if (IsExceptionDecorated(env, err_obj))
+      return;
+
+    AppendExceptionLine(env, exception, try_catch.Message());
+    Local<Value> stack = err_obj->Get(env->stack_string());
+    auto maybe_value =
+        err_obj->GetPrivate(
+            env->context(),
+            env->arrow_message_private_symbol());
+
+    Local<Value> arrow;
+    if (!(maybe_value.ToLocal(&arrow) &&
+          arrow->IsString() &&
+          stack->IsString())) {
+      return;
+    }
+
+    Local<String> decorated_stack = String::Concat(arrow.As<String>(),
+                                                   stack.As<String>());
+    err_obj->Set(env->stack_string(), decorated_stack);
+    err_obj->SetPrivate(
+        env->context(),
+        env->decorated_private_symbol(),
+        True(env->isolate()));
   }
 
   static int64_t GetTimeoutArg(const FunctionCallbackInfo<Value>& args,
@@ -779,7 +814,7 @@ class ContextifyScript : public BaseObject {
     }
 
     if (try_catch.HasCaught() && try_catch.HasTerminated()) {
-      V8::CancelTerminateExecution(env->isolate());
+      env->isolate()->CancelTerminateExecution();
       env->ThrowError("Script execution timed out.");
       try_catch.ReThrow();
       return false;
@@ -788,7 +823,7 @@ class ContextifyScript : public BaseObject {
     if (result.IsEmpty()) {
       // Error occurred during execution of the script.
       if (display_errors) {
-        AppendExceptionLine(env, try_catch.Exception(), try_catch.Message());
+        DecorateErrorStack(env, try_catch);
       }
       try_catch.ReThrow();
       return false;

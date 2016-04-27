@@ -100,7 +100,7 @@ const unrefedLists = {};
 
 // Schedule or re-schedule a timer.
 // The item must have been enroll()'d first.
-exports.active = function(item) {
+const active = exports.active = function(item) {
   insert(item, false);
 };
 
@@ -282,11 +282,12 @@ const unenroll = exports.unenroll = function(item) {
 // Using existing objects as timers slightly reduces object overhead.
 exports.enroll = function(item, msecs) {
   if (typeof msecs !== 'number') {
-    throw new TypeError('msecs must be a number');
+    throw new TypeError('"msecs" argument must be a number');
   }
 
   if (msecs < 0 || !isFinite(msecs)) {
-    throw new RangeError('msecs must be a non-negative finite number');
+    throw new RangeError('"msecs" argument must be ' +
+                         'a non-negative finite number');
   }
 
   // if this item was already in a list somewhere
@@ -309,6 +310,10 @@ exports.enroll = function(item, msecs) {
 
 
 exports.setTimeout = function(callback, after) {
+  if (typeof callback !== 'function') {
+    throw new TypeError('"callback" argument must be a function');
+  }
+
   after *= 1; // coalesce to number or NaN
 
   if (!(after >= 1 && after <= TIMEOUT_MAX)) {
@@ -346,25 +351,29 @@ exports.setTimeout = function(callback, after) {
 
   if (process.domain) timer.domain = process.domain;
 
-  exports.active(timer);
+  active(timer);
 
   return timer;
 };
 
 
-exports.clearTimeout = function(timer) {
+const clearTimeout = exports.clearTimeout = function(timer) {
   if (timer && (timer[kOnTimeout] || timer._onTimeout)) {
     timer[kOnTimeout] = timer._onTimeout = null;
     if (timer instanceof Timeout) {
       timer.close(); // for after === 0
     } else {
-      exports.unenroll(timer);
+      unenroll(timer);
     }
   }
 };
 
 
 exports.setInterval = function(callback, repeat) {
+  if (typeof callback !== 'function') {
+    throw new TypeError('"callback" argument must be a function');
+  }
+
   repeat *= 1; // coalesce to number or NaN
 
   if (!(repeat >= 1 && repeat <= TIMEOUT_MAX)) {
@@ -400,7 +409,7 @@ exports.setInterval = function(callback, repeat) {
   timer._repeat = ontimeout;
 
   if (process.domain) timer.domain = process.domain;
-  exports.active(timer);
+  active(timer);
 
   return timer;
 
@@ -416,7 +425,7 @@ exports.setInterval = function(callback, repeat) {
       this._handle.start(repeat, 0);
     } else {
       timer._idleTimeout = repeat;
-      exports.active(timer);
+      active(timer);
     }
   }
 };
@@ -459,7 +468,7 @@ Timeout.prototype.unref = function() {
 
     // Prevent running cb again when unref() is called during the same cb
     if (this._called && !this._repeat) {
-      exports.unenroll(this);
+      unenroll(this);
       return;
     }
 
@@ -487,7 +496,7 @@ Timeout.prototype.close = function() {
     this._handle[kOnTimeout] = null;
     this._handle.close();
   } else {
-    exports.unenroll(this);
+    unenroll(this);
   }
   return this;
 };
@@ -555,6 +564,10 @@ Immediate.prototype._idlePrev = undefined;
 
 
 exports.setImmediate = function(callback, arg1, arg2, arg3) {
+  if (typeof callback !== 'function') {
+    throw new TypeError('"callback" argument must be a function');
+  }
+
   var i, args;
   var len = arguments.length;
   var immediate = new Immediate();

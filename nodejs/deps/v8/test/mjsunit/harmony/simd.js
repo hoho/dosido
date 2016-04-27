@@ -45,9 +45,9 @@ function isValidSimdString(string, value, type, lanes) {
 }
 
 
-var simdTypeNames = ['Float32x4', 'Int32x4', 'Bool32x4',
-                                  'Int16x8', 'Bool16x8',
-                                  'Int8x16', 'Bool8x16'];
+var simdTypeNames = ['Float32x4', 'Int32x4', 'Uint32x4', 'Bool32x4',
+                                  'Int16x8', 'Uint16x8', 'Bool16x8',
+                                  'Int8x16', 'Uint8x16', 'Bool8x16'];
 
 var nonSimdValues = [347, 1.275, NaN, "string", null, undefined, {},
                      function() {}];
@@ -212,6 +212,24 @@ function TestCoercions(type, lanes) {
       test(4294967296, 0);
       test(4294967297, 1);
       break;
+    case 'Uint32x4':
+      test(Infinity, 0);
+      test(-Infinity, 0);
+      test(NaN, 0);
+      test(0, 0);
+      test(-0, 0);
+      test(Number.MIN_VALUE, 0);
+      test(-Number.MIN_VALUE, 0);
+      test(0.1, 0);
+      test(-0.1, 0);
+      test(1, 1);
+      test(1.1, 1);
+      test(-1, 4294967295);
+      test(-1.6, 4294967295);
+      test(4294967295, 4294967295);
+      test(4294967296, 0);
+      test(4294967297, 1);
+      break;
     case 'Int16x8':
       test(Infinity, 0);
       test(-Infinity, 0);
@@ -233,6 +251,24 @@ function TestCoercions(type, lanes) {
       test(65536, 0);
       test(65537, 1);
       break;
+    case 'Uint16x8':
+      test(Infinity, 0);
+      test(-Infinity, 0);
+      test(NaN, 0);
+      test(0, 0);
+      test(-0, 0);
+      test(Number.MIN_VALUE, 0);
+      test(-Number.MIN_VALUE, 0);
+      test(0.1, 0);
+      test(-0.1, 0);
+      test(1, 1);
+      test(1.1, 1);
+      test(-1, 65535);
+      test(-1.6, 65535);
+      test(65535, 65535);
+      test(65536, 0);
+      test(65537, 1);
+      break;
     case 'Int8x16':
       test(Infinity, 0);
       test(-Infinity, 0);
@@ -251,6 +287,24 @@ function TestCoercions(type, lanes) {
       test(128, -128);
       test(129, -127);
       test(255, -1);
+      test(256, 0);
+      test(257, 1);
+      break;
+    case 'Uint8x16':
+      test(Infinity, 0);
+      test(-Infinity, 0);
+      test(NaN, 0);
+      test(0, 0);
+      test(-0, 0);
+      test(Number.MIN_VALUE, 0);
+      test(-Number.MIN_VALUE, 0);
+      test(0.1, 0);
+      test(-0.1, 0);
+      test(1, 1);
+      test(1.1, 1);
+      test(-1, 255);
+      test(-1.6, 255);
+      test(255, 255);
       test(256, 0);
       test(257, 1);
       break;
@@ -283,8 +337,8 @@ function TestEquality(type, lanes) {
   assertTrue(instance == instance)
   assertFalse(instance === Object(instance))
   assertFalse(Object(instance) === instance)
-  assertFalse(instance == Object(instance))
-  assertFalse(Object(instance) == instance)
+  assertTrue(instance == Object(instance))
+  assertTrue(Object(instance) == instance)
   assertTrue(instance === instance.valueOf())
   assertTrue(instance.valueOf() === instance)
   assertTrue(instance == instance.valueOf())
@@ -330,8 +384,11 @@ function TestEquality(type, lanes) {
       test(NaN, NaN);
       break;
     case 'Int32x4':
+    case 'Uint32x4':
     case 'Int16x8':
+    case 'Uint16x8':
     case 'Int8x16':
+    case 'Uint8x16':
       test(1, 2);
       test(1, 1);
       test(1, -1);
@@ -349,8 +406,8 @@ function TestEquality(type, lanes) {
 function TestSameValue(type, lanes) {
   var simdFn = SIMD[type];
   var instance = createInstance(type);
-  var sameValue = natives.$sameValue;
-  var sameValueZero = natives.$sameValueZero;
+  var sameValue = Object.is
+  var sameValueZero = function(x, y) { return %SameValueZero(x, y); }
 
   // SIMD values should not be the same as instances of different types.
   checkTypeMatrix(type, function(other) {
@@ -381,8 +438,11 @@ function TestSameValue(type, lanes) {
       test(NaN, NaN);
       break;
     case 'Int32x4':
+    case 'Uint32x4':
     case 'Int16x8':
+    case 'Uint16x8':
     case 'Int8x16':
+    case 'Uint8x16':
       test(1, 2);
       test(1, 1);
       test(1, -1);
@@ -558,3 +618,17 @@ function TestSIMDObject() {
   assertSame(SIMD.Bool8x16, undefined);
 }
 TestSIMDObject()
+
+
+function TestStringify(expected, input) {
+  assertEquals(expected, JSON.stringify(input));
+  assertEquals(expected, JSON.stringify(input, null, 0));
+}
+
+TestStringify(undefined, SIMD.Float32x4(1, 2, 3, 4));
+TestStringify('[null]', [SIMD.Float32x4(1, 2, 3, 4)]);
+TestStringify('[{}]', [Object(SIMD.Float32x4(1, 2, 3, 4))]);
+var simd_wrapper = Object(SIMD.Float32x4(1, 2, 3, 4));
+TestStringify('{}', simd_wrapper);
+simd_wrapper.a = 1;
+TestStringify('{"a":1}', simd_wrapper);

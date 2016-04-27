@@ -8,13 +8,14 @@
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/operator-properties.h"
+#include "src/conversions-inl.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
 SimplifiedOperatorReducer::SimplifiedOperatorReducer(JSGraph* jsgraph)
-    : jsgraph_(jsgraph), simplified_(jsgraph->zone()) {}
+    : jsgraph_(jsgraph) {}
 
 
 SimplifiedOperatorReducer::~SimplifiedOperatorReducer() {}
@@ -25,8 +26,7 @@ Reduction SimplifiedOperatorReducer::Reduce(Node* node) {
     case IrOpcode::kBooleanNot: {
       HeapObjectMatcher m(node->InputAt(0));
       if (m.HasValue()) {
-        return Replace(
-            jsgraph()->BooleanConstant(!m.Value().handle()->BooleanValue()));
+        return Replace(jsgraph()->BooleanConstant(!m.Value()->BooleanValue()));
       }
       if (m.IsBooleanNot()) return Replace(m.InputAt(0));
       break;
@@ -40,7 +40,7 @@ Reduction SimplifiedOperatorReducer::Reduce(Node* node) {
     }
     case IrOpcode::kChangeBoolToBit: {
       HeapObjectMatcher m(node->InputAt(0));
-      if (m.HasValue()) return ReplaceInt32(m.Value().handle()->BooleanValue());
+      if (m.HasValue()) return ReplaceInt32(m.Value()->BooleanValue());
       if (m.IsChangeBitToBool()) return Replace(m.InputAt(0));
       break;
     }
@@ -89,8 +89,27 @@ Reduction SimplifiedOperatorReducer::Reduce(Node* node) {
       if (m.HasValue()) return ReplaceNumber(FastUI2D(m.Value()));
       break;
     }
+    case IrOpcode::kReferenceEqual:
+      return ReduceReferenceEqual(node);
     default:
       break;
+  }
+  return NoChange();
+}
+
+
+Reduction SimplifiedOperatorReducer::ReduceReferenceEqual(Node* node) {
+  DCHECK_EQ(IrOpcode::kReferenceEqual, node->opcode());
+  Node* const left = NodeProperties::GetValueInput(node, 0);
+  Node* const right = NodeProperties::GetValueInput(node, 1);
+  HeapObjectMatcher match_left(left);
+  HeapObjectMatcher match_right(right);
+  if (match_left.HasValue() && match_right.HasValue()) {
+    if (match_left.Value().is_identical_to(match_right.Value())) {
+      return Replace(jsgraph()->TrueConstant());
+    } else {
+      return Replace(jsgraph()->FalseConstant());
+    }
   }
   return NoChange();
 }
@@ -100,8 +119,8 @@ Reduction SimplifiedOperatorReducer::Change(Node* node, const Operator* op,
                                             Node* a) {
   DCHECK_EQ(node->InputCount(), OperatorProperties::GetTotalInputCount(op));
   DCHECK_LE(1, node->InputCount());
-  node->set_op(op);
   node->ReplaceInput(0, a);
+  NodeProperties::ChangeOp(node, op);
   return Changed(node);
 }
 

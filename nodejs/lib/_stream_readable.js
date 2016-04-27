@@ -12,6 +12,25 @@ var StringDecoder;
 
 util.inherits(Readable, Stream);
 
+const hasPrependListener = typeof EE.prototype.prependListener === 'function';
+
+function prependListener(emitter, event, fn) {
+  if (hasPrependListener)
+    return emitter.prependListener(event, fn);
+
+  // This is a brutally ugly hack to make sure that our error handler
+  // is attached before any userland ones.  NEVER DO THIS. This is here
+  // only because this code needs to continue to work with older versions
+  // of Node.js that do not include the prependListener() method. The goal
+  // is to eventually remove this hack.
+  if (!emitter._events || !emitter._events[event])
+    emitter.on(event, fn);
+  else if (Array.isArray(emitter._events[event]))
+    emitter._events[event].unshift(fn);
+  else
+    emitter._events[event] = [fn, emitter._events[event]];
+}
+
 function ReadableState(options, stream) {
   options = options || {};
 
@@ -103,7 +122,7 @@ Readable.prototype.push = function(chunk, encoding) {
   if (!state.objectMode && typeof chunk === 'string') {
     encoding = encoding || state.defaultEncoding;
     if (encoding !== state.encoding) {
-      chunk = new Buffer(chunk, encoding);
+      chunk = Buffer.from(chunk, encoding);
       encoding = '';
     }
   }
@@ -538,9 +557,9 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
       // If the user unpiped during `dest.write()`, it is possible
       // to get stuck in a permanently paused state if that write
       // also returned false.
-      if (state.pipesCount === 1 &&
-          state.pipes[0] === dest &&
-          src.listenerCount('data') === 1 &&
+      // => Check whether `dest` is still a piping destination.
+      if (((state.pipesCount === 1 && state.pipes === dest) ||
+           (state.pipesCount > 1 && state.pipes.indexOf(dest) !== -1)) &&
           !cleanedUp) {
         debug('false write response, pause', src._readableState.awaitDrain);
         src._readableState.awaitDrain++;
@@ -558,15 +577,9 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
     if (EE.listenerCount(dest, 'error') === 0)
       dest.emit('error', er);
   }
-  // This is a brutally ugly hack to make sure that our error handler
-  // is attached before any userland ones.  NEVER DO THIS.
-  if (!dest._events || !dest._events.error)
-    dest.on('error', onerror);
-  else if (Array.isArray(dest._events.error))
-    dest._events.error.unshift(onerror);
-  else
-    dest._events.error = [onerror, dest._events.error];
 
+  // Make sure our error handler is attached before userland ones.
+  prependListener(dest, 'error', onerror);
 
   // Both close and finish should trigger unpipe, but only once.
   function onclose() {
@@ -866,7 +879,7 @@ function fromList(n, state) {
       if (stringMode)
         ret = '';
       else
-        ret = new Buffer(n);
+        ret = Buffer.allocUnsafe(n);
 
       var c = 0;
       for (var i = 0, l = list.length; i < l && c < n; i++) {
@@ -897,7 +910,7 @@ function endReadable(stream) {
   // If we get here before consuming all the bytes, then that is a
   // bug in node.  Should never happen.
   if (state.length > 0)
-    throw new Error('endReadable called on non-empty stream');
+    throw new Error('"endReadable()" called on non-empty stream');
 
   if (!state.endEmitted) {
     state.ended = true;

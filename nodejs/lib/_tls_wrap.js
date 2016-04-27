@@ -1,5 +1,7 @@
 'use strict';
 
+require('internal/util').assertCrypto(exports);
+
 const assert = require('assert');
 const crypto = require('crypto');
 const net = require('net');
@@ -14,21 +16,6 @@ const Timer = process.binding('timer_wrap').Timer;
 const tls_wrap = process.binding('tls_wrap');
 const TCP = process.binding('tcp_wrap').TCP;
 const Pipe = process.binding('pipe_wrap').Pipe;
-const defaultSessionIdContext = getDefaultSessionIdContext();
-
-function getDefaultSessionIdContext() {
-  var defaultText = process.argv.join(' ');
-  /* SSL_MAX_SID_CTX_LENGTH is 128 bits */
-  if (process.config.variables.openssl_fips) {
-    return crypto.createHash('sha1')
-      .update(defaultText)
-      .digest('hex').slice(0, 32);
-  } else {
-    return crypto.createHash('md5')
-      .update(defaultText)
-      .digest('hex');
-  }
-}
 
 function onhandshakestart() {
   debug('onhandshakestart');
@@ -52,7 +39,7 @@ function onhandshakestart() {
     // state machine and OpenSSL is not re-entrant. We cannot allow the user's
     // callback to destroy the connection right now, it would crash and burn.
     setImmediate(function() {
-      var err = new Error('TLS session renegotiation attack detected.');
+      var err = new Error('TLS session renegotiation attack detected');
       self._emitTLSError(err);
     });
   }
@@ -617,7 +604,7 @@ TLSSocket.prototype.setServername = function(name) {
 
 TLSSocket.prototype.setSession = function(session) {
   if (typeof session === 'string')
-    session = new Buffer(session, 'binary');
+    session = Buffer.from(session, 'binary');
   this._handle.setSession(session);
 };
 
@@ -828,14 +815,14 @@ function Server(/* [options], listener */) {
         errorEmitted = true;
         var connReset = new Error('socket hang up');
         connReset.code = 'ECONNRESET';
-        self.emit('clientError', connReset, socket);
+        self.emit('tlsClientError', connReset, socket);
       }
     });
 
     socket.on('_tlsError', function(err) {
       if (!socket._controlReleased && !errorEmitted) {
         errorEmitted = true;
-        self.emit('clientError', err, socket);
+        self.emit('tlsClientError', err, socket);
       }
     });
   });
@@ -860,7 +847,7 @@ Server.prototype._getServerData = function() {
 
 
 Server.prototype._setServerData = function(data) {
-  this.setTicketKeys(new Buffer(data.ticketKeys, 'hex'));
+  this.setTicketKeys(Buffer.from(data.ticketKeys, 'hex'));
 };
 
 
@@ -912,14 +899,17 @@ Server.prototype.setOptions = function(options) {
   if (options.sessionIdContext) {
     this.sessionIdContext = options.sessionIdContext;
   } else {
-    this.sessionIdContext = defaultSessionIdContext;
+    this.sessionIdContext = crypto.createHash('sha1')
+                                  .update(process.argv.join(' '))
+                                  .digest('hex')
+                                  .slice(0, 32);
   }
 };
 
 // SNI Contexts High-Level API
 Server.prototype.addContext = function(servername, context) {
   if (!servername) {
-    throw new Error('Servername is required parameter for Server.addContext');
+    throw new Error('"servername" is required parameter for Server.addContext');
   }
 
   var re = new RegExp('^' +

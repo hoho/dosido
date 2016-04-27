@@ -24,6 +24,7 @@ var cluster;
 const errnoException = util._errnoException;
 const exceptionWithHostPort = util._exceptionWithHostPort;
 const isLegalPort = internalNet.isLegalPort;
+const assertPort = internalNet.assertPort;
 
 function noop() {}
 
@@ -97,7 +98,6 @@ exports._normalizeConnectArgs = normalizeConnectArgs;
 // called when creating new Socket, or when re-using a closed Socket
 function initSocketHandle(self) {
   self.destroyed = false;
-  self.bytesRead = 0;
   self._bytesDispatched = 0;
   self._sockname = null;
 
@@ -111,6 +111,10 @@ function initSocketHandle(self) {
       self._writev = null;
   }
 }
+
+
+const BYTES_READ = Symbol('bytesRead');
+
 
 function Socket(options) {
   if (!(this instanceof Socket)) return new Socket(options);
@@ -179,6 +183,9 @@ function Socket(options) {
   // Reserve properties
   this.server = null;
   this._server = null;
+
+  // Used after `.destroy()`
+  this[BYTES_READ] = 0;
 }
 util.inherits(Socket, stream.Duplex);
 
@@ -444,9 +451,7 @@ Socket.prototype.destroySoon = function() {
 Socket.prototype._destroy = function(exception, cb) {
   debug('destroy');
 
-  var self = this;
-
-  function fireErrorCallbacks() {
+  function fireErrorCallbacks(self) {
     if (cb) cb(exception);
     if (exception && !self._writableState.errorEmitted) {
       process.nextTick(emitErrorNT, self, exception);
@@ -456,11 +461,11 @@ Socket.prototype._destroy = function(exception, cb) {
 
   if (this.destroyed) {
     debug('already destroyed, fire error callbacks');
-    fireErrorCallbacks();
+    fireErrorCallbacks(this);
     return;
   }
 
-  self._connecting = false;
+  this._connecting = false;
 
   this.readable = this.writable = false;
 
@@ -472,9 +477,12 @@ Socket.prototype._destroy = function(exception, cb) {
     if (this !== process.stderr)
       debug('close handle');
     var isException = exception ? true : false;
-    this._handle.close(function() {
+    // `bytesRead` should be accessible after `.destroy()`
+    this[BYTES_READ] = this._handle.bytesRead;
+
+    this._handle.close(() => {
       debug('emit close');
-      self.emit('close', isException);
+      this.emit('close', isException);
     });
     this._handle.onread = noop;
     this._handle = null;
@@ -485,7 +493,7 @@ Socket.prototype._destroy = function(exception, cb) {
   // to make it re-entrance safe in case Socket.prototype.destroy()
   // is called within callbacks
   this.destroyed = true;
-  fireErrorCallbacks();
+  fireErrorCallbacks(this);
 
   if (this._server) {
     COUNTER_NET_SERVER_CONNECTION_CLOSE(this);
@@ -522,10 +530,6 @@ function onread(nread, buffer) {
     // In theory (and in practice) calling readStop right now
     // will prevent this from being called again until _read() gets
     // called again.
-
-    // if it's not enough data, we'll just call handle.readStart()
-    // again right away.
-    self.bytesRead += nread;
 
     // Optimization: emit the original buffer with end points
     var ret = self.push(buffer);
@@ -582,16 +586,27 @@ Socket.prototype._getpeername = function() {
   return this._peername;
 };
 
+function protoGetter(name, callback) {
+  Object.defineProperty(Socket.prototype, name, {
+    configurable: false,
+    enumerable: true,
+    get: callback
+  });
+}
 
-Socket.prototype.__defineGetter__('remoteAddress', function() {
+protoGetter('bytesRead', function bytesRead() {
+  return this._handle ? this._handle.bytesRead : this[BYTES_READ];
+});
+
+protoGetter('remoteAddress', function remoteAddress() {
   return this._getpeername().address;
 });
 
-Socket.prototype.__defineGetter__('remoteFamily', function() {
+protoGetter('remoteFamily', function remoteFamily() {
   return this._getpeername().family;
 });
 
-Socket.prototype.__defineGetter__('remotePort', function() {
+protoGetter('remotePort', function remotePort() {
   return this._getpeername().port;
 });
 
@@ -610,19 +625,21 @@ Socket.prototype._getsockname = function() {
 };
 
 
-Socket.prototype.__defineGetter__('localAddress', function() {
+protoGetter('localAddress', function localAddress() {
   return this._getsockname().address;
 });
 
 
-Socket.prototype.__defineGetter__('localPort', function() {
+protoGetter('localPort', function localPort() {
   return this._getsockname().port;
 });
 
 
 Socket.prototype.write = function(chunk, encoding, cb) {
-  if (typeof chunk !== 'string' && !(chunk instanceof Buffer))
-    throw new TypeError('invalid data');
+  if (typeof chunk !== 'string' && !(chunk instanceof Buffer)) {
+    throw new TypeError(
+      'Invalid data, chunk must be a string or buffer, not ' + typeof chunk);
+  }
   return stream.Duplex.prototype.write.apply(this, arguments);
 };
 
@@ -645,7 +662,7 @@ Socket.prototype._writeGeneric = function(writev, data, encoding, cb) {
   this._unrefTimer();
 
   if (!this._handle) {
-    this._destroy(new Error('This socket is closed.'), cb);
+    this._destroy(new Error('This socket is closed'), cb);
     return false;
   }
 
@@ -722,12 +739,12 @@ function createWriteReq(req, handle, data, encoding) {
       return handle.writeUcs2String(req, data);
 
     default:
-      return handle.writeBuffer(req, new Buffer(data, encoding));
+      return handle.writeBuffer(req, Buffer.from(data, encoding));
   }
 }
 
 
-Socket.prototype.__defineGetter__('bytesWritten', function() {
+protoGetter('bytesWritten', function bytesWritten() {
   var bytes = this._bytesDispatched;
   const state = this._writableState;
   const data = this._pendingData;
@@ -916,16 +933,18 @@ function lookupAndConnect(self, options) {
   var localPort = options.localPort;
 
   if (localAddress && !exports.isIP(localAddress))
-    throw new TypeError('localAddress must be a valid IP: ' + localAddress);
+    throw new TypeError('"localAddress" option must be a valid IP: ' +
+                        localAddress);
 
   if (localPort && typeof localPort !== 'number')
-    throw new TypeError('localPort should be a number: ' + localPort);
+    throw new TypeError('"localPort" option should be a number: ' + localPort);
 
   if (typeof port !== 'undefined') {
     if (typeof port !== 'number' && typeof port !== 'string')
-      throw new TypeError('port should be a number or string: ' + port);
+      throw new TypeError('"port" option should be a number or string: ' +
+                          port);
     if (!isLegalPort(port))
-      throw new RangeError('port should be >= 0 and < 65536: ' + port);
+      throw new RangeError('"port" option should be >= 0 and < 65536: ' + port);
   }
   port |= 0;
 
@@ -940,22 +959,15 @@ function lookupAndConnect(self, options) {
   }
 
   if (options.lookup && typeof options.lookup !== 'function')
-    throw new TypeError('options.lookup should be a function.');
+    throw new TypeError('"lookup" option should be a function');
 
   var dnsopts = {
     family: options.family,
-    hints: 0
+    hints: options.hints || 0
   };
 
-  if (dnsopts.family !== 4 && dnsopts.family !== 6) {
+  if (dnsopts.family !== 4 && dnsopts.family !== 6 && dnsopts.hints === 0) {
     dnsopts.hints = dns.ADDRCONFIG;
-    // The AI_V4MAPPED hint is not supported on FreeBSD or Android,
-    // and getaddrinfo returns EAI_BADFLAGS. However, it seems to be
-    // supported on most other systems. See
-    // http://lists.freebsd.org/pipermail/freebsd-bugs/2008-February/028260.html
-    // for more information on the lack of support for FreeBSD.
-    if (process.platform !== 'freebsd' && process.platform !== 'android')
-      dnsopts.hints |= dns.V4MAPPED;
   }
 
   debug('connect: find host ' + host);
@@ -963,7 +975,7 @@ function lookupAndConnect(self, options) {
   self._host = host;
   var lookup = options.lookup || dns.lookup;
   lookup(host, dnsopts, function(err, ip, addressType) {
-    self.emit('lookup', err, ip, addressType);
+    self.emit('lookup', err, ip, addressType, host);
 
     // It's possible we were destroyed while looking this up.
     // XXX it would be great if we could cancel the promise returned by
@@ -1078,33 +1090,33 @@ function Server(options, connectionListener) {
 
   EventEmitter.call(this);
 
-  var self = this;
-
   if (typeof options === 'function') {
     connectionListener = options;
     options = {};
-    self.on('connection', connectionListener);
-  } else {
+    this.on('connection', connectionListener);
+  } else if (options == null || typeof options === 'object') {
     options = options || {};
 
     if (typeof connectionListener === 'function') {
-      self.on('connection', connectionListener);
+      this.on('connection', connectionListener);
     }
+  } else {
+    throw new TypeError('options must be an object');
   }
 
   this._connections = 0;
 
   Object.defineProperty(this, 'connections', {
-    get: internalUtil.deprecate(function() {
+    get: internalUtil.deprecate(() => {
 
-      if (self._usingSlaves) {
+      if (this._usingSlaves) {
         return null;
       }
-      return self._connections;
+      return this._connections;
     }, 'Server.connections property is deprecated. ' +
        'Use Server.getConnections method instead.'),
-    set: internalUtil.deprecate(function(val) {
-      return (self._connections = val);
+    set: internalUtil.deprecate((val) => {
+      return (this._connections = val);
     }, 'Server.connections property is deprecated.'),
     configurable: true, enumerable: false
   });
@@ -1341,8 +1353,7 @@ Server.prototype.listen = function() {
           (typeof h.port === 'undefined' && 'port' in h)) {
         // Undefined is interpreted as zero (random port) for consistency
         // with net.connect().
-        if (typeof h.port !== 'undefined' && !isLegalPort(h.port))
-          throw new RangeError('port should be >= 0 and < 65536: ' + h.port);
+        assertPort(h.port);
         if (h.host)
           listenAfterLookup(h.port | 0, h.host, backlog, h.exclusive);
         else
@@ -1363,10 +1374,12 @@ Server.prototype.listen = function() {
              typeof arguments[1] === 'function' ||
              typeof arguments[1] === 'number') {
     // The first argument is the port, no IP given.
+    assertPort(port);
     listen(self, null, port, 4, backlog);
 
   } else {
     // The first argument is the port, the second an IP.
+    assertPort(port);
     listenAfterLookup(port, arguments[1], backlog);
   }
 

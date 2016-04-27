@@ -1,8 +1,10 @@
 'use strict';
 
-const FreeList = require('internal/freelist').FreeList;
-const HTTPParser = process.binding('http_parser').HTTPParser;
+const binding = process.binding('http_parser');
+const methods = binding.methods;
+const HTTPParser = binding.HTTPParser;
 
+const FreeList = require('internal/freelist').FreeList;
 const incoming = require('_http_incoming');
 const IncomingMessage = incoming.IncomingMessage;
 const readStart = incoming.readStart;
@@ -14,7 +16,7 @@ exports.debug = debug;
 exports.CRLF = '\r\n';
 exports.chunkExpression = /chunk/i;
 exports.continueExpression = /100-continue/i;
-exports.methods = HTTPParser.methods;
+exports.methods = methods;
 
 const kOnHeaders = HTTPParser.kOnHeaders | 0;
 const kOnHeadersComplete = HTTPParser.kOnHeadersComplete | 0;
@@ -71,7 +73,7 @@ function parserOnHeadersComplete(versionMajor, versionMinor, headers, method,
 
   if (typeof method === 'number') {
     // server only
-    parser.incoming.method = HTTPParser.methods[method];
+    parser.incoming.method = methods[method];
   } else {
     // client only
     parser.incoming.statusCode = statusCode;
@@ -94,7 +96,7 @@ function parserOnHeadersComplete(versionMajor, versionMinor, headers, method,
 
   parser.incoming.upgrade = upgrade;
 
-  var skipBody = false; // response to HEAD or CONNECT
+  var skipBody = 0; // response to HEAD or CONNECT
 
   if (!upgrade) {
     // For upgraded connections and CONNECT method request, we'll emit this
@@ -103,7 +105,10 @@ function parserOnHeadersComplete(versionMajor, versionMinor, headers, method,
     skipBody = parser.onIncoming(parser.incoming, shouldKeepAlive);
   }
 
-  return skipBody;
+  if (typeof skipBody !== 'number')
+    return skipBody ? 1 : 0;
+  else
+    return skipBody;
 }
 
 // XXX This is a mess.
@@ -225,10 +230,56 @@ exports.httpSocketSetup = httpSocketSetup;
 /**
  * Verifies that the given val is a valid HTTP token
  * per the rules defined in RFC 7230
+ * See https://tools.ietf.org/html/rfc7230#section-3.2.6
+ *
+ * This implementation of checkIsHttpToken() loops over the string instead of
+ * using a regular expression since the former is up to 180% faster with v8 4.9
+ * depending on the string length (the shorter the string, the larger the
+ * performance difference)
  **/
-const token = /^[a-zA-Z0-9_!#$%&'*+.^`|~-]+$/;
 function checkIsHttpToken(val) {
-  return typeof val === 'string' && token.test(val);
+  if (typeof val !== 'string' || val.length === 0)
+    return false;
+
+  for (var i = 0, len = val.length; i < len; i++) {
+    var ch = val.charCodeAt(i);
+
+    if (ch >= 65 && ch <= 90) // A-Z
+      continue;
+
+    if (ch >= 97 && ch <= 122) // a-z
+      continue;
+
+    // ^ => 94
+    // _ => 95
+    // ` => 96
+    // | => 124
+    // ~ => 126
+    if (ch === 94 || ch === 95 || ch === 96 || ch === 124 || ch === 126)
+      continue;
+
+    if (ch >= 48 && ch <= 57) // 0-9
+      continue;
+
+    // ! => 33
+    // # => 35
+    // $ => 36
+    // % => 37
+    // & => 38
+    // ' => 39
+    // * => 42
+    // + => 43
+    // - => 45
+    // . => 46
+    if (ch >= 33 && ch <= 46) {
+      if (ch === 34 || ch === 40 || ch === 41 || ch === 44)
+        return false;
+      continue;
+    }
+
+    return false;
+  }
+  return true;
 }
 exports._checkIsHttpToken = checkIsHttpToken;
 

@@ -318,7 +318,7 @@ function normalizeSpawnArguments(file /*, args, options*/) {
   if (options === undefined)
     options = {};
   else if (options === null || typeof options !== 'object')
-    throw new TypeError('options argument must be an object');
+    throw new TypeError('"options" argument must be an object');
 
   // Make a shallow copy so we don't clobber the user's options object.
   options = Object.assign({}, options);
@@ -422,7 +422,7 @@ function spawnSync(/*file, args, options*/) {
       if (Buffer.isBuffer(input))
         pipe.input = input;
       else if (typeof input === 'string')
-        pipe.input = new Buffer(input, options.encoding);
+        pipe.input = Buffer.from(input, options.encoding);
       else
         throw new TypeError(util.format(
             'stdio[%d] should be Buffer or string not %s',
@@ -463,9 +463,10 @@ function checkExecSyncError(ret) {
     ret.error = null;
 
     if (!err) {
-      var msg = 'Command failed: ' +
-                (ret.cmd ? ret.cmd : ret.args.join(' ')) +
-                (ret.stderr ? '\n' + ret.stderr.toString() : '');
+      var msg = 'Command failed: ';
+      msg += ret.cmd || ret.args.join(' ');
+      if (ret.stderr)
+        msg += '\n' + ret.stderr.toString();
       err = new Error(msg);
     }
 

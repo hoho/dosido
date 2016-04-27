@@ -377,9 +377,7 @@ RUNTIME_FUNCTION(Runtime_AbortJS) {
 
 RUNTIME_FUNCTION(Runtime_NativeScriptsCount) {
   DCHECK(args.length() == 0);
-  return Smi::FromInt(Natives::GetBuiltinsCount() +
-                      ExtraNatives::GetBuiltinsCount() +
-                      CodeStubNatives::GetBuiltinsCount());
+  return Smi::FromInt(Natives::GetBuiltinsCount());
 }
 
 
@@ -400,7 +398,7 @@ RUNTIME_FUNCTION(Runtime_DisassembleFunction) {
   DCHECK(args.length() == 1);
   // Get the function and make sure it is compiled.
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, func, 0);
-  if (!Compiler::EnsureCompiled(func, KEEP_EXCEPTION)) {
+  if (!Compiler::Compile(func, KEEP_EXCEPTION)) {
     return isolate->heap()->exception();
   }
   OFStream os(stdout);
@@ -410,53 +408,54 @@ RUNTIME_FUNCTION(Runtime_DisassembleFunction) {
   return isolate->heap()->undefined_value();
 }
 
+namespace {
 
-static int StackSize(Isolate* isolate) {
+int StackSize(Isolate* isolate) {
   int n = 0;
   for (JavaScriptFrameIterator it(isolate); !it.done(); it.Advance()) n++;
   return n;
 }
 
-
-static void PrintTransition(Isolate* isolate, Object* result) {
-  // indentation
-  {
-    const int nmax = 80;
-    int n = StackSize(isolate);
-    if (n <= nmax)
-      PrintF("%4d:%*s", n, n, "");
-    else
-      PrintF("%4d:%*s", n, nmax, "...");
-  }
-
-  if (result == NULL) {
-    JavaScriptFrame::PrintTop(isolate, stdout, true, false);
-    PrintF(" {\n");
+void PrintIndentation(Isolate* isolate) {
+  const int nmax = 80;
+  int n = StackSize(isolate);
+  if (n <= nmax) {
+    PrintF("%4d:%*s", n, n, "");
   } else {
-    // function result
-    PrintF("} -> ");
-    result->ShortPrint();
-    PrintF("\n");
+    PrintF("%4d:%*s", n, nmax, "...");
   }
 }
 
+}  // namespace
 
 RUNTIME_FUNCTION(Runtime_TraceEnter) {
   SealHandleScope shs(isolate);
-  DCHECK(args.length() == 0);
-  PrintTransition(isolate, NULL);
+  DCHECK_EQ(0, args.length());
+  PrintIndentation(isolate);
+  JavaScriptFrame::PrintTop(isolate, stdout, true, false);
+  PrintF(" {\n");
   return isolate->heap()->undefined_value();
 }
 
 
 RUNTIME_FUNCTION(Runtime_TraceExit) {
   SealHandleScope shs(isolate);
-  DCHECK(args.length() == 1);
+  DCHECK_EQ(1, args.length());
   CONVERT_ARG_CHECKED(Object, obj, 0);
-  PrintTransition(isolate, obj);
+  PrintIndentation(isolate);
+  PrintF("} -> ");
+  obj->ShortPrint();
+  PrintF("\n");
   return obj;  // return TOS
 }
 
+RUNTIME_FUNCTION(Runtime_TraceTailCall) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(0, args.length());
+  PrintIndentation(isolate);
+  PrintF("} -> tail call ->\n");
+  return isolate->heap()->undefined_value();
+}
 
 RUNTIME_FUNCTION(Runtime_HaveSameMap) {
   SealHandleScope shs(isolate);
@@ -464,6 +463,14 @@ RUNTIME_FUNCTION(Runtime_HaveSameMap) {
   CONVERT_ARG_CHECKED(JSObject, obj1, 0);
   CONVERT_ARG_CHECKED(JSObject, obj2, 1);
   return isolate->heap()->ToBoolean(obj1->map() == obj2->map());
+}
+
+
+RUNTIME_FUNCTION(Runtime_InNewSpace) {
+  SealHandleScope shs(isolate);
+  DCHECK(args.length() == 1);
+  CONVERT_ARG_CHECKED(Object, obj, 0);
+  return isolate->heap()->ToBoolean(isolate->heap()->InNewSpace(obj));
 }
 
 

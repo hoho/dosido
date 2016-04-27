@@ -1,3 +1,4 @@
+/* eslint-disable strict */
 const scriptFiles = [
   'internal/v8_prof_polyfill',
   'v8/tools/splaytree',
@@ -25,5 +26,8 @@ if (process.platform === 'darwin') {
   tickArguments.push('--windows');
 }
 tickArguments.push.apply(tickArguments, process.argv.slice(1));
-script = 'arguments = ' + JSON.stringify(tickArguments) + ';\n' + script;
+script = `(function() {
+  arguments = ${JSON.stringify(tickArguments)};
+  ${script}
+})()`;
 eval(script);

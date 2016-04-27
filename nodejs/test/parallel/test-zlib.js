@@ -73,7 +73,7 @@ BufferStream.prototype.write = function(c) {
 BufferStream.prototype.end = function(c) {
   if (c) this.write(c);
   // flatten
-  var buf = new Buffer(this.length);
+  var buf = Buffer.allocUnsafe(this.length);
   var i = 0;
   this.chunks.forEach(function(c) {
     c.copy(buf, i);
@@ -165,9 +165,9 @@ Object.keys(tests).forEach(function(file) {
                 // verify that the same exact buffer comes out the other end.
                 buf.on('data', function(c) {
                   var msg = file + ' ' +
-                      chunkSize + ' ' +
-                      JSON.stringify(opts) + ' ' +
-                      Def.name + ' -> ' + Inf.name;
+                            chunkSize + ' ' +
+                            JSON.stringify(opts) + ' ' +
+                            Def.name + ' -> ' + Inf.name;
                   var ok = true;
                   var testNum = ++done;
                   for (var i = 0; i < Math.max(c.length, test.length); i++) {

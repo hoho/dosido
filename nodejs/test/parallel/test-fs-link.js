@@ -18,3 +18,19 @@ const callback = function(err) {
 };
 
 fs.link(srcPath, dstPath, common.mustCall(callback));
+
+// test error outputs
+
+assert.throws(
+  function() {
+    fs.link();
+  },
+  /src must be a string or Buffer/
+);
+
+assert.throws(
+  function() {
+    fs.link('abc');
+  },
+  /dest must be a string or Buffer/
+);

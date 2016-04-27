@@ -12,7 +12,7 @@ const deflater = zlib.createDeflate(opts);
 
 const chunk1 = file.slice(0, chunkSize);
 const chunk2 = file.slice(chunkSize);
-const blkhdr = new Buffer([0x00, 0x5a, 0x82, 0xa5, 0x7d]);
+const blkhdr = Buffer.from([0x00, 0x5a, 0x82, 0xa5, 0x7d]);
 const expected = Buffer.concat([blkhdr, chunk2]);
 let actual;
 
@@ -30,5 +30,5 @@ deflater.write(chunk1, function() {
 });
 
 process.once('exit', function() {
-  assert.deepEqual(actual, expected);
+  assert.deepStrictEqual(actual, expected);
 });

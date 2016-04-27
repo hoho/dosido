@@ -11,7 +11,6 @@
 #include "src/assembler.h"
 #include "src/compiler/node.h"
 #include "src/compiler/operator.h"
-#include "src/unique.h"
 
 namespace v8 {
 namespace internal {
@@ -62,18 +61,22 @@ struct ValueMatcher : public NodeMatcher {
     return value_;
   }
 
-  bool Is(const T& value) const {
-    return this->HasValue() && this->Value() == value;
-  }
-
-  bool IsInRange(const T& low, const T& high) const {
-    return this->HasValue() && low <= this->Value() && this->Value() <= high;
-  }
-
  private:
   T value_;
   bool has_value_;
 };
+
+
+template <>
+inline ValueMatcher<uint32_t, IrOpcode::kInt32Constant>::ValueMatcher(
+    Node* node)
+    : NodeMatcher(node),
+      value_(),
+      has_value_(opcode() == IrOpcode::kInt32Constant) {
+  if (has_value_) {
+    value_ = static_cast<uint32_t>(OpParameter<int32_t>(node));
+  }
+}
 
 
 template <>
@@ -94,10 +97,10 @@ inline ValueMatcher<uint64_t, IrOpcode::kInt64Constant>::ValueMatcher(
     Node* node)
     : NodeMatcher(node), value_(), has_value_(false) {
   if (opcode() == IrOpcode::kInt32Constant) {
-    value_ = OpParameter<uint32_t>(node);
+    value_ = static_cast<uint32_t>(OpParameter<int32_t>(node));
     has_value_ = true;
   } else if (opcode() == IrOpcode::kInt64Constant) {
-    value_ = OpParameter<uint64_t>(node);
+    value_ = static_cast<uint64_t>(OpParameter<int64_t>(node));
     has_value_ = true;
   }
 }
@@ -108,6 +111,12 @@ template <typename T, IrOpcode::Value kOpcode>
 struct IntMatcher final : public ValueMatcher<T, kOpcode> {
   explicit IntMatcher(Node* node) : ValueMatcher<T, kOpcode>(node) {}
 
+  bool Is(const T& value) const {
+    return this->HasValue() && this->Value() == value;
+  }
+  bool IsInRange(const T& low, const T& high) const {
+    return this->HasValue() && low <= this->Value() && this->Value() <= high;
+  }
   bool IsMultipleOf(T n) const {
     return this->HasValue() && (this->Value() % n) == 0;
   }
@@ -139,6 +148,12 @@ template <typename T, IrOpcode::Value kOpcode>
 struct FloatMatcher final : public ValueMatcher<T, kOpcode> {
   explicit FloatMatcher(Node* node) : ValueMatcher<T, kOpcode>(node) {}
 
+  bool Is(const T& value) const {
+    return this->HasValue() && this->Value() == value;
+  }
+  bool IsInRange(const T& low, const T& high) const {
+    return this->HasValue() && low <= this->Value() && this->Value() <= high;
+  }
   bool IsMinusZero() const {
     return this->Is(0.0) && std::signbit(this->Value());
   }
@@ -153,9 +168,9 @@ typedef FloatMatcher<double, IrOpcode::kNumberConstant> NumberMatcher;
 
 // A pattern matcher for heap object constants.
 struct HeapObjectMatcher final
-    : public ValueMatcher<Unique<HeapObject>, IrOpcode::kHeapConstant> {
+    : public ValueMatcher<Handle<HeapObject>, IrOpcode::kHeapConstant> {
   explicit HeapObjectMatcher(Node* node)
-      : ValueMatcher<Unique<HeapObject>, IrOpcode::kHeapConstant>(node) {}
+      : ValueMatcher<Handle<HeapObject>, IrOpcode::kHeapConstant>(node) {}
 };
 
 
@@ -164,6 +179,9 @@ struct ExternalReferenceMatcher final
     : public ValueMatcher<ExternalReference, IrOpcode::kExternalConstant> {
   explicit ExternalReferenceMatcher(Node* node)
       : ValueMatcher<ExternalReference, IrOpcode::kExternalConstant>(node) {}
+  bool Is(const ExternalReference& value) const {
+    return this->HasValue() && this->Value() == value;
+  }
 };
 
 
@@ -366,19 +384,19 @@ template <class AddMatcher>
 struct BaseWithIndexAndDisplacementMatcher {
   BaseWithIndexAndDisplacementMatcher(Node* node, bool allow_input_swap)
       : matches_(false),
-        index_(NULL),
+        index_(nullptr),
         scale_(0),
-        base_(NULL),
-        displacement_(NULL) {
+        base_(nullptr),
+        displacement_(nullptr) {
     Initialize(node, allow_input_swap);
   }
 
   explicit BaseWithIndexAndDisplacementMatcher(Node* node)
       : matches_(false),
-        index_(NULL),
+        index_(nullptr),
         scale_(0),
-        base_(NULL),
-        displacement_(NULL) {
+        base_(nullptr),
+        displacement_(nullptr) {
     Initialize(node, node->op()->HasProperty(Operator::kCommutative));
   }
 
@@ -416,10 +434,10 @@ struct BaseWithIndexAndDisplacementMatcher {
     AddMatcher m(node, allow_input_swap);
     Node* left = m.left().node();
     Node* right = m.right().node();
-    Node* displacement = NULL;
-    Node* base = NULL;
-    Node* index = NULL;
-    Node* scale_expression = NULL;
+    Node* displacement = nullptr;
+    Node* base = nullptr;
+    Node* index = nullptr;
+    Node* scale_expression = nullptr;
     bool power_of_two_plus_one = false;
     int scale = 0;
     if (m.HasIndexInput() && left->OwnedBy(node)) {
@@ -501,7 +519,7 @@ struct BaseWithIndexAndDisplacementMatcher {
       }
     }
     int64_t value = 0;
-    if (displacement != NULL) {
+    if (displacement != nullptr) {
       switch (displacement->opcode()) {
         case IrOpcode::kInt32Constant: {
           value = OpParameter<int32_t>(displacement);
@@ -516,11 +534,11 @@ struct BaseWithIndexAndDisplacementMatcher {
           break;
       }
       if (value == 0) {
-        displacement = NULL;
+        displacement = nullptr;
       }
     }
     if (power_of_two_plus_one) {
-      if (base != NULL) {
+      if (base != nullptr) {
         // If the scale requires explicitly using the index as the base, but a
         // base is already part of the match, then the (1 << N + 1) scale factor
         // can't be folded into the match and the entire index * scale

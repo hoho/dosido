@@ -60,6 +60,12 @@ const slashedProtocol = {
 };
 const querystring = require('querystring');
 
+// This constructor is used to store parsed query string values. Instantiating
+// this is faster than explicitly calling `Object.create(null)` to get a
+// "clean" empty object (tested with v8 v4.9).
+function ParsedQueryString() {}
+ParsedQueryString.prototype = Object.create(null);
+
 function urlParse(url, parseQueryString, slashesDenoteHost) {
   if (url instanceof Url) return url;
 
@@ -70,7 +76,7 @@ function urlParse(url, parseQueryString, slashesDenoteHost) {
 
 Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
   if (typeof url !== 'string') {
-    throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
+    throw new TypeError('Parameter "url" must be a string, not ' + typeof url);
   }
 
   // Copy chrome, IE, opera backslash-handling behavior.
@@ -168,7 +174,7 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
         }
       } else if (parseQueryString) {
         this.search = '';
-        this.query = {};
+        this.query = new ParsedQueryString();
       }
       return this;
     }
@@ -358,7 +364,7 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
   } else if (parseQueryString) {
     // no query string, but parseQueryString still requested
     this.search = '';
-    this.query = {};
+    this.query = new ParsedQueryString();
   }
 
   var firstIdx = (questionIdx !== -1 &&
@@ -529,7 +535,7 @@ function urlFormat(obj) {
   if (typeof obj === 'string') obj = urlParse(obj);
 
   else if (typeof obj !== 'object' || obj === null)
-    throw new TypeError("Parameter 'urlObj' must be an object, not " +
+    throw new TypeError('Parameter "urlObj" must be an object, not ' +
                         obj === null ? 'null' : typeof obj);
 
   else if (!(obj instanceof Url)) return Url.prototype.format.call(obj);
@@ -748,6 +754,7 @@ Url.prototype.resolveObject = function(relative) {
     if (relative.protocol) {
       relative.hostname = null;
       relative.port = null;
+      result.auth = null;
       if (relative.host) {
         if (relPath[0] === '') relPath[0] = relative.host;
         else relPath.unshift(relative.host);
@@ -759,10 +766,14 @@ Url.prototype.resolveObject = function(relative) {
 
   if (isRelAbs) {
     // it's absolute.
-    result.host = (relative.host || relative.host === '') ?
-                  relative.host : result.host;
-    result.hostname = (relative.hostname || relative.hostname === '') ?
-                      relative.hostname : result.hostname;
+    if (relative.host || relative.host === '') {
+      result.host = relative.host;
+      result.auth = null;
+    }
+    if (relative.hostname || relative.hostname === '') {
+      result.hostname = relative.hostname;
+      result.auth = null;
+    }
     result.search = relative.search;
     result.query = relative.query;
     srcPath = relPath;

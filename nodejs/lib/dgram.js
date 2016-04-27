@@ -54,7 +54,7 @@ function newHandle(type) {
   }
 
   if (type == 'unix_dgram')
-    throw new Error('unix_dgram sockets are not supported any more.');
+    throw new Error('"unix_dgram" type sockets are not supported any more');
 
   throw new Error('Bad socket type specified. Valid types are: udp4, udp6');
 }
@@ -241,7 +241,7 @@ Socket.prototype.sendto = function(buffer,
                                    address,
                                    callback) {
   if (typeof offset !== 'number' || typeof length !== 'number')
-    throw new Error('send takes offset and length as args 2 and 3');
+    throw new Error('Send takes "offset" and "length" as args 2 and 3');
 
   if (typeof address !== 'string')
     throw new Error(this.type + ' sockets must send to port, address');
@@ -252,7 +252,7 @@ Socket.prototype.sendto = function(buffer,
 
 function sliceBuffer(buffer, offset, length) {
   if (typeof buffer === 'string')
-    buffer = new Buffer(buffer);
+    buffer = Buffer.from(buffer);
   else if (!(buffer instanceof Buffer))
     throw new TypeError('First argument must be a buffer or string');
 
@@ -267,7 +267,7 @@ function fixBuffer(buffer) {
   for (var i = 0, l = buffer.length; i < l; i++) {
     var buf = buffer[i];
     if (typeof buf === 'string')
-      buffer[i] = new Buffer(buf);
+      buffer[i] = Buffer.from(buf);
     else if (!(buf instanceof Buffer))
       return false;
   }
@@ -318,7 +318,7 @@ Socket.prototype.send = function(buffer,
 
   if (!Array.isArray(buffer)) {
     if (typeof buffer === 'string') {
-      buffer = [ new Buffer(buffer) ];
+      buffer = [ Buffer.from(buffer) ];
     } else if (!(buffer instanceof Buffer)) {
       throw new TypeError('First argument must be a buffer or a string');
     } else {
@@ -392,7 +392,10 @@ function doSend(ex, self, ip, buffer, address, port, callback) {
 function afterSend(err, sent) {
   if (err) {
     err = exceptionWithHostPort(err, 'send', this.address, this.port);
+  } else {
+    err = null;
   }
+
   this.callback(err, sent);
 }
 

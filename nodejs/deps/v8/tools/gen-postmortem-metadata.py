@@ -82,7 +82,7 @@ consts_misc = [
     { 'name': 'OddballTrue',            'value': 'Oddball::kTrue' },
     { 'name': 'OddballTheHole',         'value': 'Oddball::kTheHole' },
     { 'name': 'OddballNull',            'value': 'Oddball::kNull' },
-    { 'name': 'OddballArgumentMarker',  'value': 'Oddball::kArgumentMarker' },
+    { 'name': 'OddballArgumentsMarker', 'value': 'Oddball::kArgumentsMarker' },
     { 'name': 'OddballUndefined',       'value': 'Oddball::kUndefined' },
     { 'name': 'OddballUninitialized',   'value': 'Oddball::kUninitialized' },
     { 'name': 'OddballOther',           'value': 'Oddball::kOther' },
@@ -189,15 +189,15 @@ consts_misc = [
 extras_accessors = [
     'JSFunction, context, Context, kContextOffset',
     'Context, closure_index, int, CLOSURE_INDEX',
-    'Context, global_object_index, int, GLOBAL_OBJECT_INDEX',
+    'Context, native_context_index, int, NATIVE_CONTEXT_INDEX',
     'Context, previous_index, int, PREVIOUS_INDEX',
     'Context, min_context_slots, int, MIN_CONTEXT_SLOTS',
     'HeapObject, map, Map, kMapOffset',
     'JSObject, elements, Object, kElementsOffset',
     'FixedArray, data, uintptr_t, kHeaderSize',
-    'JSTypedArray, length, Object, kLengthOffset',
     'JSArrayBuffer, backing_store, Object, kBackingStoreOffset',
     'JSArrayBufferView, byte_offset, Object, kByteOffsetOffset',
+    'JSTypedArray, length, Object, kLengthOffset',
     'Map, instance_attributes, int, kInstanceAttributesOffset',
     'Map, inobject_properties_or_constructor_function_index, int, kInObjectPropertiesOrConstructorFunctionIndexOffset',
     'Map, instance_size, int, kInstanceSizeOffset',
@@ -319,7 +319,7 @@ def load_objects():
                         in_insttype = False;
                         continue;
 
-                line = re.sub('//.*', '', line.rstrip().lstrip());
+                line = re.sub('//.*', '', line.strip());
 
                 if (in_insttype):
                         typestr += line;
@@ -329,10 +329,10 @@ def load_objects():
                     line);
 
                 if (match):
-                        klass = match.group(1).rstrip().lstrip();
+                        klass = match.group(1).strip();
                         pklass = match.group(3);
                         if (pklass):
-                                pklass = pklass.rstrip().lstrip();
+                                pklass = pklass.strip();
                         klasses[klass] = { 'parent': pklass };
 
         #

@@ -1,5 +1,6 @@
 'use strict';
 
+const internalUtil = require('internal/util');
 const util = require('util');
 const path = require('path');
 const net = require('net');
@@ -31,8 +32,8 @@ exports.start = function(argv, stdin, stdout) {
   stdin.resume();
 
   process.on('uncaughtException', function(e) {
-    console.error("There was an internal error in Node's debugger. " +
-        'Please report this bug.');
+    internalUtil.error('There was an internal error in Node\'s debugger. ' +
+                       'Please report this bug.');
     console.error(e.message);
     console.error(e.stack);
     if (interface_.child) interface_.child.kill();
@@ -107,7 +108,7 @@ Protocol.prototype.execute = function(d) {
       var resRawByteLength = Buffer.byteLength(res.raw, 'utf8');
 
       if (resRawByteLength - this.bodyStartByteIndex >= this.contentLength) {
-        var buf = new Buffer(resRawByteLength);
+        var buf = Buffer.allocUnsafe(resRawByteLength);
         buf.write(res.raw, 0, resRawByteLength, 'utf8');
         res.body =
             buf.slice(this.bodyStartByteIndex,
@@ -520,7 +521,7 @@ Client.prototype.mirrorObject = function(handle, depth, cb) {
     cb = cb || function() {};
     this.reqLookup(propertyRefs, function(err, res) {
       if (err) {
-        console.error('problem with reqLookup');
+        internalUtil.error('problem with reqLookup');
         cb(null, handle);
         return;
       }
@@ -672,6 +673,9 @@ const commands = [
 var helpMessage = 'Commands: ' + commands.map(function(group) {
   return group.join(', ');
 }).join(',\n');
+
+// Previous command received. Initialize to empty command.
+var lastCommand = '\n';
 
 
 function SourceUnderline(sourceText, position, repl) {
@@ -944,10 +948,10 @@ Interface.prototype.requireConnection = function() {
 Interface.prototype.controlEval = function(code, context, filename, callback) {
   try {
     // Repeat last command if empty line are going to be evaluated
-    if (this.repl.rli.history && this.repl.rli.history.length > 0) {
-      if (code === '\n') {
-        code = this.repl.rli.history[0] + '\n';
-      }
+    if (code === '\n') {
+      code = lastCommand;
+    } else {
+      lastCommand = code;
     }
 
     // exec process.title => exec("process.title");
@@ -1349,7 +1353,7 @@ Interface.prototype.setBreakpoint = function(script, line,
   }
 
   let req;
-  if (/\(\)$/.test(script)) {
+  if (script.endsWith('()')) {
     // setBreakpoint('functionname()');
     req = {
       type: 'function',
@@ -1664,7 +1668,7 @@ Interface.prototype.trySpawn = function(cb) {
         process._debugProcess(pid);
       } catch (e) {
         if (e.code === 'ESRCH') {
-          console.error(`Target process: ${pid} doesn't exist.`);
+          internalUtil.error(`Target process: ${pid} doesn't exist.`);
           process.exit(1);
         }
         throw e;
@@ -1733,7 +1737,7 @@ Interface.prototype.trySpawn = function(cb) {
   function connectError() {
     // If it's failed to connect 10 times then print failed message
     if (connectionAttempts >= 10) {
-      console.error(' failed, please retry');
+      internalUtil.error(' failed to connect, please retry');
       process.exit(1);
     }
     setTimeout(attemptConnect, 500);
