@@ -1,7 +1,6 @@
 /**
  * @fileoverview A rule to suggest using arrow functions as callbacks.
  * @author Toru Nagashima
- * @copyright 2015 Toru Nagashima. All rights reserved.
  */
 
 "use strict";
@@ -27,11 +26,6 @@ function isFunctionName(variable) {
  * @returns {boolean} `true` if the node is the specific value.
  */
 function checkMetaProperty(node, metaName, propertyName) {
-
-    // TODO: Remove this if block after https://github.com/eslint/espree/issues/206 was fixed.
-    if (typeof node.meta === "string") {
-        return node.meta === metaName && node.property === propertyName;
-    }
     return node.meta.name === metaName && node.property.name === propertyName;
 }
 
@@ -41,10 +35,10 @@ function checkMetaProperty(node, metaName, propertyName) {
  * @returns {escope.Variable} The found variable object.
  */
 function getVariableOfArguments(scope) {
-    var variables = scope.variables;
+    const variables = scope.variables;
 
-    for (var i = 0; i < variables.length; ++i) {
-        var variable = variables[i];
+    for (let i = 0; i < variables.length; ++i) {
+        const variable = variables[i];
 
         if (variable.name === "arguments") {
 
@@ -64,13 +58,13 @@ function getVariableOfArguments(scope) {
 /**
  * Checkes whether or not a given node is a callback.
  * @param {ASTNode} node - A node to check.
- * @returns {object}
+ * @returns {Object}
  *   {boolean} retv.isCallback - `true` if the node is a callback.
  *   {boolean} retv.isLexicalThis - `true` if the node is with `.bind(this)`.
  */
 function getCallbackInfo(node) {
-    var retv = {isCallback: false, isLexicalThis: false};
-    var parent = node.parent;
+    const retv = {isCallback: false, isLexicalThis: false};
+    let parent = node.parent;
 
     while (node) {
         switch (parent.type) {
@@ -121,108 +115,180 @@ function getCallbackInfo(node) {
     throw new Error("unreachable");
 }
 
+/**
+* Checks whether a simple list of parameters contains any duplicates. This does not handle complex
+parameter lists (e.g. with destructuring), since complex parameter lists are a SyntaxError with duplicate
+parameter names anyway. Instead, it always returns `false` for complex parameter lists.
+* @param {ASTNode[]} paramsList The list of parameters for a function
+* @returns {boolean} `true` if the list of parameters contains any duplicates
+*/
+function hasDuplicateParams(paramsList) {
+    return paramsList.every(param => param.type === "Identifier") && paramsList.length !== new Set(paramsList.map(param => param.name)).size;
+}
+
 //------------------------------------------------------------------------------
 // Rule Definition
 //------------------------------------------------------------------------------
 
-module.exports = function(context) {
-
-    /*
-     * {Array<{this: boolean, super: boolean, meta: boolean}>}
-     * - this - A flag which shows there are one or more ThisExpression.
-     * - super - A flag which shows there are one or more Super.
-     * - meta - A flag which shows there are one or more MethProperty.
-     */
-    var stack = [];
-
-    /**
-     * Pushes new function scope with all `false` flags.
-     * @returns {void}
-     */
-    function enterScope() {
-        stack.push({this: false, super: false, meta: false});
-    }
-
-    /**
-     * Pops a function scope from the stack.
-     * @returns {{this: boolean, super: boolean, meta: boolean}} The information of the last scope.
-     */
-    function exitScope() {
-        return stack.pop();
-    }
-
-    return {
-
-        // Reset internal state.
-        Program: function() {
-            stack = [];
+module.exports = {
+    meta: {
+        docs: {
+            description: "require arrow functions as callbacks",
+            category: "ECMAScript 6",
+            recommended: false
         },
 
-        // If there are below, it cannot replace with arrow functions merely.
-        ThisExpression: function() {
-            var info = stack[stack.length - 1];
-
-            if (info) {
-                info.this = true;
+        schema: [
+            {
+                type: "object",
+                properties: {
+                    allowNamedFunctions: {
+                        type: "boolean"
+                    },
+                    allowUnboundThis: {
+                        type: "boolean"
+                    }
+                },
+                additionalProperties: false
             }
-        },
+        ],
 
-        Super: function() {
-            var info = stack[stack.length - 1];
+        fixable: "code"
+    },
 
-            if (info) {
-                info.super = true;
-            }
-        },
+    create(context) {
+        const options = context.options[0] || {};
 
-        MetaProperty: function(node) {
-            var info = stack[stack.length - 1];
+        const allowUnboundThis = options.allowUnboundThis !== false;  // default to true
+        const allowNamedFunctions = options.allowNamedFunctions;
+        const sourceCode = context.getSourceCode();
 
-            if (info && checkMetaProperty(node, "new", "target")) {
-                info.meta = true;
-            }
-        },
+        /*
+         * {Array<{this: boolean, super: boolean, meta: boolean}>}
+         * - this - A flag which shows there are one or more ThisExpression.
+         * - super - A flag which shows there are one or more Super.
+         * - meta - A flag which shows there are one or more MethProperty.
+         */
+        let stack = [];
 
-        // To skip nested scopes.
-        FunctionDeclaration: enterScope,
-        "FunctionDeclaration:exit": exitScope,
-
-        // Main.
-        FunctionExpression: enterScope,
-        "FunctionExpression:exit": function(node) {
-            var scopeInfo = exitScope();
-
-            // Skip generators.
-            if (node.generator) {
-                return;
-            }
-
-            // Skip recursive functions.
-            var nameVar = context.getDeclaredVariables(node)[0];
-
-            if (isFunctionName(nameVar) && nameVar.references.length > 0) {
-                return;
-            }
-
-            // Skip if it's using arguments.
-            var variable = getVariableOfArguments(context.getScope());
-
-            if (variable && variable.references.length > 0) {
-                return;
-            }
-
-            // Reports if it's a callback which can replace with arrows.
-            var callbackInfo = getCallbackInfo(node);
-
-            if (callbackInfo.isCallback &&
-                (!scopeInfo.this || callbackInfo.isLexicalThis) &&
-                !scopeInfo.super &&
-                !scopeInfo.meta
-            ) {
-                context.report(node, "Unexpected function expression.");
-            }
+        /**
+         * Pushes new function scope with all `false` flags.
+         * @returns {void}
+         */
+        function enterScope() {
+            stack.push({this: false, super: false, meta: false});
         }
-    };
-};
 
-module.exports.schema = [];
+        /**
+         * Pops a function scope from the stack.
+         * @returns {{this: boolean, super: boolean, meta: boolean}} The information of the last scope.
+         */
+        function exitScope() {
+            return stack.pop();
+        }
+
+        return {
+
+            // Reset internal state.
+            Program() {
+                stack = [];
+            },
+
+            // If there are below, it cannot replace with arrow functions merely.
+            ThisExpression() {
+                const info = stack[stack.length - 1];
+
+                if (info) {
+                    info.this = true;
+                }
+            },
+
+            Super() {
+                const info = stack[stack.length - 1];
+
+                if (info) {
+                    info.super = true;
+                }
+            },
+
+            MetaProperty(node) {
+                const info = stack[stack.length - 1];
+
+                if (info && checkMetaProperty(node, "new", "target")) {
+                    info.meta = true;
+                }
+            },
+
+            // To skip nested scopes.
+            FunctionDeclaration: enterScope,
+            "FunctionDeclaration:exit": exitScope,
+
+            // Main.
+            FunctionExpression: enterScope,
+            "FunctionExpression:exit"(node) {
+                const scopeInfo = exitScope();
+
+                // Skip named function expressions
+                if (allowNamedFunctions && node.id && node.id.name) {
+                    return;
+                }
+
+                // Skip generators.
+                if (node.generator) {
+                    return;
+                }
+
+                // Skip recursive functions.
+                const nameVar = context.getDeclaredVariables(node)[0];
+
+                if (isFunctionName(nameVar) && nameVar.references.length > 0) {
+                    return;
+                }
+
+                // Skip if it's using arguments.
+                const variable = getVariableOfArguments(context.getScope());
+
+                if (variable && variable.references.length > 0) {
+                    return;
+                }
+
+                // Reports if it's a callback which can replace with arrows.
+                const callbackInfo = getCallbackInfo(node);
+
+                if (callbackInfo.isCallback &&
+                    (!allowUnboundThis || !scopeInfo.this || callbackInfo.isLexicalThis) &&
+                    !scopeInfo.super &&
+                    !scopeInfo.meta
+                ) {
+                    context.report({
+                        node,
+                        message: "Unexpected function expression.",
+                        fix(fixer) {
+                            if ((!callbackInfo.isLexicalThis && scopeInfo.this) || hasDuplicateParams(node.params)) {
+
+                                // If the callback function does not have .bind(this) and contains a reference to `this`, there
+                                // is no way to determine what `this` should be, so don't perform any fixes.
+                                // If the callback function has duplicates in its list of parameters (possible in sloppy mode),
+                                // don't replace it with an arrow function, because this is a SyntaxError with arrow functions.
+                                return null;
+                            }
+
+                            const paramsLeftParen = node.params.length ? sourceCode.getTokenBefore(node.params[0]) : sourceCode.getTokenBefore(node.body, 1);
+                            const paramsRightParen = sourceCode.getTokenBefore(node.body);
+                            const paramsFullText = sourceCode.text.slice(paramsLeftParen.range[0], paramsRightParen.range[1]);
+
+                            if (callbackInfo.isLexicalThis) {
+
+                                // If the callback function has `.bind(this)`, replace it with an arrow function and remove the binding.
+                                return fixer.replaceText(node.parent.parent, paramsFullText + " => " + sourceCode.getText(node.body));
+                            }
+
+                            // Otherwise, only replace the `function` keyword and parameters with the arrow function parameters.
+                            return fixer.replaceTextRange([node.start, node.body.start], paramsFullText + " => ");
+                        }
+                    });
+                }
+            }
+        };
+    }
+};

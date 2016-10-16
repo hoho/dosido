@@ -171,7 +171,11 @@ function oncertcb(info) {
       if (!self._handle)
         return self.destroy(new Error('Socket is closed'));
 
-      self._handle.certCbDone();
+      try {
+        self._handle.certCbDone();
+      } catch (e) {
+        self.destroy(e);
+      }
     });
   });
 }
@@ -268,11 +272,11 @@ function TLSSocket(socket, options) {
   // Proxy for API compatibility
   this.ssl = this._handle;
 
-  this.on('error', this._emitTLSError);
+  this.on('error', this._tlsError);
 
   this._init(socket, wrap);
 
-  // Make sure to setup all required properties like: `_connecting` before
+  // Make sure to setup all required properties like: `connecting` before
   // starting the flow of the data
   this.readable = true;
   this.writable = true;
@@ -422,7 +426,9 @@ TLSSocket.prototype._init = function(socket, wrap) {
 
     // Destroy socket if error happened before handshake's finish
     if (!self._secureEstablished) {
-      self.destroy(self._tlsError(err));
+      // When handshake fails control is not yet released,
+      // so self._tlsError will return null instead of actual error
+      self.destroy(err);
     } else if (options.isServer &&
                rejectUnauthorized &&
                /peer did not return a certificate/.test(err.message)) {
@@ -466,9 +472,9 @@ TLSSocket.prototype._init = function(socket, wrap) {
     this._parent = socket;
 
     // To prevent assertion in afterConnect() and properly kick off readStart
-    this._connecting = socket._connecting || !socket._handle;
+    this.connecting = socket.connecting || !socket._handle;
     socket.once('connect', function() {
-      self._connecting = false;
+      self.connecting = false;
       self.emit('connect');
     });
   }
@@ -480,7 +486,7 @@ TLSSocket.prototype._init = function(socket, wrap) {
     });
   } else {
     assert(!socket);
-    this._connecting = true;
+    this.connecting = true;
   }
 };
 
@@ -550,7 +556,7 @@ TLSSocket.prototype._releaseControl = function() {
   if (this._controlReleased)
     return false;
   this._controlReleased = true;
-  this.removeListener('error', this._emitTLSError);
+  this.removeListener('error', this._tlsError);
   return true;
 };
 
@@ -581,7 +587,7 @@ TLSSocket.prototype._finishInit = function() {
 };
 
 TLSSocket.prototype._start = function() {
-  if (this._connecting) {
+  if (this.connecting) {
     this.once('connect', function() {
       this._start();
     });
@@ -604,7 +610,7 @@ TLSSocket.prototype.setServername = function(name) {
 
 TLSSocket.prototype.setSession = function(session) {
   if (typeof session === 'string')
-    session = Buffer.from(session, 'binary');
+    session = Buffer.from(session, 'latin1');
   this._handle.setSession(session);
 };
 
@@ -914,7 +920,7 @@ Server.prototype.addContext = function(servername, context) {
 
   var re = new RegExp('^' +
                       servername.replace(/([\.^$+?\-\\[\]{}])/g, '\\$1')
-                                .replace(/\*/g, '[^\.]*') +
+                                .replace(/\*/g, '[^.]*') +
                       '$');
   this._contexts.push([re, tls.createSecureContext(context).context]);
 };
@@ -1021,6 +1027,7 @@ exports.connect = function(/* [port, host], options, cb */) {
       connect_opt = {
         port: options.port,
         host: options.host,
+        family: options.family,
         localAddress: options.localAddress
       };
     }

@@ -1,4 +1,5 @@
 #include "node.h"
+#include "node_watchdog.h"
 #include "v8.h"
 #include "env.h"
 #include "env-inl.h"
@@ -6,11 +7,13 @@
 namespace node {
 namespace util {
 
+using v8::Array;
 using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::Local;
 using v8::Object;
 using v8::Private;
+using v8::Proxy;
 using v8::String;
 using v8::Value;
 
@@ -25,6 +28,7 @@ using v8::Value;
   V(isRegExp, IsRegExp)                                                       \
   V(isSet, IsSet)                                                             \
   V(isSetIterator, IsSetIterator)                                             \
+  V(isSharedArrayBuffer, IsSharedArrayBuffer)                                 \
   V(isTypedArray, IsTypedArray)
 
 
@@ -37,6 +41,19 @@ using v8::Value;
   VALUE_METHOD_MAP(V)
 #undef V
 
+static void GetProxyDetails(const FunctionCallbackInfo<Value>& args) {
+  // Return undefined if it's not a proxy.
+  if (!args[0]->IsProxy())
+    return;
+
+  Local<Proxy> proxy = args[0].As<Proxy>();
+
+  Local<Array> ret = Array::New(args.GetIsolate(), 2);
+  ret->Set(0, proxy->GetTarget());
+  ret->Set(1, proxy->GetHandler());
+
+  args.GetReturnValue().Set(ret);
+}
 
 static void GetHiddenValue(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
@@ -73,6 +90,27 @@ static void SetHiddenValue(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+void StartSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
+  int ret = SigintWatchdogHelper::GetInstance()->Start();
+  if (ret != 0) {
+    Environment* env = Environment::GetCurrent(args);
+    env->ThrowErrnoException(ret, "StartSigintWatchdog");
+  }
+}
+
+
+void StopSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
+  bool had_pending_signals = SigintWatchdogHelper::GetInstance()->Stop();
+  args.GetReturnValue().Set(had_pending_signals);
+}
+
+
+void WatchdogHasPendingSigint(const FunctionCallbackInfo<Value>& args) {
+  bool ret = SigintWatchdogHelper::GetInstance()->HasPendingSignal();
+  args.GetReturnValue().Set(ret);
+}
+
+
 void Initialize(Local<Object> target,
                 Local<Value> unused,
                 Local<Context> context) {
@@ -84,6 +122,11 @@ void Initialize(Local<Object> target,
 
   env->SetMethod(target, "getHiddenValue", GetHiddenValue);
   env->SetMethod(target, "setHiddenValue", SetHiddenValue);
+  env->SetMethod(target, "getProxyDetails", GetProxyDetails);
+
+  env->SetMethod(target, "startSigintWatchdog", StartSigintWatchdog);
+  env->SetMethod(target, "stopSigintWatchdog", StopSigintWatchdog);
+  env->SetMethod(target, "watchdogHasPendingSigint", WatchdogHasPendingSigint);
 }
 
 }  // namespace util

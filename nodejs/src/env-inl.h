@@ -1,6 +1,8 @@
 #ifndef SRC_ENV_INL_H_
 #define SRC_ENV_INL_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include "env.h"
 #include "node.h"
 #include "util.h"
@@ -223,6 +225,9 @@ inline Environment::Environment(v8::Local<v8::Context> context,
       makecallback_cntr_(0),
       async_wrap_uid_(0),
       debugger_agent_(this),
+#if HAVE_INSPECTOR
+      inspector_agent_(this),
+#endif
       http_parser_buffer_(nullptr),
       context_(context->GetIsolate(), context) {
   // We'll be creating new objects so make sure we've entered the context.
@@ -423,7 +428,7 @@ inline ares_channel* Environment::cares_channel_ptr() {
   return &cares_channel_;
 }
 
-inline ares_task_list* Environment::cares_task_list() {
+inline node_ares_task_list* Environment::cares_task_list() {
   return &cares_task_list_;
 }
 
@@ -431,39 +436,23 @@ inline Environment::IsolateData* Environment::isolate_data() const {
   return isolate_data_;
 }
 
-// this would have been a template function were it not for the fact that g++
-// sometimes fails to resolve it...
-#define THROW_ERROR(fun)                                                      \
-  do {                                                                        \
-    v8::HandleScope scope(isolate);                                           \
-    isolate->ThrowException(fun(OneByteString(isolate, errmsg)));             \
-  }                                                                           \
-  while (0)
-
-inline void Environment::ThrowError(v8::Isolate* isolate, const char* errmsg) {
-  THROW_ERROR(v8::Exception::Error);
-}
-
-inline void Environment::ThrowTypeError(v8::Isolate* isolate,
-                                        const char* errmsg) {
-  THROW_ERROR(v8::Exception::TypeError);
-}
-
-inline void Environment::ThrowRangeError(v8::Isolate* isolate,
-                                         const char* errmsg) {
-  THROW_ERROR(v8::Exception::RangeError);
-}
-
 inline void Environment::ThrowError(const char* errmsg) {
-  ThrowError(isolate(), errmsg);
+  ThrowError(v8::Exception::Error, errmsg);
 }
 
 inline void Environment::ThrowTypeError(const char* errmsg) {
-  ThrowTypeError(isolate(), errmsg);
+  ThrowError(v8::Exception::TypeError, errmsg);
 }
 
 inline void Environment::ThrowRangeError(const char* errmsg) {
-  ThrowRangeError(isolate(), errmsg);
+  ThrowError(v8::Exception::RangeError, errmsg);
+}
+
+inline void Environment::ThrowError(
+    v8::Local<v8::Value> (*fun)(v8::Local<v8::String>),
+    const char* errmsg) {
+  v8::HandleScope handle_scope(isolate());
+  isolate()->ThrowException(fun(OneByteString(isolate(), errmsg)));
 }
 
 inline void Environment::ThrowErrnoException(int errorno,
@@ -575,5 +564,7 @@ inline v8::Local<v8::Object> Environment::NewInternalFieldObject() {
 #undef PER_ISOLATE_STRING_PROPERTIES
 
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_ENV_INL_H_

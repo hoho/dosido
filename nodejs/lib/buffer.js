@@ -2,7 +2,18 @@
 'use strict';
 
 const binding = process.binding('buffer');
+const { isArrayBuffer, isSharedArrayBuffer } = process.binding('util');
 const bindingObj = {};
+const internalUtil = require('internal/util');
+
+class FastBuffer extends Uint8Array {
+  constructor(arg1, arg2, arg3) {
+    super(arg1, arg2, arg3);
+  }
+}
+
+FastBuffer.prototype.constructor = Buffer;
+Buffer.prototype = FastBuffer.prototype;
 
 exports.Buffer = Buffer;
 exports.SlowBuffer = SlowBuffer;
@@ -18,56 +29,13 @@ var poolSize, poolOffset, allocPool;
 
 binding.setupBufferJS(Buffer.prototype, bindingObj);
 
-const swap16n = binding.swap16;
-const swap32n = binding.swap32;
-
-function swap(b, n, m) {
-  const i = b[n];
-  b[n] = b[m];
-  b[m] = i;
-}
-
-Buffer.prototype.swap16 = function swap16() {
-  // For Buffer.length < 512, it's generally faster to
-  // do the swap in javascript. For larger buffers,
-  // dropping down to the native code is faster.
-  const len = this.length;
-  if (len % 2 !== 0)
-    throw new RangeError('Buffer size must be a multiple of 16-bits');
-  if (len < 512) {
-    for (var i = 0; i < len; i += 2)
-      swap(this, i, i + 1);
-    return this;
-  }
-  return swap16n.apply(this);
-};
-
-Buffer.prototype.swap32 = function swap32() {
-  // For Buffer.length < 1024, it's generally faster to
-  // do the swap in javascript. For larger buffers,
-  // dropping down to the native code is faster.
-  const len = this.length;
-  if (len % 4 !== 0)
-    throw new RangeError('Buffer size must be a multiple of 32-bits');
-  if (len < 1024) {
-    for (var i = 0; i < len; i += 4) {
-      swap(this, i, i + 3);
-      swap(this, i + 1, i + 2);
-    }
-    return this;
-  }
-  return swap32n.apply(this);
-};
-
 const flags = bindingObj.flags;
 const kNoZeroFill = 0;
 
-function createBuffer(size, noZeroFill) {
-  flags[kNoZeroFill] = noZeroFill ? 1 : 0;
+function createUnsafeBuffer(size) {
+  flags[kNoZeroFill] = 1;
   try {
-    const ui8 = new Uint8Array(size);
-    Object.setPrototypeOf(ui8, Buffer.prototype);
-    return ui8;
+    return new FastBuffer(size);
   } finally {
     flags[kNoZeroFill] = 0;
   }
@@ -75,7 +43,7 @@ function createBuffer(size, noZeroFill) {
 
 function createPool() {
   poolSize = Buffer.poolSize;
-  allocPool = createBuffer(poolSize, true);
+  allocPool = createUnsafeBuffer(poolSize);
   poolOffset = 0;
 }
 createPool();
@@ -124,7 +92,7 @@ Buffer.from = function(value, encodingOrOffset, length) {
   if (typeof value === 'number')
     throw new TypeError('"value" argument must not be a number');
 
-  if (value instanceof ArrayBuffer)
+  if (isArrayBuffer(value) || isSharedArrayBuffer(value))
     return fromArrayBuffer(value, encodingOrOffset, length);
 
   if (typeof value === 'string')
@@ -133,7 +101,6 @@ Buffer.from = function(value, encodingOrOffset, length) {
   return fromObject(value);
 };
 
-Object.setPrototypeOf(Buffer.prototype, Uint8Array.prototype);
 Object.setPrototypeOf(Buffer, Uint8Array);
 
 function assertSize(size) {
@@ -153,18 +120,16 @@ function assertSize(size) {
  **/
 Buffer.alloc = function(size, fill, encoding) {
   assertSize(size);
-  if (size <= 0)
-    return createBuffer(size);
-  if (fill !== undefined) {
+  if (size > 0 && fill !== undefined) {
     // Since we are filling anyway, don't zero fill initially.
     // Only pay attention to encoding if it's a string. This
     // prevents accidentally sending in a number that would
     // be interpretted as a start offset.
-    return typeof encoding === 'string' ?
-        createBuffer(size, true).fill(fill, encoding) :
-        createBuffer(size, true).fill(fill);
+    if (typeof encoding !== 'string')
+      encoding = undefined;
+    return createUnsafeBuffer(size).fill(fill, encoding);
   }
-  return createBuffer(size);
+  return new FastBuffer(size);
 };
 
 /**
@@ -183,7 +148,7 @@ Buffer.allocUnsafe = function(size) {
  **/
 Buffer.allocUnsafeSlow = function(size) {
   assertSize(size);
-  return createBuffer(size, true);
+  return createUnsafeBuffer(size);
 };
 
 // If --zero-fill-buffers command line argument is set, a zero-filled
@@ -191,7 +156,7 @@ Buffer.allocUnsafeSlow = function(size) {
 function SlowBuffer(length) {
   if (+length != length)
     length = 0;
-  return createBuffer(+length, true);
+  return createUnsafeBuffer(+length);
 }
 
 Object.setPrototypeOf(SlowBuffer.prototype, Uint8Array.prototype);
@@ -199,8 +164,8 @@ Object.setPrototypeOf(SlowBuffer, Uint8Array);
 
 
 function allocate(size) {
-  if (size === 0) {
-    return createBuffer(size);
+  if (size <= 0) {
+    return new FastBuffer();
   }
   if (size < (Buffer.poolSize >>> 1)) {
     if (size > (poolSize - poolOffset))
@@ -213,7 +178,7 @@ function allocate(size) {
     // Even though this is checked above, the conditional is a safety net and
     // sanity check to prevent any subsequent typed array allocation from not
     // being zero filled.
-    return createBuffer(size, true);
+    return createUnsafeBuffer(size);
   }
 }
 
@@ -225,10 +190,10 @@ function fromString(string, encoding) {
   if (!Buffer.isEncoding(encoding))
     throw new TypeError('"encoding" must be a valid string encoding');
 
-  var length = byteLength(string, encoding);
+  if (string.length === 0)
+    return new FastBuffer();
 
-  if (length === 0)
-    return Buffer.alloc(0);
+  var length = byteLength(string, encoding);
 
   if (length >= (Buffer.poolSize >>> 1))
     return binding.createFromString(string, encoding);
@@ -246,18 +211,27 @@ function fromArrayLike(obj) {
   const length = obj.length;
   const b = allocate(length);
   for (var i = 0; i < length; i++)
-    b[i] = obj[i] & 255;
+    b[i] = obj[i];
   return b;
 }
 
 function fromArrayBuffer(obj, byteOffset, length) {
   byteOffset >>>= 0;
 
-  if (typeof length === 'undefined')
-    return binding.createFromArrayBuffer(obj, byteOffset);
+  const maxLength = obj.byteLength - byteOffset;
 
-  length >>>= 0;
-  return binding.createFromArrayBuffer(obj, byteOffset, length);
+  if (maxLength < 0)
+    throw new RangeError("'offset' is out of bounds");
+
+  if (length === undefined) {
+    length = maxLength;
+  } else {
+    length >>>= 0;
+    if (length > maxLength)
+      throw new RangeError("'length' is out of bounds");
+  }
+
+  return new FastBuffer(obj, byteOffset, length);
 }
 
 function fromObject(obj) {
@@ -272,9 +246,10 @@ function fromObject(obj) {
   }
 
   if (obj) {
-    if (obj.buffer instanceof ArrayBuffer || 'length' in obj) {
+    if ('length' in obj || isArrayBuffer(obj.buffer) ||
+        isSharedArrayBuffer(obj.buffer)) {
       if (typeof obj.length !== 'number' || obj.length !== obj.length) {
-        return allocate(0);
+        return new FastBuffer();
       }
       return fromArrayLike(obj);
     }
@@ -310,30 +285,10 @@ Buffer.compare = function compare(a, b) {
 
 
 Buffer.isEncoding = function(encoding) {
-  var loweredCase = false;
-  for (;;) {
-    switch (encoding) {
-      case 'hex':
-      case 'utf8':
-      case 'utf-8':
-      case 'ascii':
-      case 'binary':
-      case 'base64':
-      case 'ucs2':
-      case 'ucs-2':
-      case 'utf16le':
-      case 'utf-16le':
-        return true;
-
-      default:
-        if (loweredCase)
-          return false;
-        encoding = ('' + encoding).toLowerCase();
-        loweredCase = true;
-    }
-  }
+  return typeof encoding === 'string' &&
+         typeof internalUtil.normalizeEncoding(encoding) === 'string';
 };
-
+Buffer[internalUtil.kIsEncodingSymbol] = Buffer.isEncoding;
 
 Buffer.concat = function(list, length) {
   var i;
@@ -341,7 +296,7 @@ Buffer.concat = function(list, length) {
     throw new TypeError('"list" argument must be an Array of Buffers');
 
   if (list.length === 0)
-    return Buffer.alloc(0);
+    return new FastBuffer();
 
   if (length === undefined) {
     length = 0;
@@ -359,6 +314,14 @@ Buffer.concat = function(list, length) {
       throw new TypeError('"list" argument must be an Array of Buffers');
     buf.copy(buffer, pos);
     pos += buf.length;
+  }
+
+  // Note: `length` is always equal to `buffer.length` at this point
+  if (pos < length) {
+    // Zero-fill the remaining bytes if the specified `length` was more than
+    // the actual total length, i.e. if we have some remaining allocated bytes
+    // there were not initialized.
+    buffer.fill(0, pos, length);
   }
 
   return buffer;
@@ -379,8 +342,10 @@ function base64ByteLength(str, bytes) {
 
 function byteLength(string, encoding) {
   if (typeof string !== 'string') {
-    if (ArrayBuffer.isView(string) || string instanceof ArrayBuffer)
+    if (ArrayBuffer.isView(string) || isArrayBuffer(string) ||
+        isSharedArrayBuffer(string)) {
       return string.byteLength;
+    }
 
     string = '' + string;
   }
@@ -394,6 +359,7 @@ function byteLength(string, encoding) {
   for (;;) {
     switch (encoding) {
       case 'ascii':
+      case 'latin1':
       case 'binary':
         return len;
 
@@ -495,8 +461,9 @@ function slowToString(encoding, start, end) {
       case 'ascii':
         return this.asciiSlice(start, end);
 
+      case 'latin1':
       case 'binary':
-        return this.binarySlice(start, end);
+        return this.latin1Slice(start, end);
 
       case 'base64':
         return this.base64Slice(start, end);
@@ -541,8 +508,8 @@ Buffer.prototype.equals = function equals(b) {
 };
 
 
-// Inspect
-Buffer.prototype.inspect = function inspect() {
+// Override how buffers are presented by util.inspect().
+Buffer.prototype[internalUtil.inspectSymbol] = function inspect() {
   var str = '';
   var max = exports.INSPECT_MAX_BYTES;
   if (this.length > 0) {
@@ -552,6 +519,7 @@ Buffer.prototype.inspect = function inspect() {
   }
   return '<' + this.constructor.name + ' ' + str + '>';
 };
+Buffer.prototype.inspect = Buffer.prototype[internalUtil.inspectSymbol];
 
 Buffer.prototype.compare = function compare(target,
                                             start,
@@ -565,7 +533,7 @@ Buffer.prototype.compare = function compare(target,
   if (start === undefined)
     start = 0;
   if (end === undefined)
-    end = target ? target.length : 0;
+    end = target.length;
   if (thisStart === undefined)
     thisStart = 0;
   if (thisEnd === undefined)
@@ -644,6 +612,7 @@ function slowIndexOf(buffer, val, byteOffset, encoding, dir) {
       case 'ucs-2':
       case 'utf16le':
       case 'utf-16le':
+      case 'latin1':
       case 'binary':
         return binding.indexOfString(buffer, val, byteOffset, encoding, dir);
 
@@ -787,8 +756,9 @@ Buffer.prototype.write = function(string, offset, length, encoding) {
       case 'ascii':
         return this.asciiWrite(string, offset, length);
 
+      case 'latin1':
       case 'binary':
-        return this.binaryWrite(string, offset, length);
+        return this.latin1Write(string, offset, length);
 
       case 'base64':
         // Warning: maxLength not taken into account in base64Write
@@ -818,10 +788,26 @@ Buffer.prototype.toJSON = function() {
 };
 
 
+function adjustOffset(offset, length) {
+  offset = +offset;
+  if (offset === 0 || Number.isNaN(offset)) {
+    return 0;
+  }
+  if (offset < 0) {
+    offset += length;
+    return offset > 0 ? offset : 0;
+  } else {
+    return offset < length ? offset : length;
+  }
+}
+
+
 Buffer.prototype.slice = function slice(start, end) {
-  const buffer = this.subarray(start, end);
-  Object.setPrototypeOf(buffer, Buffer.prototype);
-  return buffer;
+  const srcLength = this.length;
+  start = adjustOffset(start, srcLength);
+  end = end !== undefined ? adjustOffset(end, srcLength) : srcLength;
+  const newLength = end > start ? end - start : 0;
+  return new FastBuffer(this.buffer, this.byteOffset + start, newLength);
 };
 
 
@@ -1290,4 +1276,68 @@ Buffer.prototype.writeDoubleBE = function writeDoubleBE(val, offset, noAssert) {
   else
     binding.writeDoubleBE(this, val, offset, true);
   return offset + 8;
+};
+
+const swap16n = binding.swap16;
+const swap32n = binding.swap32;
+const swap64n = binding.swap64;
+
+function swap(b, n, m) {
+  const i = b[n];
+  b[n] = b[m];
+  b[m] = i;
+}
+
+
+Buffer.prototype.swap16 = function swap16() {
+  // For Buffer.length < 128, it's generally faster to
+  // do the swap in javascript. For larger buffers,
+  // dropping down to the native code is faster.
+  const len = this.length;
+  if (len % 2 !== 0)
+    throw new RangeError('Buffer size must be a multiple of 16-bits');
+  if (len < 128) {
+    for (var i = 0; i < len; i += 2)
+      swap(this, i, i + 1);
+    return this;
+  }
+  return swap16n(this);
+};
+
+
+Buffer.prototype.swap32 = function swap32() {
+  // For Buffer.length < 192, it's generally faster to
+  // do the swap in javascript. For larger buffers,
+  // dropping down to the native code is faster.
+  const len = this.length;
+  if (len % 4 !== 0)
+    throw new RangeError('Buffer size must be a multiple of 32-bits');
+  if (len < 192) {
+    for (var i = 0; i < len; i += 4) {
+      swap(this, i, i + 3);
+      swap(this, i + 1, i + 2);
+    }
+    return this;
+  }
+  return swap32n(this);
+};
+
+
+Buffer.prototype.swap64 = function swap64() {
+  // For Buffer.length < 192, it's generally faster to
+  // do the swap in javascript. For larger buffers,
+  // dropping down to the native code is faster.
+  const len = this.length;
+  if (len % 8 !== 0)
+    throw new RangeError('Buffer size must be a multiple of 64-bits');
+  if (len < 192) {
+    for (var i = 0; i < len; i += 8) {
+      swap(this, i, i + 7);
+      swap(this, i + 1, i + 6);
+      swap(this, i + 2, i + 5);
+      swap(this, i + 3, i + 4);
+    }
+    return this;
+  }
+  return swap64n(this);
 };

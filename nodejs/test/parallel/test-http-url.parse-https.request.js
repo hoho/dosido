@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var https = require('https');
@@ -16,9 +16,6 @@ var httpsOptions = {
   key: fs.readFileSync(common.fixturesDir + '/keys/agent1-key.pem'),
   cert: fs.readFileSync(common.fixturesDir + '/keys/agent1-cert.pem')
 };
-
-var testURL = url.parse('https://localhost:' + common.PORT);
-testURL.rejectUnauthorized = false;
 
 function check(request) {
   // assert that I'm https
@@ -33,7 +30,10 @@ var server = https.createServer(httpsOptions, function(request, response) {
   server.close();
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
+  var testURL = url.parse(`https://localhost:${this.address().port}`);
+  testURL.rejectUnauthorized = false;
+
   // make the request
   var clientRequest = https.request(testURL);
   // since there is a little magic with the agent

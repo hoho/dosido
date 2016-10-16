@@ -7,6 +7,8 @@
 'use strict';
 
 const kHistorySize = 30;
+const kMincrlfDelay = 100;
+const kMaxcrlfDelay = 2000;
 
 const util = require('util');
 const debug = util.debuglog('readline');
@@ -40,10 +42,14 @@ function Interface(input, output, completer, terminal) {
     return self;
   }
 
-  this._sawReturn = false;
+  this._sawReturnAt = 0;
+  this.isCompletionEnabled = true;
+  this._sawKeyPress = false;
 
   EventEmitter.call(this);
   var historySize;
+  let crlfDelay;
+  let prompt = '> ';
 
   if (arguments.length === 1) {
     // an options object was given
@@ -51,6 +57,10 @@ function Interface(input, output, completer, terminal) {
     completer = input.completer;
     terminal = input.terminal;
     historySize = input.historySize;
+    if (input.prompt !== undefined) {
+      prompt = input.prompt;
+    }
+    crlfDelay = input.crlfDelay;
     input = input.input;
   }
 
@@ -79,6 +89,8 @@ function Interface(input, output, completer, terminal) {
   this.output = output;
   this.input = input;
   this.historySize = historySize;
+  this.crlfDelay = Math.max(kMincrlfDelay,
+                            Math.min(kMaxcrlfDelay, crlfDelay >>> 0));
 
   // Check arity, 2 - for async, 1 for sync
   if (typeof completer === 'function') {
@@ -87,7 +99,7 @@ function Interface(input, output, completer, terminal) {
     };
   }
 
-  this.setPrompt('> ');
+  this.setPrompt(prompt);
 
   this.terminal = !!terminal;
 
@@ -130,7 +142,7 @@ function Interface(input, output, completer, terminal) {
 
   } else {
 
-    emitKeypressEvents(input);
+    emitKeypressEvents(input, this);
 
     // input usually refers to stdin
     input.on('keypress', onkeypress);
@@ -165,11 +177,15 @@ function Interface(input, output, completer, terminal) {
 
 inherits(Interface, EventEmitter);
 
-Interface.prototype.__defineGetter__('columns', function() {
-  var columns = Infinity;
-  if (this.output && this.output.columns)
-    columns = this.output.columns;
-  return columns;
+Object.defineProperty(Interface.prototype, 'columns', {
+  configurable: true,
+  enumerable: true,
+  get: function() {
+    var columns = Infinity;
+    if (this.output && this.output.columns)
+      columns = this.output.columns;
+    return columns;
+  }
 });
 
 Interface.prototype.setPrompt = function(prompt) {
@@ -178,9 +194,13 @@ Interface.prototype.setPrompt = function(prompt) {
 
 
 Interface.prototype._setRawMode = function(mode) {
+  const wasInRawMode = this.input.isRaw;
+
   if (typeof this.input.setRawMode === 'function') {
-    return this.input.setRawMode(mode);
+    this.input.setRawMode(mode);
   }
+
+  return wasInRawMode;
 };
 
 
@@ -233,6 +253,9 @@ Interface.prototype._addHistory = function() {
 
   // if the history is disabled then return the line
   if (this.historySize === 0) return this.line;
+
+  // if the trimmed line is empty then return the line
+  if (this.line.trim().length === 0) return this.line;
 
   if (this.history.length === 0 || this.history[0] !== this.line) {
     this.history.unshift(this.line);
@@ -328,9 +351,10 @@ Interface.prototype._normalWrite = function(b) {
     return;
   }
   var string = this._decoder.write(b);
-  if (this._sawReturn) {
+  if (this._sawReturnAt &&
+      Date.now() - this._sawReturnAt <= this.crlfDelay) {
     string = string.replace(/^\n/, '');
-    this._sawReturn = false;
+    this._sawReturnAt = 0;
   }
 
   // Run test() on the new string chunk, not on the entire line buffer.
@@ -341,11 +365,11 @@ Interface.prototype._normalWrite = function(b) {
     this._line_buffer = null;
   }
   if (newPartContainsEnding) {
-    this._sawReturn = string.endsWith('\r');
+    this._sawReturnAt = string.endsWith('\r') ? Date.now() : 0;
 
     // got one or more newlines; process into "line" events
     var lines = string.split(lineEnding);
-    // either '' or (concievably) the unfinished portion of the next line
+    // either '' or (conceivably) the unfinished portion of the next line
     string = lines.pop();
     this._line_buffer = string;
     lines.forEach(function(line) {
@@ -829,20 +853,22 @@ Interface.prototype._ttyWrite = function(s, key) {
     /* No modifier keys used */
 
     // \r bookkeeping is only relevant if a \n comes right after.
-    if (this._sawReturn && key.name !== 'enter')
-      this._sawReturn = false;
+    if (this._sawReturnAt && key.name !== 'enter')
+      this._sawReturnAt = 0;
 
     switch (key.name) {
       case 'return':  // carriage return, i.e. \r
-        this._sawReturn = true;
+        this._sawReturnAt = Date.now();
         this._line();
         break;
 
       case 'enter':
-        if (this._sawReturn)
-          this._sawReturn = false;
-        else
+        // When key interval > crlfDelay
+        if (this._sawReturnAt === 0 ||
+            Date.now() - this._sawReturnAt > this.crlfDelay) {
           this._line();
+        }
+        this._sawReturnAt = 0;
         break;
 
       case 'backspace':
@@ -879,7 +905,7 @@ Interface.prototype._ttyWrite = function(s, key) {
 
       case 'tab':
         // If tab completion enabled, do that...
-        if (typeof this.completer === 'function') {
+        if (typeof this.completer === 'function' && this.isCompletionEnabled) {
           this._tabComplete();
           break;
         }
@@ -913,7 +939,10 @@ exports.Interface = Interface;
 const KEYPRESS_DECODER = Symbol('keypress-decoder');
 const ESCAPE_DECODER = Symbol('escape-decoder');
 
-function emitKeypressEvents(stream) {
+// GNU readline library - keyseq-timeout is 500ms (default)
+const ESCAPE_CODE_TIMEOUT = 500;
+
+function emitKeypressEvents(stream, iface) {
   if (stream[KEYPRESS_DECODER]) return;
   var StringDecoder = require('string_decoder').StringDecoder; // lazy load
   stream[KEYPRESS_DECODER] = new StringDecoder('utf8');
@@ -921,19 +950,40 @@ function emitKeypressEvents(stream) {
   stream[ESCAPE_DECODER] = emitKeys(stream);
   stream[ESCAPE_DECODER].next();
 
+  const escapeCodeTimeout = () => stream[ESCAPE_DECODER].next('');
+  let timeoutId;
+
   function onData(b) {
     if (stream.listenerCount('keypress') > 0) {
       var r = stream[KEYPRESS_DECODER].write(b);
       if (r) {
+        clearTimeout(timeoutId);
+
+        if (iface) {
+          iface._sawKeyPress = r.length === 1;
+        }
+
         for (var i = 0; i < r.length; i++) {
+          if (r[i] === '\t' && typeof r[i + 1] === 'string' && iface) {
+            iface.isCompletionEnabled = false;
+          }
+
           try {
             stream[ESCAPE_DECODER].next(r[i]);
+            // Escape letter at the tail position
+            if (r[i] === '\x1b' && i + 1 === r.length) {
+              timeoutId = setTimeout(escapeCodeTimeout, ESCAPE_CODE_TIMEOUT);
+            }
           } catch (err) {
             // if the generator throws (it could happen in the `keypress`
             // event), we need to restart it.
             stream[ESCAPE_DECODER] = emitKeys(stream);
             stream[ESCAPE_DECODER].next();
             throw err;
+          } finally {
+            if (iface) {
+              iface.isCompletionEnabled = true;
+            }
           }
         }
       }

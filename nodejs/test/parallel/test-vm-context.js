@@ -32,8 +32,7 @@ console.error('test runInContext signature');
 var gh1140Exception;
 try {
   vm.runInContext('throw new Error()', context, 'expected-filename.js');
-}
-catch (e) {
+} catch (e) {
   gh1140Exception = e;
   assert.ok(/expected-filename/.test(e.stack),
             'expected appearance of filename in Error stack');
@@ -52,7 +51,7 @@ console.error('test RegExp as argument to assert.throws');
 script = vm.createScript('var assert = require(\'assert\'); assert.throws(' +
                          'function() { throw "hello world"; }, /hello/);',
                          'some.js');
-script.runInNewContext({ require : require });
+script.runInNewContext({ require: require });
 
 // Issue GH-7529
 script = vm.createScript('delete b');
@@ -72,3 +71,7 @@ assert.throws(function() {
 }, function(err) {
   return /expected-filename.js:33:130/.test(err.stack);
 }, 'Expected appearance of proper offset in Error stack');
+
+// https://github.com/nodejs/node/issues/6158
+ctx = new Proxy({}, {});
+assert.strictEqual(typeof vm.runInNewContext('String', ctx), 'function');

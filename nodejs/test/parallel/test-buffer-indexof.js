@@ -1,15 +1,15 @@
 'use strict';
 require('../common');
-var assert = require('assert');
+const assert = require('assert');
 
-var Buffer = require('buffer').Buffer;
+const Buffer = require('buffer').Buffer;
 
-var b = Buffer.from('abcdef');
-var buf_a = Buffer.from('a');
-var buf_bc = Buffer.from('bc');
-var buf_f = Buffer.from('f');
-var buf_z = Buffer.from('z');
-var buf_empty = Buffer.from('');
+const b = Buffer.from('abcdef');
+const buf_a = Buffer.from('a');
+const buf_bc = Buffer.from('bc');
+const buf_f = Buffer.from('f');
+const buf_z = Buffer.from('z');
+const buf_empty = Buffer.from('');
 
 assert.equal(b.indexOf('a'), 0);
 assert.equal(b.indexOf('a', 1), -1);
@@ -78,46 +78,101 @@ assert.equal(b.indexOf(Buffer.from('f'), 6), -1);
 
 assert.equal(Buffer.from('ff').indexOf(Buffer.from('f'), 1, 'ucs2'), -1);
 
+// test invalid and uppercase encoding
+assert.strictEqual(b.indexOf('b', 'utf8'), 1);
+assert.strictEqual(b.indexOf('b', 'UTF8'), 1);
+assert.strictEqual(b.indexOf('62', 'HEX'), 1);
+assert.throws(() => b.indexOf('bad', 'enc'), /Unknown encoding: enc/);
+
 // test hex encoding
-assert.equal(
-    Buffer.from(b.toString('hex'), 'hex')
-    .indexOf('64', 0, 'hex'), 3);
-assert.equal(
-    Buffer.from(b.toString('hex'), 'hex')
-    .indexOf(Buffer.from('64', 'hex'), 0, 'hex'), 3);
+assert.strictEqual(
+  Buffer.from(b.toString('hex'), 'hex')
+    .indexOf('64', 0, 'hex'),
+  3
+);
+assert.strictEqual(
+  Buffer.from(b.toString('hex'), 'hex')
+    .indexOf(Buffer.from('64', 'hex'), 0, 'hex'),
+  3
+);
 
 // test base64 encoding
-assert.equal(
-    Buffer.from(b.toString('base64'), 'base64')
-    .indexOf('ZA==', 0, 'base64'), 3);
-assert.equal(
-    Buffer.from(b.toString('base64'), 'base64')
-    .indexOf(Buffer.from('ZA==', 'base64'), 0, 'base64'), 3);
+assert.strictEqual(
+  Buffer.from(b.toString('base64'), 'base64')
+    .indexOf('ZA==', 0, 'base64'),
+  3
+);
+assert.strictEqual(
+  Buffer.from(b.toString('base64'), 'base64')
+    .indexOf(Buffer.from('ZA==', 'base64'), 0, 'base64'),
+  3
+);
 
 // test ascii encoding
-assert.equal(
-    Buffer.from(b.toString('ascii'), 'ascii')
-    .indexOf('d', 0, 'ascii'), 3);
-assert.equal(
-    Buffer.from(b.toString('ascii'), 'ascii')
-    .indexOf(Buffer.from('d', 'ascii'), 0, 'ascii'), 3);
+assert.strictEqual(
+  Buffer.from(b.toString('ascii'), 'ascii')
+    .indexOf('d', 0, 'ascii'),
+  3
+);
+assert.strictEqual(
+  Buffer.from(b.toString('ascii'), 'ascii')
+    .indexOf(Buffer.from('d', 'ascii'), 0, 'ascii'),
+  3
+);
+
+// test latin1 encoding
+assert.strictEqual(
+  Buffer.from(b.toString('latin1'), 'latin1')
+    .indexOf('d', 0, 'latin1'),
+  3
+);
+assert.strictEqual(
+  Buffer.from(b.toString('latin1'), 'latin1')
+    .indexOf(Buffer.from('d', 'latin1'), 0, 'latin1'),
+  3
+);
+assert.strictEqual(
+  Buffer.from('aa\u00e8aa', 'latin1')
+    .indexOf('\u00e8', 'latin1'),
+  2
+);
+assert.strictEqual(
+  Buffer.from('\u00e8', 'latin1')
+    .indexOf('\u00e8', 'latin1'),
+  0
+);
+assert.strictEqual(
+  Buffer.from('\u00e8', 'latin1')
+    .indexOf(Buffer.from('\u00e8', 'latin1'), 'latin1'),
+  0
+);
 
 // test binary encoding
-assert.equal(
-    Buffer.from(b.toString('binary'), 'binary')
-    .indexOf('d', 0, 'binary'), 3);
-assert.equal(
-    Buffer.from(b.toString('binary'), 'binary')
-    .indexOf(Buffer.from('d', 'binary'), 0, 'binary'), 3);
-assert.equal(
-    Buffer.from('aa\u00e8aa', 'binary')
-    .indexOf('\u00e8', 'binary'), 2);
-assert.equal(
-    Buffer.from('\u00e8', 'binary')
-    .indexOf('\u00e8', 'binary'), 0);
-assert.equal(
-    Buffer.from('\u00e8', 'binary')
-    .indexOf(Buffer.from('\u00e8', 'binary'), 'binary'), 0);
+assert.strictEqual(
+  Buffer.from(b.toString('binary'), 'binary')
+    .indexOf('d', 0, 'binary'),
+  3
+);
+assert.strictEqual(
+  Buffer.from(b.toString('binary'), 'binary')
+    .indexOf(Buffer.from('d', 'binary'), 0, 'binary'),
+  3
+);
+assert.strictEqual(
+  Buffer.from('aa\u00e8aa', 'binary')
+    .indexOf('\u00e8', 'binary'),
+  2
+);
+assert.strictEqual(
+  Buffer.from('\u00e8', 'binary')
+    .indexOf('\u00e8', 'binary'),
+  0
+);
+assert.strictEqual(
+  Buffer.from('\u00e8', 'binary')
+    .indexOf(Buffer.from('\u00e8', 'binary'), 'binary'),
+  0
+);
 
 
 // test optional offset with passed encoding
@@ -183,7 +238,7 @@ assert.equal(-1, mixedByteStringUtf8.indexOf('\u0396'));
 // Long string that isn't a simple repeat of a shorter string.
 var longString = 'A';
 for (let i = 66; i < 76; i++) {  // from 'B' to 'K'
-  longString =  longString + String.fromCharCode(i) + longString;
+  longString = longString + String.fromCharCode(i) + longString;
 }
 
 var longBufferString = Buffer.from(longString);
@@ -221,6 +276,15 @@ var allCharsBufferUcs2 = Buffer.from(allCharsString, 'ucs2');
 // and UC16 subject.
 assert.equal(-1, allCharsBufferUtf8.indexOf('notfound'));
 assert.equal(-1, allCharsBufferUcs2.indexOf('notfound'));
+
+// Needle is longer than haystack, but only because it's encoded as UTF-16
+assert.strictEqual(Buffer.from('aaaa').indexOf('a'.repeat(4), 'ucs2'), -1);
+
+assert.strictEqual(Buffer.from('aaaa').indexOf('a'.repeat(4), 'utf8'), 0);
+assert.strictEqual(Buffer.from('aaaa').indexOf('你好', 'ucs2'), -1);
+
+// Haystack has odd length, but the needle is UCS2.
+assert.strictEqual(Buffer.from('aaaaa').indexOf('b', 'ucs2'), -1);
 
 {
   // Find substrings in Utf8.
@@ -345,12 +409,39 @@ assert.equal(b.lastIndexOf('b', {}), 1);
 assert.equal(b.lastIndexOf('b', []), -1);
 assert.equal(b.lastIndexOf('b', [2]), 1);
 
+// Test needles longer than the haystack.
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 'ucs2'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 'utf8'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 'latin1'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 'binary'), -1);
+assert.strictEqual(b.lastIndexOf(Buffer.from('aaaaaaaaaaaaaaa')), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 2, 'ucs2'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 3, 'utf8'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 5, 'latin1'), -1);
+assert.strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 5, 'binary'), -1);
+assert.strictEqual(b.lastIndexOf(Buffer.from('aaaaaaaaaaaaaaa'), 7), -1);
+
+// 你好 expands to a total of 6 bytes using UTF-8 and 4 bytes using UTF-16
+assert.strictEqual(buf_bc.lastIndexOf('你好', 'ucs2'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 'utf8'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 'latin1'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 'binary'), -1);
+assert.strictEqual(buf_bc.lastIndexOf(Buffer.from('你好')), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 2, 'ucs2'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 3, 'utf8'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 5, 'latin1'), -1);
+assert.strictEqual(buf_bc.lastIndexOf('你好', 5, 'binary'), -1);
+assert.strictEqual(buf_bc.lastIndexOf(Buffer.from('你好'), 7), -1);
+
 // Test lastIndexOf on a longer buffer:
 var bufferString = new Buffer('a man a plan a canal panama');
 assert.equal(15, bufferString.lastIndexOf('canal'));
 assert.equal(21, bufferString.lastIndexOf('panama'));
 assert.equal(0, bufferString.lastIndexOf('a man a plan a canal panama'));
 assert.equal(-1, bufferString.lastIndexOf('a man a plan a canal mexico'));
+assert.equal(-1, bufferString.lastIndexOf('a man a plan a canal mexico city'));
+assert.equal(-1, bufferString.lastIndexOf(Buffer.from('a'.repeat(1000))));
+assert.equal(0, bufferString.lastIndexOf('a man a plan', 4));
 assert.equal(13, bufferString.lastIndexOf('a '));
 assert.equal(13, bufferString.lastIndexOf('a ', 13));
 assert.equal(6, bufferString.lastIndexOf('a ', 12));
@@ -358,6 +449,24 @@ assert.equal(0, bufferString.lastIndexOf('a ', 5));
 assert.equal(13, bufferString.lastIndexOf('a ', -1));
 assert.equal(0, bufferString.lastIndexOf('a ', -27));
 assert.equal(-1, bufferString.lastIndexOf('a ', -28));
+
+// Test lastIndexOf for the case that the first character can be found,
+// but in a part of the buffer that does not make search to search
+// due do length constraints.
+const abInUCS2 = Buffer.from('ab', 'ucs2');
+assert.strictEqual(-1, Buffer.from('µaaaa¶bbbb', 'latin1').lastIndexOf('µ'));
+assert.strictEqual(-1, Buffer.from('µaaaa¶bbbb', 'binary').lastIndexOf('µ'));
+assert.strictEqual(-1, Buffer.from('bc').lastIndexOf('ab'));
+assert.strictEqual(-1, Buffer.from('abc').lastIndexOf('qa'));
+assert.strictEqual(-1, Buffer.from('abcdef').lastIndexOf('qabc'));
+assert.strictEqual(-1, Buffer.from('bc').lastIndexOf(Buffer.from('ab')));
+assert.strictEqual(-1, Buffer.from('bc', 'ucs2').lastIndexOf('ab', 'ucs2'));
+assert.strictEqual(-1, Buffer.from('bc', 'ucs2').lastIndexOf(abInUCS2));
+
+assert.strictEqual(0, Buffer.from('abc').lastIndexOf('ab'));
+assert.strictEqual(0, Buffer.from('abc').lastIndexOf('ab', 1));
+assert.strictEqual(0, Buffer.from('abc').lastIndexOf('ab', 2));
+assert.strictEqual(0, Buffer.from('abc').lastIndexOf('ab', 3));
 
 // The above tests test the LINEAR and SINGLE-CHAR strategies.
 // Now, we test the BOYER-MOORE-HORSPOOL strategy.
@@ -399,3 +508,19 @@ pattern = reallyLong.slice(0, 1000000);  // First 1/5th.
 assert.equal(3932160, reallyLong.lastIndexOf(pattern));
 pattern = reallyLong.slice(0, 2000000);  // first 2/5ths.
 assert.equal(0, reallyLong.lastIndexOf(pattern));
+
+// test truncation of Number arguments to uint8
+{
+  const buf = Buffer.from('this is a test');
+  assert.strictEqual(buf.indexOf(0x6973), 3);
+  assert.strictEqual(buf.indexOf(0x697320), 4);
+  assert.strictEqual(buf.indexOf(0x69732069), 2);
+  assert.strictEqual(buf.indexOf(0x697374657374), 0);
+  assert.strictEqual(buf.indexOf(0x69737374), 0);
+  assert.strictEqual(buf.indexOf(0x69737465), 11);
+  assert.strictEqual(buf.indexOf(0x69737465), 11);
+  assert.strictEqual(buf.indexOf(-140), 0);
+  assert.strictEqual(buf.indexOf(-152), 1);
+  assert.strictEqual(buf.indexOf(0xff), -1);
+  assert.strictEqual(buf.indexOf(0xffff), -1);
+}

@@ -1,8 +1,8 @@
 'use strict';
 // Flags: --expose-gc
 
-require('../../common');
-var binding = require('./build/Release/binding');
+const common = require('../../common');
+const binding = require(`./build/${common.buildType}/binding`);
 
 function check(size, alignment, offset) {
   var buf = binding.alloc(size, alignment, offset);
@@ -11,9 +11,9 @@ function check(size, alignment, offset) {
   buf = null;
   binding.check(slice);
   slice = null;
-  gc();
-  gc();
-  gc();
+  global.gc();
+  global.gc();
+  global.gc();
 }
 
 check(64, 1, 0);
@@ -22,13 +22,13 @@ check(64, 1, 0);
 check(97, 1, 0);
 
 // Buffers can be unaligned
-check(64,  8, 0);
+check(64, 8, 0);
 check(64, 16, 0);
-check(64,  8, 1);
+check(64, 8, 1);
 check(64, 16, 1);
-check(97,  8, 1);
+check(97, 8, 1);
 check(97, 16, 1);
-check(97,  8, 3);
+check(97, 8, 3);
 check(97, 16, 3);
 
 // Empty ArrayBuffer does not allocate data, worth checking

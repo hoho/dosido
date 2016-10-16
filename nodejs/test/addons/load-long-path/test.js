@@ -4,6 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
+if (common.isWOW64) {
+  common.skip('doesn\'t work on WOW64');
+  return;
+}
+
 common.refreshTmpDir();
 
 // make a path that is more than 260 chars long.
@@ -16,7 +21,10 @@ for (var i = 0; i < 10; i++) {
   fs.mkdirSync(addonDestinationDir);
 }
 
-const addonPath = path.join(__dirname, 'build', 'Release', 'binding.node');
+const addonPath = path.join(__dirname,
+                            'build',
+                            common.buildType,
+                            'binding.node');
 const addonDestinationPath = path.join(addonDestinationDir, 'binding.node');
 
 // Copy binary to long path destination
@@ -25,5 +33,5 @@ fs.writeFileSync(addonDestinationPath, contents);
 
 // Attempt to load at long path destination
 var addon = require(addonDestinationPath);
-assert(addon != null);
-assert(addon.hello() == 'world');
+assert.notEqual(addon, null);
+assert.equal(addon.hello(), 'world');

@@ -47,6 +47,12 @@ else
 		$FORCE_LOAD_BEGIN../nodejs/out/Release/libv8_base.a $FORCE_LOAD_END\
 		../nodejs/out/Release/libv8_libbase.a \
 		../nodejs/out/Release/libv8_nosnapshot.a \
+		../nodejs/out/Release/libv8_inspector_stl.a \
+		../nodejs/out/Release/libicuucx.a \
+		../nodejs/out/Release/libgtest.a \
+		../nodejs/out/Release/libicudata.a \
+		../nodejs/out/Release/libicui18n.a \
+		../nodejs/out/Release/libicustubdata.a \
 		-lstdc++$LIBSTD_VERSION -lm -ldl"
 fi
 

@@ -1,6 +1,14 @@
 'use strict';
 
-const punycode = require('punycode');
+function importPunycode() {
+  try {
+    return process.binding('icu');
+  } catch (e) {
+    return require('punycode');
+  }
+}
+
+const { toASCII } = importPunycode();
 
 exports.parse = urlParse;
 exports.resolve = urlResolve;
@@ -309,7 +317,7 @@ Url.prototype.parse = function(url, parseQueryString, slashesDenoteHost) {
       // It only converts parts of the domain name that
       // have non-ASCII characters, i.e. it doesn't matter if
       // you call it with a domain that already is ASCII-only.
-      this.hostname = punycode.toASCII(this.hostname);
+      this.hostname = toASCII(this.hostname);
     }
 
     var p = this.port ? ':' + this.port : '';
@@ -611,7 +619,7 @@ Url.prototype.format = function() {
     host = '';
   }
 
-  search = search.replace('#', '%23');
+  search = search.replace(/#/g, '%23');
 
   if (hash && hash.charCodeAt(0) !== 35/*#*/) hash = '#' + hash;
   if (search && search.charCodeAt(0) !== 63/*?*/) search = '?' + search;
@@ -767,12 +775,13 @@ Url.prototype.resolveObject = function(relative) {
   if (isRelAbs) {
     // it's absolute.
     if (relative.host || relative.host === '') {
+      if (result.host !== relative.host) result.auth = null;
       result.host = relative.host;
-      result.auth = null;
+      result.port = relative.port;
     }
     if (relative.hostname || relative.hostname === '') {
+      if (result.hostname !== relative.hostname) result.auth = null;
       result.hostname = relative.hostname;
-      result.auth = null;
     }
     result.search = relative.search;
     result.query = relative.query;
@@ -838,7 +847,7 @@ Url.prototype.resolveObject = function(relative) {
   // strip single dots, resolve double dots to parent dir
   // if the path tries to go above the root, `up` ends up > 0
   var up = 0;
-  for (var i = srcPath.length; i >= 0; i--) {
+  for (var i = srcPath.length - 1; i >= 0; i--) {
     last = srcPath[i];
     if (last === '.') {
       spliceOne(srcPath, i);

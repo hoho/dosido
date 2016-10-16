@@ -134,11 +134,37 @@ Object.defineProperty(WritableState.prototype, 'buffer', {
      'instead.')
 });
 
+// Test _writableState for inheritance to account for Duplex streams,
+// whose prototype chain only points to Readable.
+var realHasInstance;
+if (typeof Symbol === 'function' && Symbol.hasInstance) {
+  realHasInstance = Function.prototype[Symbol.hasInstance];
+  Object.defineProperty(Writable, Symbol.hasInstance, {
+    value: function(object) {
+      if (realHasInstance.call(this, object))
+        return true;
+
+      return object && object._writableState instanceof WritableState;
+    }
+  });
+} else {
+  realHasInstance = function(object) {
+    return object instanceof this;
+  };
+}
+
 function Writable(options) {
-  // Writable ctor is applied to Duplexes, though they're not
-  // instanceof Writable, they're instanceof Readable.
-  if (!(this instanceof Writable) && !(this instanceof Stream.Duplex))
+  // Writable ctor is applied to Duplexes, too.
+  // `realHasInstance` is necessary because using plain `instanceof`
+  // would return false, as no `_writableState` property is attached.
+
+  // Trying to use the custom `instanceof` for Writable here will also break the
+  // Node.js LazyTransform implementation, which has a non-trivial getter for
+  // `_writableState` that would lead to infinite recursion.
+  if (!(realHasInstance.call(Writable, this)) &&
+      !(this instanceof Stream.Duplex)) {
     return new Writable(options);
+  }
 
   this._writableState = new WritableState(options, this);
 
@@ -251,6 +277,7 @@ Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
   if (!Buffer.isEncoding(encoding))
     throw new TypeError('Unknown encoding: ' + encoding);
   this._writableState.defaultEncoding = encoding;
+  return this;
 };
 
 function decodeChunk(state, chunk, encoding) {

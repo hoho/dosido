@@ -2,7 +2,7 @@
 var common = require('../common');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var crypto = require('crypto');
@@ -36,9 +36,9 @@ function verify() {
     .verify(certPem, 'asdfasdfas', 'base64');
 }
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   tls.connect({
-    port: common.PORT,
+    port: this.address().port,
     rejectUnauthorized: false
   }, function() {
     verify();

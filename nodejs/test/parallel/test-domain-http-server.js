@@ -1,8 +1,8 @@
 'use strict';
+require('../common');
 var domain = require('domain');
 var http = require('http');
 var assert = require('assert');
-var common = require('../common');
 
 var objects = { foo: 'bar', baz: {}, num: 42, arr: [1, 2, 3] };
 objects.baz.asdf = objects;
@@ -20,7 +20,7 @@ var server = http.createServer(function(req, res) {
     serverCaught++;
     console.log('horray! got a server error', er);
     // try to send a 500.  If that fails, oh well.
-    res.writeHead(500, {'content-type':'text/plain'});
+    res.writeHead(500, {'content-type': 'text/plain'});
     res.end(er.stack || er.message || 'Unknown error');
   });
 
@@ -30,17 +30,18 @@ var server = http.createServer(function(req, res) {
     var data = JSON.stringify(objects[req.url.replace(/[^a-z]/g, '')]);
 
     // this line will throw if you pick an unknown key
-    assert(data !== undefined, 'Data should not be undefined');
+    assert.notStrictEqual(data, undefined, 'Data should not be undefined');
 
     res.writeHead(200);
     res.end(data);
   });
 });
 
-server.listen(common.PORT, next);
+server.listen(0, next);
 
 function next() {
-  console.log('listening on localhost:%d', common.PORT);
+  const port = this.address().port;
+  console.log('listening on localhost:%d', port);
 
   var requests = 0;
   var responses = 0;
@@ -61,7 +62,7 @@ function next() {
       req.socket.destroy();
     });
 
-    var req = http.get({ host: 'localhost', port: common.PORT, path: p });
+    var req = http.get({ host: 'localhost', port: port, path: p });
     dom.add(req);
     req.on('response', function(res) {
       responses++;

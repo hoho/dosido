@@ -3,12 +3,12 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.opensslCli) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL CLI.');
+  common.skip('node compiled without OpenSSL CLI.');
   return;
 }
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 
@@ -41,13 +41,13 @@ var server = tls.createServer(opts, function(s) {
   });
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   sendClient();
 });
 
 
 function sendClient() {
-  var client = tls.connect(common.PORT, {
+  var client = tls.connect(server.address().port, {
     rejectUnauthorized: false
   });
   client.on('data', function(chunk) {
@@ -72,7 +72,7 @@ function sendClient() {
 
 function sendBADTLSRecord() {
   var BAD_RECORD = Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
-  var socket = net.connect(common.PORT);
+  var socket = net.connect(server.address().port);
   var client = tls.connect({
     socket: socket,
     rejectUnauthorized: false
@@ -86,6 +86,6 @@ function sendBADTLSRecord() {
 }
 
 process.on('exit', function() {
-  assert(iter === max_iter);
+  assert.strictEqual(iter, max_iter);
   assert(success);
 });

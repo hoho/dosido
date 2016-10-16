@@ -2,13 +2,12 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 const tls = require('tls');
 const stream = require('stream');
 const net = require('net');
 
 var server;
-var cert_dir = path.resolve(__dirname, '../fixtures');
+var cert_dir = common.fixturesDir;
 var options = { key: fs.readFileSync(cert_dir + '/test_key.pem'),
                 cert: fs.readFileSync(cert_dir + '/test_cert.pem'),
                 ca: [ fs.readFileSync(cert_dir + '/test_ca.pem') ],
@@ -21,8 +20,8 @@ server = tls.createServer(options, function(s) {
     recv_bufs.push(c);
   });
 });
-server.listen(common.PORT, function() {
-  var raw = net.connect(common.PORT);
+server.listen(0, function() {
+  var raw = net.connect(this.address().port);
 
   var pending = false;
   raw.on('readable', function() {

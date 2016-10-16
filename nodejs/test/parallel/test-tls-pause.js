@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -27,10 +27,10 @@ var server = tls.Server(options, function(socket) {
   });
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   var resumed = false;
   var client = tls.connect({
-    port: common.PORT,
+    port: this.address().port,
     rejectUnauthorized: false
   }, function() {
     console.error('connected');

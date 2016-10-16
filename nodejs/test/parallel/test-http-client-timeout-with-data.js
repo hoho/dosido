@@ -13,18 +13,19 @@ process.on('exit', function() {
 
 const options = {
   method: 'GET',
-  port: common.PORT,
+  port: undefined,
   host: '127.0.0.1',
   path: '/'
 };
 
 const server = http.createServer(function(req, res) {
-  res.writeHead(200, {'Content-Length':'2'});
+  res.writeHead(200, {'Content-Length': '2'});
   res.write('*');
   setTimeout(function() { res.end('*'); }, common.platformTimeout(100));
 });
 
-server.listen(options.port, options.host, function() {
+server.listen(0, options.host, function() {
+  options.port = this.address().port;
   const req = http.request(options, onresponse);
   req.end();
 

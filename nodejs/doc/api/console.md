@@ -1,6 +1,6 @@
 # Console
 
-    Stability: 2 - Stable
+> Stability: 2 - Stable
 
 The `console` module provides a simple debugging console that is similar to the
 JavaScript console mechanism provided by web browsers.
@@ -53,10 +53,14 @@ duplicate the browser's functionality exactly.
 
 ## Asynchronous vs Synchronous Consoles
 
-The console functions are asynchronous unless the destination is a file.
+The console functions are usually asynchronous unless the destination is a file.
 Disks are fast and operating systems normally employ write-back caching;
 it should be a very rare occurrence indeed that a write blocks, but it
 is possible.
+
+Additionally, console functions are blocking when outputting to TTYs
+(terminals) on OS X as a workaround for the OS's very small, 1kb buffer size.
+This is to prevent interleaving between `stdout` and `stderr`.
 
 ## Class: Console
 
@@ -96,7 +100,10 @@ The global `console` is a special `Console` whose output is sent to
 new Console(process.stdout, process.stderr);
 ```
 
-### console.assert(value[, message][, ...])
+### console.assert(value[, message][, ...args])
+<!-- YAML
+added: v0.1.101
+-->
 
 A simple assertion test that verifies whether `value` is truthy. If it is not,
 an `AssertionError` is thrown. If provided, the error `message` is formatted
@@ -150,6 +157,9 @@ console.log('this will also print');
 ```
 
 ### console.dir(obj[, options])
+<!-- YAML
+added: v0.1.101
+-->
 
 Uses [`util.inspect()`][] on `obj` and prints the resulting string to `stdout`.
 This function bypasses any custom `inspect()` function defined on `obj`. An
@@ -167,7 +177,10 @@ Defaults to `2`. To make it recurse indefinitely, pass `null`.
 Defaults to `false`. Colors are customizable; see
 [customizing `util.inspect()` colors][].
 
-### console.error([data][, ...])
+### console.error([data][, ...args])
+<!-- YAML
+added: v0.1.100
+-->
 
 Prints to `stderr` with newline. Multiple arguments can be passed, with the
 first used as the primary message and all additional used as substitution
@@ -186,11 +199,17 @@ If formatting elements (e.g. `%d`) are not found in the first string then
 [`util.inspect()`][] is called on each argument and the resulting string
 values are concatenated. See [`util.format()`][] for more information.
 
-### console.info([data][, ...])
+### console.info([data][, ...args])
+<!-- YAML
+added: v0.1.100
+-->
 
 The `console.info()` function is an alias for [`console.log()`][].
 
-### console.log([data][, ...])
+### console.log([data][, ...args])
+<!-- YAML
+added: v0.1.100
+-->
 
 Prints to `stdout` with newline. Multiple arguments can be passed, with the
 first used as the primary message and all additional used as substitution
@@ -201,7 +220,7 @@ values similar to `printf(3)` (the arguments are all passed to
 var count = 5;
 console.log('count: %d', count);
   // Prints: count: 5, to stdout
-console.log('count: ', count);
+console.log('count:', count);
   // Prints: count: 5, to stdout
 ```
 
@@ -210,16 +229,22 @@ If formatting elements (e.g. `%d`) are not found in the first string then
 values are concatenated. See [`util.format()`][] for more information.
 
 ### console.time(label)
+<!-- YAML
+added: v0.1.104
+-->
 
 Starts a timer that can be used to compute the duration of an operation. Timers
 are identified by a unique `label`. Use the same `label` when you call
 [`console.timeEnd()`][] to stop the timer and output the elapsed time in
-milliseconds to stdout. Timer durations are accurate to the sub-millisecond.
+milliseconds to `stdout`. Timer durations are accurate to the sub-millisecond.
 
 ### console.timeEnd(label)
+<!-- YAML
+added: v0.1.104
+-->
 
 Stops a timer that was previously started by calling [`console.time()`][] and
-prints the result to stdout:
+prints the result to `stdout`:
 
 ```js
 console.time('100-elements');
@@ -230,7 +255,15 @@ console.timeEnd('100-elements');
 // prints 100-elements: 225.438ms
 ```
 
-### console.trace(message[, ...])
+*Note: As of Node.js v6.0.0, `console.timeEnd()` deletes the timer to avoid
+leaking it. On older versions, the timer persisted. This allowed
+`console.timeEnd()` to be called multiple times for the same label. This
+functionality was unintended and is no longer supported.*
+
+### console.trace(message[, ...args])
+<!-- YAML
+added: v0.1.104
+-->
 
 Prints to `stderr` the string `'Trace :'`, followed by the [`util.format()`][]
 formatted message and stack trace to the current position in the code.
@@ -251,17 +284,20 @@ console.trace('Show me');
   //    at REPLServer.Interface._ttyWrite (readline.js:826:14)
 ```
 
-### console.warn([data][, ...])
+### console.warn([data][, ...args])
+<!-- YAML
+added: v0.1.100
+-->
 
 The `console.warn()` function is an alias for [`console.error()`][].
 
-[`console.error()`]: #console_console_error_data
-[`console.log()`]: #console_console_log_data
+[`console.error()`]: #console_console_error_data_args
+[`console.log()`]: #console_console_log_data_args
 [`console.time()`]: #console_console_time_label
 [`console.timeEnd()`]: #console_console_timeend_label
 [`process.stderr`]: process.html#process_process_stderr
 [`process.stdout`]: process.html#process_process_stdout
-[`util.format()`]: util.html#util_util_format_format
+[`util.format()`]: util.html#util_util_format_format_args
 [`util.inspect()`]: util.html#util_util_inspect_object_options
 [customizing `util.inspect()` colors]: util.html#util_customizing_util_inspect_colors
 [web-api-assert]: https://developer.mozilla.org/en-US/docs/Web/API/console/assert

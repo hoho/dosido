@@ -5,7 +5,14 @@
 These objects are available in all modules. Some of these objects aren't
 actually in the global scope but in the module scope - this will be noted.
 
+The objects listed here are specific to Node.js. There are a number of
+[built-in objects][] that are part of the JavaScript language itself, which are
+also globally accessible.
+
 ## Class: Buffer
+<!-- YAML
+added: v0.1.103
+-->
 
 <!-- type=global -->
 
@@ -14,6 +21,9 @@ actually in the global scope but in the module scope - this will be noted.
 Used to handle binary data. See the [buffer section][].
 
 ## \_\_dirname
+<!-- YAML
+added: v0.1.27
+-->
 
 <!-- type=var -->
 
@@ -38,9 +48,12 @@ For instance, given two modules: `a` and `b`, where `b` is a dependency of
 
 References to `__dirname` within `b.js` will return
 `/Users/mjr/app/node_modules/b` while references to `__dirname` within `a.js`
-will return `/Users/mj/app`.
+will return `/Users/mjr/app`.
 
 ## \_\_filename
+<!-- YAML
+added: v0.0.1
+-->
 
 <!-- type=var -->
 
@@ -61,24 +74,36 @@ console.log(__filename);
 `__filename` isn't actually a global but rather local to each module.
 
 ## clearImmediate(immediateObject)
+<!-- YAML
+added: v0.9.1
+-->
 
 <!--type=global-->
 
 [`clearImmediate`] is described in the [timers][] section.
 
 ## clearInterval(intervalObject)
+<!-- YAML
+added: v0.0.1
+-->
 
 <!--type=global-->
 
 [`clearInterval`] is described in the [timers][] section.
 
 ## clearTimeout(timeoutObject)
+<!-- YAML
+added: v0.0.1
+-->
 
 <!--type=global-->
 
 [`clearTimeout`] is described in the [timers][] section.
 
 ## console
+<!-- YAML
+added: v0.1.100
+-->
 
 <!-- type=global -->
 
@@ -87,6 +112,9 @@ console.log(__filename);
 Used to print to stdout and stderr. See the [`console`][] section.
 
 ## exports
+<!-- YAML
+added: v0.1.12
+-->
 
 <!-- type=var -->
 
@@ -99,6 +127,9 @@ when to use `module.exports`.
 See the [module system documentation][] for more information.
 
 ## global
+<!-- YAML
+added: v0.1.27
+-->
 
 <!-- type=global -->
 
@@ -110,6 +141,9 @@ variable. In Node.js this is different. The top-level scope is not the global
 scope; `var something` inside an Node.js module will be local to that module.
 
 ## module
+<!-- YAML
+added: v0.1.16
+-->
 
 <!-- type=var -->
 
@@ -124,6 +158,9 @@ available through `require()`.
 See the [module system documentation][] for more information.
 
 ## process
+<!-- YAML
+added: v0.1.7
+-->
 
 <!-- type=global -->
 
@@ -132,6 +169,9 @@ See the [module system documentation][] for more information.
 The process object. See the [`process` object][] section.
 
 ## require()
+<!-- YAML
+added: v0.1.13
+-->
 
 <!-- type=var -->
 
@@ -141,6 +181,9 @@ To require modules. See the [Modules][] section.  `require` isn't actually a
 global but rather local to each module.
 
 ### require.cache
+<!-- YAML
+added: v0.3.0
+-->
 
 * {Object}
 
@@ -150,8 +193,12 @@ this does not apply to [native addons][], for which reloading will result in an
 Error.
 
 ### require.extensions
+<!-- YAML
+added: v0.3.0
+deprecated: v0.10.6
+-->
 
-    Stability: 0 - Deprecated
+> Stability: 0 - Deprecated
 
 * {Object}
 
@@ -174,23 +221,35 @@ away.  However, it may have subtle bugs and complexities that are best
 left untouched.
 
 ### require.resolve()
+<!-- YAML
+added: v0.3.0
+-->
 
 Use the internal `require()` machinery to look up the location of a module,
 but rather than loading the module, just return the resolved filename.
 
-## setImmediate(callback[, arg][, ...])
+## setImmediate(callback[, ...args])
+<!-- YAML
+added: v0.9.1
+-->
 
 <!-- type=global -->
 
 [`setImmediate`] is described in the [timers][] section.
 
-## setInterval(callback, delay[, arg][, ...])
+## setInterval(callback, delay[, ...args])
+<!-- YAML
+added: v0.0.1
+-->
 
 <!-- type=global -->
 
 [`setInterval`] is described in the [timers][] section.
 
-## setTimeout(callback, delay[, arg][, ...])
+## setTimeout(callback, delay[, ...args])
+<!-- YAML
+added: v0.0.1
+-->
 
 <!-- type=global -->
 
@@ -203,9 +262,10 @@ but rather than loading the module, just return the resolved filename.
 [Modules]: modules.html#modules_modules
 [native addons]: addons.html
 [timers]: timers.html
-[`clearImmediate`]: timers.html#timers_clearimmediate_immediateobject
-[`clearInterval`]: timers.html#timers_clearinterval_intervalobject
-[`clearTimeout`]: timers.html#timers_cleartimeout_timeoutobject
-[`setImmediate`]: timers.html#timers_setimmediate_callback_arg
-[`setInterval`]: timers.html#timers_setinterval_callback_delay_arg
-[`setTimeout`]: timers.html#timers_settimeout_callback_delay_arg
+[`clearImmediate`]: timers.html#timers_clearimmediate_immediate
+[`clearInterval`]: timers.html#timers_clearinterval_timeout
+[`clearTimeout`]: timers.html#timers_cleartimeout_timeout
+[`setImmediate`]: timers.html#timers_setimmediate_callback_args
+[`setInterval`]: timers.html#timers_setinterval_callback_delay_args
+[`setTimeout`]: timers.html#timers_settimeout_callback_delay_args
+[built-in objects]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects

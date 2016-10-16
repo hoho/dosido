@@ -1,10 +1,28 @@
 .TH NODE 1 2016 Node.js Node.js
 
-.\ This is a man page comment.
-.\ Man page syntax (actually troff syntax) is somewhat obscure, but the
-.\ important part is is that .<letter> specifies <letter>'s syntax for that
-.\ line, and \f<letter> specifies it for the characters that follow.
-.\ See http://liw.fi/manpages/ for more info.
+.\" This is a man page comment.
+
+.\" Man page syntax (actually roff syntax) is somewhat obscure, but the
+.\" important part is is that .<letter> specifies <letter>'s syntax for that
+.\" line, and \f<letter> specifies it for the characters that follow.
+
+.\" .B   Bold line
+.\" .I   Italic line (Rendered as underlined text in terminals)
+.\" .BI  Alternating bold/italics without spaces between arguments.
+.\"      Use `\ ` to include an "unpaddable" (literal) space in the output.
+.\" .RI  Alternating roman/italic
+
+.\" See http://liw.fi/manpages/ for an overview, or http://www.troff.org/54.pdf
+.\" for detailed language reference.
+
+.\" Macro to display an underlined URL in bold
+.de ur
+.nr CF \\n(.f
+.ft 4
+\\$1
+.ft \\n(CF
+..
+
 
 .SH NAME
 
@@ -14,15 +32,22 @@ node \- Server-side JavaScript runtime
 .SH SYNOPSIS
 
 .B node
-[\fIoptions\fR] [\fIv8 options\fR]
-[\fIscript.js\fR | \fB\-e \fR"\fIscript\fR"]
-[\fIarguments\fR]
+.RI [ options ]
+.RI [ v8\ options ]
+.RI [ script.js \ |
+.B -e
+.RI \&" script \&"]
+.RI [ arguments ]
 .br
 .B node debug
-[\fIscript.js\fR | \fB\-e \fR"\fIscript\fR" | \fI<host>:<port>\fR] \fI...
+.RI [ script.js " | "
+.B \-e
+.RI \&" script \&"\ |
+.IR <host>:<port> ]
+.I ...
 .br
 .B node
-[\fB\-\-v8-options\fR]
+.RB [ \-\-v8-options ]
 
 Execute without arguments to start the REPL.
 
@@ -59,7 +84,7 @@ Syntax check the script without executing.
 
 .TP
 .BR \-i ", " \-\-interactive
-Opens the REPL even if stdin does not appear to be a terminal.
+Open the REPL even if stdin does not appear to be a terminal.
 
 .TP
 .BR \-r ", " \-\-require " " \fImodule\fR
@@ -88,12 +113,17 @@ Print stack traces for process warnings (including deprecations).
 
 .TP
 .BR \-\-trace\-sync\-io
-Prints a stack trace whenever synchronous I/O is detected after the first turn
+Print a stack trace whenever synchronous I/O is detected after the first turn
 of the event loop.
 
 .TP
 .BR \-\-zero\-fill\-buffers
 Automatically zero-fills all newly allocated Buffer and SlowBuffer instances.
+
+.TP
+.BR \-\-preserve\-symlinks
+Instructs the module loader to preserve symbolic links when resolving and
+caching modules.
 
 .TP
 .BR \-\-track\-heap-objects
@@ -107,6 +137,12 @@ Process v8 profiler output generated using the v8 option \fB\-\-prof\fR
 .BR \-\-v8\-options
 Print v8 command line options.
 
+Note: v8 options allow words to be separated by both dashes (\fB-\fR) or
+underscores (\fB_\fR).
+
+For example, \fB\-\-stack\-trace\-limit\fR is equivalent to
+\fB\-\-stack\_trace\_limit\fR
+
 .TP
 .BR \-\-v8\-pool\-size =\fInum\fR
 Set v8's thread pool size which will be used to allocate background jobs.
@@ -116,15 +152,18 @@ max then the largest value will be chosen.
 
 .TP
 .BR \-\-tls\-cipher\-list =\fIlist\fR
-Specify an alternative default TLS cipher list. (Requires Node.js to be built with crypto support. (Default))
+Specify an alternative default TLS cipher list. (Requires Node.js to be built
+with crypto support. (Default))
 
 .TP
 .BR \-\-enable\-fips
-Enable FIPS-compliant crypto at startup. (Requires Node.js to be built with \fB./configure \-\-openssl\-fips\fR)
+Enable FIPS-compliant crypto at startup. (Requires Node.js to be built with
+\fB./configure \-\-openssl\-fips\fR)
 
 .TP
 .BR \-\-force\-fips
-Force FIPS-compliant crypto on startup. (Cannot be disabled from script code.) (Same requirements as \fB\-\-enable\-fips\fR)
+Force FIPS-compliant crypto on startup. (Cannot be disabled from script code.)
+(Same requirements as \fB\-\-enable\-fips\fR)
 
 .TP
 .BR \-\-icu\-data\-dir =\fIfile\fR
@@ -155,17 +194,49 @@ Path to the file used to store the persistent REPL history. The default path
 is ~/.node_repl_history, which is overridden by this variable. Setting the
 value to an empty string ("" or " ") disables persistent REPL history.
 
+.TP
+.BR NODE_TTY_UNSAFE_ASYNC=1
+When set to 1, writes to stdout and stderr will be non-blocking and asynchronous
+when outputting to a TTY on platforms which support async stdio.
+Setting this will void any guarantee that stdio will not be interleaved or
+dropped at program exit. \fBAvoid use.\fR
+
+
+.SH BUGS
+Bugs are tracked in GitHub Issues:
+.ur https://github.com/nodejs/node/issues
+
+
+.SH AUTHORS
+Written and maintained by 1000+ contributors:
+.ur https://github.com/nodejs/node/blob/master/AUTHORS
+
+
+.SH COPYRIGHT
+Copyright Node.js contributors. Node.js is available under the MIT license.
+
+Node.js also includes external libraries that are available under a variety
+of licenses. See
+.ur https://github.com/nodejs/node/blob/master/LICENSE
+for the full license text.
+
 
 .SH RESOURCES AND DOCUMENTATION
+Website:
+.ur https://nodejs.org/
 
-Website: \fBhttps://nodejs.org/\fR
+Documentation:
+.ur https://nodejs.org/api/
 
-Documentation: \fBhttps://nodejs.org/api/\fR
+GitHub repository & Issue Tracker:
+.ur https://github.com/nodejs/node
 
-GitHub repository & Issue Tracker: \fBhttps://github.com/nodejs/node\fR
+Mailing list:
+.ur http://groups.google.com/group/nodejs
 
-Mailing list: \fBhttp://groups.google.com/group/nodejs\fR
+IRC (general questions):
+.ur "chat.freenode.net #node.js"
+(unofficial)
 
-IRC (general questions): \fBchat.freenode.net #node.js\fR
-
-IRC (node core development): \fBchat.freenode.net #node-dev\fR
+IRC (Node.js core development):
+.ur "chat.freenode.net #node-dev"

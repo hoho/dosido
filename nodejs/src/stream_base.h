@@ -1,11 +1,14 @@
 #ifndef SRC_STREAM_BASE_H_
 #define SRC_STREAM_BASE_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include "env.h"
 #include "async-wrap.h"
 #include "req-wrap.h"
 #include "req-wrap-inl.h"
 #include "node.h"
+#include "util.h"
 
 #include "v8.h"
 
@@ -54,6 +57,10 @@ class ShutdownWrap : public ReqWrap<uv_shutdown_t>,
     CHECK(args.IsConstructCall());
   }
 
+  static ShutdownWrap* from_req(uv_shutdown_t* req) {
+    return ContainerOf(&ShutdownWrap::req_, req);
+  }
+
   inline StreamBase* wrap() const { return wrap_; }
   size_t self_size() const override { return sizeof(*this); }
 
@@ -78,6 +85,10 @@ class WriteWrap: public ReqWrap<uv_write_t>,
 
   static void NewWriteWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     CHECK(args.IsConstructCall());
+  }
+
+  static WriteWrap* from_req(uv_write_t* req) {
+    return ContainerOf(&WriteWrap::req_, req);
   }
 
   static const size_t kAlignSize = 16;
@@ -259,7 +270,7 @@ class StreamBase : public StreamResource {
                            const v8::PropertyCallbackInfo<v8::Value>& args);
 
   template <class Base,
-            int (StreamBase::*Method)(  // NOLINT(whitespace/parens)
+            int (StreamBase::*Method)(
       const v8::FunctionCallbackInfo<v8::Value>& args)>
   static void JSMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -269,5 +280,7 @@ class StreamBase : public StreamResource {
 };
 
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_STREAM_BASE_H_

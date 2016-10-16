@@ -74,10 +74,10 @@ does not align with the project team. Node.js has two IRC channels,
 
 ### Step 2: Branch
 
-Create a feature branch and start hacking:
+Create a branch and start hacking:
 
 ```text
-$ git checkout -b my-feature-branch -t origin/master
+$ git checkout -b my-branch -t origin/master
 ```
 
 ### Step 3: Commit
@@ -93,15 +93,19 @@ Writing good commit logs is important. A commit log should describe what
 changed and why. Follow these guidelines when writing one:
 
 1. The first line should be 50 characters or less and contain a short
-   description of the change prefixed with the name of the changed
-   subsystem (e.g. "net: add localAddress and localPort to Socket").
+   description of the change. All words in the description should be in
+   lowercase with the exception of proper nouns, acronyms, and the ones that
+   refer to code, like function/variable names. The description should
+   be prefixed with the name of the changed subsystem and start with an
+   imperative verb, for example, "net: add localAddress and localPort
+   to Socket".
 2. Keep the second line blank.
 3. Wrap all other lines at 72 columns.
 
 A good commit log can look something like this:
 
-```
-subsystem: explaining the commit in one line
+```txt
+subsystem: explain the commit in one line
 
 Body of commit message is a few lines of text, explaining things
 in more detail, possibly giving some background about the issue
@@ -119,6 +123,12 @@ run `git shortlog` or `git log --oneline`.
 Check the output of `git log --oneline files_that_you_changed` to find out
 what subsystem (or subsystems) your changes touch.
 
+If your patch fixes an open issue, you can add a reference to it at the end
+of the log. Use the `Fixes:` prefix and the full issue URL. For example:
+
+```txt
+Fixes: https://github.com/nodejs/node/issues/1337
+```
 
 ### Step 4: Rebase
 
@@ -129,19 +139,35 @@ $ git fetch upstream
 $ git rebase upstream/master
 ```
 
-
 ### Step 5: Test
 
 Bug fixes and features **should come with tests**. Add your tests in the
-test/parallel/ directory. Look at other tests to see how they should be
-structured (license boilerplate, common includes, etc.).
+`test/parallel/` directory. For guidance on how to write a test for the Node.js
+project, see this [guide](./doc/guides/writing_tests.md). Looking at other tests
+to see how they should be structured can also help.
+
+To run the tests on Unix / OS X:
 
 ```text
 $ ./configure && make -j8 test
 ```
 
+Windows:
+
+```text
+> vcbuild test
+```
+
+(See the [BUILDING.md](./BUILDING.md) for more details.)
+
 Make sure the linter is happy and that all tests pass. Please, do not submit
 patches that fail either check.
+
+Running `make test`/`vcbuild test` will run the linter as well unless one or
+more tests fail.
+
+If you want to run the linter without running tests, use
+`make lint`/`vcbuild jslint`.
 
 If you are updating tests and just want to run a single test to check it, you
 can use this syntax to run it exactly as the test harness would:
@@ -162,15 +188,15 @@ core modules.
 ### Step 6: Push
 
 ```text
-$ git push origin my-feature-branch
+$ git push origin my-branch
 ```
 
-Go to https://github.com/yourusername/node and select your feature branch.
+Go to https://github.com/yourusername/node and select your branch.
 Click the 'Pull Request' button and fill out the form.
 
 Pull requests are usually reviewed within a few days. If there are comments
 to address, apply your changes in a separate commit and push that to your
-feature branch. Post a comment in the pull request afterwards; GitHub does
+branch. Post a comment in the pull request afterwards; GitHub does
 not send out notifications when you add commits.
 
 <a id="developers-certificate-of-origin"></a>

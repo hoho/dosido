@@ -56,9 +56,6 @@ function errnoException(err, syscall, hostname) {
 //   callback.immediately = true;
 // }
 function makeAsync(callback) {
-  if (typeof callback !== 'function') {
-    return callback;
-  }
   return function asyncCallback() {
     if (asyncCallback.immediately) {
       // The API already returned, we can invoke the callback immediately.
@@ -66,8 +63,8 @@ function makeAsync(callback) {
     } else {
       var args = new Array(arguments.length + 1);
       args[0] = callback;
-      for (var i = 1, a = 0; a < arguments.length; ++i, ++a)
-        args[i] = arguments[a];
+      for (var i = 0; i < arguments.length; ++i)
+        args[i + 1] = arguments[i];
       process.nextTick.apply(null, args);
     }
   };
@@ -191,8 +188,11 @@ exports.lookupService = function(host, port, callback) {
   if (isIP(host) === 0)
     throw new TypeError('"host" argument needs to be a valid IP address');
 
-  if (port == null || !isLegalPort(port))
+  if (!isLegalPort(port))
     throw new TypeError(`"port" should be >= 0 and < 65536, got "${port}"`);
+
+  if (typeof callback !== 'function')
+    throw new TypeError('"callback" argument must be a function');
 
   port = +port;
   callback = makeAsync(callback);
@@ -286,25 +286,26 @@ exports.setServers = function(servers) {
   // cache the original servers because in the event of an error setting the
   // servers cares won't have any servers available for resolution
   const orig = cares.getServers();
+  const newSet = [];
 
-  const newSet = servers.map((serv) => {
+  servers.forEach((serv) => {
     var ipVersion = isIP(serv);
     if (ipVersion !== 0)
-      return [ipVersion, serv];
+      return newSet.push([ipVersion, serv]);
 
-    const match = serv.match(/\[(.*)\](:\d+)?/);
+    const match = serv.match(/\[(.*)\](?::\d+)?/);
     // we have an IPv6 in brackets
     if (match) {
       ipVersion = isIP(match[1]);
       if (ipVersion !== 0)
-        return [ipVersion, match[1]];
+        return newSet.push([ipVersion, match[1]]);
     }
 
     const s = serv.split(/:\d+$/)[0];
     ipVersion = isIP(s);
 
     if (ipVersion !== 0)
-      return [ipVersion, s];
+      return newSet.push([ipVersion, s]);
 
     throw new Error(`IP address is not properly formatted: ${serv}`);
   });

@@ -4,13 +4,13 @@ const fs = require('fs');
 const assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var https = require('https');
 
 if (!common.hasMultiLocalhost()) {
-  console.log('1..0 # Skipped: platform-specific test.');
+  common.skip('platform-specific test.');
   return;
 }
 
@@ -30,10 +30,10 @@ var server = https.createServer(options, function(req, res) {
   req.resume();
 });
 
-server.listen(common.PORT, '127.0.0.1', function() {
+server.listen(0, '127.0.0.1', function() {
   var options = {
     host: 'localhost',
-    port: common.PORT,
+    port: this.address().port,
     path: '/',
     method: 'GET',
     localAddress: '127.0.0.2',

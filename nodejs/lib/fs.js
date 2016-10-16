@@ -3,17 +3,23 @@
 
 'use strict';
 
+const constants = process.binding('constants').fs;
 const util = require('util');
 const pathModule = require('path');
 
 const binding = process.binding('fs');
-const constants = require('constants');
 const fs = exports;
 const Buffer = require('buffer').Buffer;
 const Stream = require('stream').Stream;
 const EventEmitter = require('events');
 const FSReqWrap = binding.FSReqWrap;
 const FSEvent = process.binding('fs_event_wrap').FSEvent;
+
+Object.defineProperty(exports, 'constants', {
+  configurable: false,
+  enumerable: true,
+  value: constants
+});
 
 const Readable = Stream.Readable;
 const Writable = Stream.Writable;
@@ -1393,7 +1399,7 @@ function FSWatcher() {
   this._handle = new FSEvent();
   this._handle.owner = this;
 
-  this._handle.onchange = function(status, event, filename) {
+  this._handle.onchange = function(status, eventType, filename) {
     if (status < 0) {
       self._handle.close();
       const error = !filename ?
@@ -1403,7 +1409,7 @@ function FSWatcher() {
       error.filename = filename;
       self.emit('error', error);
     } else {
-      self.emit('change', event, filename);
+      self.emit('change', eventType, filename);
     }
   };
 }
@@ -1557,36 +1563,298 @@ fs.unwatchFile = function(filename, listener) {
 };
 
 
-fs.realpathSync = function realpathSync(path, options) {
+// Regexp that finds the next portion of a (partial) path
+// result is [base_with_slash, base], e.g. ['somedir/', 'somedir']
+const nextPartRe = isWindows ?
+  /(.*?)(?:[\/\\]+|$)/g :
+  /(.*?)(?:[\/]+|$)/g;
+
+// Regex to find the device root, including trailing slash. E.g. 'c:\\'.
+const splitRootRe = isWindows ?
+  /^(?:[a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/][^\\\/]+)?[\\\/]*/ :
+  /^[\/]*/;
+
+function encodeRealpathResult(result, options, err) {
+  if (!options || !options.encoding || options.encoding === 'utf8' || err)
+    return result;
+  const asBuffer = Buffer.from(result);
+  if (options.encoding === 'buffer') {
+    return asBuffer;
+  } else {
+    return asBuffer.toString(options.encoding);
+  }
+}
+
+// This is removed from the fs exports in lib/module.js in order to make
+// sure that this stays internal.
+const realpathCacheKey = fs.realpathCacheKey = Symbol('realpathCacheKey');
+
+fs.realpathSync = function realpathSync(p, options) {
   if (!options)
     options = {};
   else if (typeof options === 'string')
     options = {encoding: options};
   else if (typeof options !== 'object')
     throw new TypeError('"options" must be a string or an object');
-  nullCheck(path);
-  return binding.realpath(pathModule._makeLong(path), options.encoding);
+  nullCheck(p);
+
+  p = p.toString('utf8');
+  p = pathModule.resolve(p);
+
+  const seenLinks = {};
+  const knownHard = {};
+  const cache = options[realpathCacheKey];
+  const original = p;
+
+  const maybeCachedResult = cache && cache.get(p);
+  if (maybeCachedResult) {
+    return maybeCachedResult;
+  }
+
+  // current character position in p
+  var pos;
+  // the partial path so far, including a trailing slash if any
+  var current;
+  // the partial path without a trailing slash (except when pointing at a root)
+  var base;
+  // the partial path scanned in the previous round, with slash
+  var previous;
+
+  start();
+
+  function start() {
+    // Skip over roots
+    var m = splitRootRe.exec(p);
+    pos = m[0].length;
+    current = m[0];
+    base = m[0];
+    previous = '';
+
+    // On windows, check that the root exists. On unix there is no need.
+    if (isWindows && !knownHard[base]) {
+      fs.lstatSync(base);
+      knownHard[base] = true;
+    }
+  }
+
+  // walk down the path, swapping out linked pathparts for their real
+  // values
+  // NB: p.length changes.
+  while (pos < p.length) {
+    // find the next part
+    nextPartRe.lastIndex = pos;
+    var result = nextPartRe.exec(p);
+    previous = current;
+    current += result[0];
+    base = previous + result[1];
+    pos = nextPartRe.lastIndex;
+
+    // continue if not a symlink
+    if (knownHard[base] || (cache && cache.get(base) === base)) {
+      continue;
+    }
+
+    var resolvedLink;
+    const maybeCachedResolved = cache && cache.get(base);
+    if (maybeCachedResolved) {
+      resolvedLink = maybeCachedResolved;
+    } else {
+      var stat = fs.lstatSync(base);
+      if (!stat.isSymbolicLink()) {
+        knownHard[base] = true;
+        continue;
+      }
+
+      // read the link if it wasn't read before
+      // dev/ino always return 0 on windows, so skip the check.
+      let linkTarget = null;
+      let id;
+      if (!isWindows) {
+        id = `${stat.dev.toString(32)}:${stat.ino.toString(32)}`;
+        if (seenLinks.hasOwnProperty(id)) {
+          linkTarget = seenLinks[id];
+        }
+      }
+      if (linkTarget === null) {
+        fs.statSync(base);
+        linkTarget = fs.readlinkSync(base);
+      }
+      resolvedLink = pathModule.resolve(previous, linkTarget);
+
+      if (cache) cache.set(base, resolvedLink);
+      if (!isWindows) seenLinks[id] = linkTarget;
+    }
+
+    // resolve the link, then start over
+    p = pathModule.resolve(resolvedLink, p.slice(pos));
+    start();
+  }
+
+  if (cache) cache.set(original, p);
+  return encodeRealpathResult(p, options);
 };
 
 
-fs.realpath = function realpath(path, options, callback) {
+fs.realpath = function realpath(p, options, callback) {
+  if (typeof callback !== 'function') {
+    callback = maybeCallback(options);
+    options = {};
+  }
+
   if (!options) {
     options = {};
   } else if (typeof options === 'function') {
-    callback = options;
     options = {};
   } else if (typeof options === 'string') {
     options = {encoding: options};
   } else if (typeof options !== 'object') {
     throw new TypeError('"options" must be a string or an object');
   }
-  callback = makeCallback(callback);
-  if (!nullCheck(path, callback))
+  if (!nullCheck(p, callback))
     return;
+
+  p = p.toString('utf8');
+  p = pathModule.resolve(p);
+
+  const seenLinks = {};
+  const knownHard = {};
+
+  // current character position in p
+  var pos;
+  // the partial path so far, including a trailing slash if any
+  var current;
+  // the partial path without a trailing slash (except when pointing at a root)
+  var base;
+  // the partial path scanned in the previous round, with slash
+  var previous;
+
+  start();
+
+  function start() {
+    // Skip over roots
+    var m = splitRootRe.exec(p);
+    pos = m[0].length;
+    current = m[0];
+    base = m[0];
+    previous = '';
+
+    // On windows, check that the root exists. On unix there is no need.
+    if (isWindows && !knownHard[base]) {
+      fs.lstat(base, function(err) {
+        if (err) return callback(err);
+        knownHard[base] = true;
+        LOOP();
+      });
+    } else {
+      process.nextTick(LOOP);
+    }
+  }
+
+  // walk down the path, swapping out linked pathparts for their real
+  // values
+  function LOOP() {
+    // stop if scanned past end of path
+    if (pos >= p.length) {
+      return callback(null, encodeRealpathResult(p, options));
+    }
+
+    // find the next part
+    nextPartRe.lastIndex = pos;
+    var result = nextPartRe.exec(p);
+    previous = current;
+    current += result[0];
+    base = previous + result[1];
+    pos = nextPartRe.lastIndex;
+
+    // continue if not a symlink
+    if (knownHard[base]) {
+      return process.nextTick(LOOP);
+    }
+
+    return fs.lstat(base, gotStat);
+  }
+
+  function gotStat(err, stat) {
+    if (err) return callback(err);
+
+    // if not a symlink, skip to the next path part
+    if (!stat.isSymbolicLink()) {
+      knownHard[base] = true;
+      return process.nextTick(LOOP);
+    }
+
+    // stat & read the link if not read before
+    // call gotTarget as soon as the link target is known
+    // dev/ino always return 0 on windows, so skip the check.
+    let id;
+    if (!isWindows) {
+      id = `${stat.dev.toString(32)}:${stat.ino.toString(32)}`;
+      if (seenLinks.hasOwnProperty(id)) {
+        return gotTarget(null, seenLinks[id], base);
+      }
+    }
+    fs.stat(base, function(err) {
+      if (err) return callback(err);
+
+      fs.readlink(base, function(err, target) {
+        if (!isWindows) seenLinks[id] = target;
+        gotTarget(err, target);
+      });
+    });
+  }
+
+  function gotTarget(err, target, base) {
+    if (err) return callback(err);
+
+    var resolvedLink = pathModule.resolve(previous, target);
+    gotResolvedLink(resolvedLink);
+  }
+
+  function gotResolvedLink(resolvedLink) {
+    // resolve the link, then start over
+    p = pathModule.resolve(resolvedLink, p.slice(pos));
+    start();
+  }
+};
+
+fs.mkdtemp = function(prefix, options, callback) {
+  if (!prefix || typeof prefix !== 'string')
+    throw new TypeError('filename prefix is required');
+
+  options = options || {};
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  } else if (typeof options === 'string') {
+    options = {encoding: options};
+  }
+  if (typeof options !== 'object')
+    throw new TypeError('"options" must be a string or an object');
+
+  callback = makeCallback(callback);
+  if (!nullCheck(prefix, callback)) {
+    return;
+  }
+
   var req = new FSReqWrap();
   req.oncomplete = callback;
-  binding.realpath(pathModule._makeLong(path), options.encoding, req);
-  return;
+
+  binding.mkdtemp(prefix + 'XXXXXX', options.encoding, req);
+};
+
+
+fs.mkdtempSync = function(prefix, options) {
+  if (!prefix || typeof prefix !== 'string')
+    throw new TypeError('filename prefix is required');
+
+  options = options || {};
+  if (typeof options === 'string')
+    options = {encoding: options};
+  if (typeof options !== 'object')
+    throw new TypeError('"options" must be a string or an object');
+  nullCheck(prefix);
+
+  return binding.mkdtemp(prefix + 'XXXXXX', options.encoding);
 };
 
 
@@ -1632,6 +1900,7 @@ function ReadStream(path, options) {
   this.end = options.end;
   this.autoClose = options.autoClose === undefined ? true : options.autoClose;
   this.pos = undefined;
+  this.bytesRead = 0;
 
   if (this.start !== undefined) {
     if (typeof this.start !== 'number') {
@@ -1727,8 +1996,10 @@ ReadStream.prototype._read = function(n) {
       self.emit('error', er);
     } else {
       var b = null;
-      if (bytesRead > 0)
+      if (bytesRead > 0) {
+        self.bytesRead += bytesRead;
         b = thisPool.slice(start, start + bytesRead);
+      }
 
       self.push(b);
     }
@@ -1925,17 +2196,18 @@ WriteStream.prototype.destroySoon = WriteStream.prototype.end;
 // SyncWriteStream is internal. DO NOT USE.
 // Temporary hack for process.stdout and process.stderr when piped to files.
 function SyncWriteStream(fd, options) {
-  Stream.call(this);
+  Writable.call(this);
 
   options = options || {};
 
   this.fd = fd;
-  this.writable = true;
   this.readable = false;
   this.autoClose = options.autoClose === undefined ? true : options.autoClose;
+
+  this.on('end', () => this._destroy());
 }
 
-util.inherits(SyncWriteStream, Stream);
+util.inherits(SyncWriteStream, Writable);
 
 
 // Export
@@ -1945,89 +2217,26 @@ Object.defineProperty(fs, 'SyncWriteStream', {
   value: SyncWriteStream
 });
 
-SyncWriteStream.prototype.write = function(data, arg1, arg2) {
-  var encoding, cb;
-
-  // parse arguments
-  if (arg1) {
-    if (typeof arg1 === 'string') {
-      encoding = arg1;
-      cb = arg2;
-    } else if (typeof arg1 === 'function') {
-      cb = arg1;
-    } else {
-      throw new Error('Bad arguments');
-    }
-  }
-  assertEncoding(encoding);
-
-  // Change strings to buffers. SLOW
-  if (typeof data === 'string') {
-    data = Buffer.from(data, encoding);
-  }
-
-  fs.writeSync(this.fd, data, 0, data.length);
-
-  if (cb) {
-    process.nextTick(cb);
-  }
-
+SyncWriteStream.prototype._write = function(chunk, encoding, cb) {
+  fs.writeSync(this.fd, chunk, 0, chunk.length);
+  cb();
   return true;
 };
 
+SyncWriteStream.prototype._destroy = function() {
+  if (this.fd === null) // already destroy()ed
+    return;
 
-SyncWriteStream.prototype.end = function(data, arg1, arg2) {
-  if (data) {
-    this.write(data, arg1, arg2);
-  }
-  this.destroy();
-};
-
-
-SyncWriteStream.prototype.destroy = function() {
   if (this.autoClose)
     fs.closeSync(this.fd);
+
   this.fd = null;
-  this.emit('close');
   return true;
 };
 
-SyncWriteStream.prototype.destroySoon = SyncWriteStream.prototype.destroy;
-
-fs.mkdtemp = function(prefix, options, callback) {
-  if (!prefix || typeof prefix !== 'string')
-    throw new TypeError('filename prefix is required');
-
-  options = options || {};
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
-  }
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
-
-  if (!nullCheck(prefix, callback)) {
-    return;
-  }
-
-  var req = new FSReqWrap();
-  req.oncomplete = callback;
-
-  binding.mkdtemp(prefix + 'XXXXXX', options.encoding, req);
-};
-
-fs.mkdtempSync = function(prefix, options) {
-  if (!prefix || typeof prefix !== 'string')
-    throw new TypeError('filename prefix is required');
-
-  options = options || {};
-  if (typeof options === 'string')
-    options = {encoding: options};
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
-  nullCheck(prefix);
-
-  return binding.mkdtemp(prefix + 'XXXXXX', options.encoding);
+SyncWriteStream.prototype.destroySoon =
+SyncWriteStream.prototype.destroy = function() {
+  this._destroy();
+  this.emit('close');
+  return true;
 };

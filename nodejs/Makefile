@@ -19,9 +19,9 @@ ifdef QUICKCHECK
 endif
 
 ifdef ENABLE_V8_TAP
-  TAP_V8 := --junitout v8-tap.xml
-  TAP_V8_INTL := --junitout v8-intl-tap.xml
-  TAP_V8_BENCHMARKS := --junitout v8-benchmarks-tap.xml
+  TAP_V8 := --junitout $(PWD)/v8-tap.xml
+  TAP_V8_INTL := --junitout $(PWD)/v8-intl-tap.xml
+  TAP_V8_BENCHMARKS := --junitout $(PWD)/v8-benchmarks-tap.xml
 endif
 
 V8_TEST_OPTIONS = $(V8_EXTRA_TEST_OPTIONS)
@@ -36,9 +36,10 @@ BUILDTYPE_LOWER := $(shell echo $(BUILDTYPE) | tr '[A-Z]' '[a-z]')
 EXEEXT := $(shell $(PYTHON) -c \
 		"import sys; print('.exe' if sys.platform == 'win32' else '')")
 
-NODE ?= ./node$(EXEEXT)
 NODE_EXE = node$(EXEEXT)
+NODE ?= ./$(NODE_EXE)
 NODE_G_EXE = node_g$(EXEEXT)
+NPM ?= ./deps/npm/bin/npm-cli.js
 
 # Flags for packaging.
 BUILD_DOWNLOAD_FLAGS ?= --download=all
@@ -87,7 +88,8 @@ uninstall:
 	$(PYTHON) tools/install.py $@ '$(DESTDIR)' '$(PREFIX)'
 
 clean:
-	-rm -rf out/Makefile $(NODE_EXE) $(NODE_G_EXE) out/$(BUILDTYPE)/$(NODE_EXE)
+	-rm -rf out/Makefile $(NODE_EXE) $(NODE_G_EXE) out/$(BUILDTYPE)/$(NODE_EXE) \
+                out/$(BUILDTYPE)/node.exp
 	@if [ -d out ]; then find out/ -name '*.o' -o -name '*.a' -o -name '*.d' | xargs rm -rf; fi
 	-rm -rf node_modules
 	@if [ -d deps/icu ]; then echo deleting deps/icu; rm -rf deps/icu; fi
@@ -112,12 +114,14 @@ cctest: all
 
 v8:
 	tools/make-v8.sh v8
-	$(MAKE) -C deps/v8 $(V8_ARCH) $(V8_BUILD_OPTIONS)
+	$(MAKE) -C deps/v8 $(V8_ARCH).$(BUILDTYPE_LOWER) $(V8_BUILD_OPTIONS)
 
-test: | cctest  # Depends on 'all'.
-	$(PYTHON) tools/test.py --mode=release message parallel sequential -J
-	$(MAKE) jslint
-	$(MAKE) cpplint
+test: all
+	$(MAKE) build-addons
+	$(MAKE) cctest
+	$(PYTHON) tools/test.py --mode=release -J \
+		addons doctool inspector known_issues message pseudo-tty parallel sequential
+	$(MAKE) lint
 
 test-parallel: all
 	$(PYTHON) tools/test.py --mode=release parallel -J
@@ -127,25 +131,44 @@ test-valgrind: all
 
 test/gc/node_modules/weak/build/Release/weakref.node: $(NODE_EXE)
 	$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+		--python="$(PYTHON)" \
 		--directory="$(shell pwd)/test/gc/node_modules/weak" \
 		--nodedir="$(shell pwd)"
 
 # Implicitly depends on $(NODE_EXE), see the build-addons rule for rationale.
-test/addons/.docbuildstamp: doc/api/addons.md
+DOCBUILDSTAMP_PREREQS = tools/doc/addon-verify.js doc/api/addons.md
+
+ifeq ($(OSTYPE),aix)
+DOCBUILDSTAMP_PREREQS := $(DOCBUILDSTAMP_PREREQS) out/$(BUILDTYPE)/node.exp
+endif
+
+test/addons/.docbuildstamp: $(DOCBUILDSTAMP_PREREQS)
 	$(RM) -r test/addons/??_*/
-	$(NODE) tools/doc/addon-verify.js
+	$(NODE) $<
 	touch $@
 
 ADDONS_BINDING_GYPS := \
 	$(filter-out test/addons/??_*/binding.gyp, \
 		$(wildcard test/addons/*/binding.gyp))
 
+ADDONS_BINDING_SOURCES := \
+	$(filter-out test/addons/??_*/*.cc, $(wildcard test/addons/*/*.cc)) \
+	$(filter-out test/addons/??_*/*.h, $(wildcard test/addons/*/*.h))
+
 # Implicitly depends on $(NODE_EXE), see the build-addons rule for rationale.
-test/addons/.buildstamp: $(ADDONS_BINDING_GYPS) | test/addons/.docbuildstamp
+# Depends on node-gyp package.json so that build-addons is (re)executed when
+# node-gyp is updated as part of an npm update.
+test/addons/.buildstamp: config.gypi \
+	deps/npm/node_modules/node-gyp/package.json \
+	$(ADDONS_BINDING_GYPS) $(ADDONS_BINDING_SOURCES) \
+	deps/uv/include/*.h deps/v8/include/*.h \
+	src/node.h src/node_buffer.h src/node_object_wrap.h src/node_version.h \
+	test/addons/.docbuildstamp
 	# Cannot use $(wildcard test/addons/*/) here, it's evaluated before
 	# embedded addons have been generated from the documentation.
 	for dirname in test/addons/*/; do \
 		$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+			--python="$(PYTHON)" \
 			--directory="$$PWD/$$dirname" \
 			--nodedir="$$PWD" || exit 1 ; \
 	done
@@ -156,7 +179,7 @@ test/addons/.buildstamp: $(ADDONS_BINDING_GYPS) | test/addons/.docbuildstamp
 # if the subprocess touched anything so it pessimistically assumes that
 # .buildstamp and .docbuildstamp are out of date and need a rebuild.
 # Just goes to show that recursive make really is harmful...
-# TODO(bnoordhuis) Force rebuild after gyp or node-gyp update.
+# TODO(bnoordhuis) Force rebuild after gyp update.
 build-addons: $(NODE_EXE) test/addons/.buildstamp
 
 test-gc: all test/gc/node_modules/weak/build/Release/weakref.node
@@ -170,10 +193,26 @@ test-all: test-build test/gc/node_modules/weak/build/Release/weakref.node
 test-all-valgrind: test-build
 	$(PYTHON) tools/test.py --mode=debug,release --valgrind
 
-test-ci: | build-addons
+CI_NATIVE_SUITES := addons
+CI_JS_SUITES := doctool inspector known_issues message parallel pseudo-tty sequential
+
+# Build and test addons without building anything else
+test-ci-native: | test/addons/.buildstamp
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
 		--mode=release --flaky-tests=$(FLAKY_TESTS) \
-		$(TEST_CI_ARGS) addons message parallel sequential
+		$(TEST_CI_ARGS) $(CI_NATIVE_SUITES)
+
+# This target should not use a native compiler at all
+test-ci-js:
+	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
+		--mode=release --flaky-tests=$(FLAKY_TESTS) \
+		$(TEST_CI_ARGS) $(CI_JS_SUITES)
+
+test-ci: | build-addons
+	out/Release/cctest --gtest_output=tap:cctest.tap
+	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
+		--mode=release --flaky-tests=$(FLAKY_TESTS) \
+		$(TEST_CI_ARGS) $(CI_NATIVE_SUITES) $(CI_JS_SUITES)
 
 test-release: test-build
 	$(PYTHON) tools/test.py --mode=release
@@ -196,8 +235,11 @@ test-internet: all
 test-debugger: all
 	$(PYTHON) tools/test.py debugger
 
+test-inspector: all
+	$(PYTHON) tools/test.py inspector
+
 test-known-issues: all
-	$(PYTHON) tools/test.py known_issues --expect-fail
+	$(PYTHON) tools/test.py known_issues
 
 test-npm: $(NODE_EXE)
 	NODE=$(NODE) tools/test-npm.sh
@@ -217,7 +259,7 @@ test-timers-clean:
 
 
 ifneq ("","$(wildcard deps/v8/tools/run-tests.py)")
-test-v8:
+test-v8: v8
 	# note: performs full test unless QUICKCHECK is specified
 	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
         --mode=$(BUILDTYPE_LOWER) $(V8_TEST_OPTIONS) $(QUICKCHECK_ARG) \
@@ -225,14 +267,14 @@ test-v8:
         --shell-dir=$(PWD)/deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) \
 	 $(TAP_V8)
 
-test-v8-intl:
+test-v8-intl: v8
 	# note: performs full test unless QUICKCHECK is specified
 	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
         --mode=$(BUILDTYPE_LOWER) --no-presubmit $(QUICKCHECK_ARG) \
         --shell-dir=deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) intl \
         $(TAP_V8_INTL)
 
-test-v8-benchmarks:
+test-v8-benchmarks: v8
 	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) --mode=$(BUILDTYPE_LOWER) \
         --download-data $(QUICKCHECK_ARG) --no-presubmit \
         --shell-dir=deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) benchmarks \
@@ -255,7 +297,9 @@ apidoc_dirs = out/doc out/doc/api/ out/doc/api/assets
 
 apiassets = $(subst api_assets,api/assets,$(addprefix out/,$(wildcard doc/api_assets/*)))
 
-doc: $(apidoc_dirs) $(apiassets) $(apidocs) tools/doc/ $(NODE_EXE)
+doc-only: $(apidoc_dirs) $(apiassets) $(apidocs) tools/doc/
+
+doc: $(NODE_EXE) doc-only
 
 $(apidoc_dirs):
 	mkdir -p $@
@@ -266,11 +310,29 @@ out/doc/api/assets/%: doc/api_assets/% out/doc/api/assets/
 out/doc/%: doc/%
 	cp -r $< $@
 
-out/doc/api/%.json: doc/api/%.md $(NODE_EXE)
-	$(NODE) tools/doc/generate.js --format=json $< > $@
+# check if ./node is actually set, else use user pre-installed binary
+gen-json = tools/doc/generate.js --format=json $< > $@
+out/doc/api/%.json: doc/api/%.md
+	[ -e tools/doc/node_modules/js-yaml/package.json ] || \
+		[ -e tools/eslint/node_modules/js-yaml/package.json ] || \
+		if [ -x $(NODE) ]; then \
+			cd tools/doc && ../../$(NODE) ../../$(NPM) install; \
+		else \
+			cd tools/doc && node ../../$(NPM) install; \
+		fi
+	[ -x $(NODE) ] && $(NODE) $(gen-json) || node $(gen-json)
 
-out/doc/api/%.html: doc/api/%.md $(NODE_EXE)
-	$(NODE) tools/doc/generate.js --format=html --template=doc/template.html $< > $@
+# check if ./node is actually set, else use user pre-installed binary
+gen-html = tools/doc/generate.js --node-version=$(FULLVERSION) --format=html --template=doc/template.html $< > $@
+out/doc/api/%.html: doc/api/%.md
+	[ -e tools/doc/node_modules/js-yaml/package.json ] || \
+		[ -e tools/eslint/node_modules/js-yaml/package.json ] || \
+		if [ -x $(NODE) ]; then \
+			cd tools/doc && ../../$(NODE) ../../$(NPM) install; \
+		else \
+			cd tools/doc && node ../../$(NPM) install; \
+		fi
+	[ -x $(NODE) ] && $(NODE) $(gen-html) || node $(gen-html)
 
 docopen: out/doc/api/all.html
 	-google-chrome out/doc/api/all.html
@@ -278,9 +340,11 @@ docopen: out/doc/api/all.html
 docclean:
 	-rm -rf out/doc
 
-run-ci:
+build-ci:
 	$(PYTHON) ./configure $(CONFIG_FLAGS)
 	$(MAKE)
+
+run-ci: build-ci
 	$(MAKE) test-ci
 
 RAWVER=$(shell $(PYTHON) tools/getnodeversion.py)
@@ -324,10 +388,39 @@ RELEASE=$(shell sed -ne 's/\#define NODE_VERSION_IS_RELEASE \([01]\)/\1/p' src/n
 PLATFORM=$(shell uname | tr '[:upper:]' '[:lower:]')
 NPMVERSION=v$(shell cat deps/npm/package.json | grep '"version"' | sed 's/^[^:]*: "\([^"]*\)",.*/\1/')
 
-ifeq ($(findstring x86_64,$(shell uname -m)),x86_64)
+UNAME_M=$(shell uname -m)
+ifeq ($(findstring x86_64,$(UNAME_M)),x86_64)
 DESTCPU ?= x64
 else
+ifeq ($(findstring ppc64,$(UNAME_M)),ppc64)
+DESTCPU ?= ppc64
+else
+ifeq ($(findstring ppc,$(UNAME_M)),ppc)
+DESTCPU ?= ppc
+else
+ifeq ($(findstring s390x,$(UNAME_M)),s390x)
+DESTCPU ?= s390x
+else
+ifeq ($(findstring s390,$(UNAME_M)),s390)
+DESTCPU ?= s390
+else
+ifeq ($(findstring arm,$(UNAME_M)),arm)
+DESTCPU ?= arm
+else
+ifeq ($(findstring aarch64,$(UNAME_M)),aarch64)
+DESTCPU ?= aarch64
+else
+ifeq ($(findstring powerpc,$(shell uname -p)),powerpc)
+DESTCPU ?= ppc64
+else
 DESTCPU ?= x86
+endif
+endif
+endif
+endif
+endif
+endif
+endif
 endif
 ifeq ($(DESTCPU),x64)
 ARCH=x64
@@ -393,6 +486,11 @@ PACKAGEMAKER ?= /Developer/Applications/Utilities/PackageMaker.app/Contents/MacO
 PKGDIR=out/dist-osx
 
 release-only:
+	@if [ "$(DISTTYPE)" != "nightly" ] && [ "$(DISTTYPE)" != "next-nightly" ] && \
+		`grep -q REPLACEME doc/api/*.md`; then \
+		echo 'Please update Added: tags in the documentation first.' ; \
+		exit 1 ; \
+	fi
 	@if [ "$(shell git status --porcelain | egrep -v '^\?\? ')" = "" ]; then \
 		exit 0 ; \
 	else \
@@ -455,6 +553,7 @@ $(TARBALL): release-only $(NODE_EXE) doc
 	rm -rf $(TARNAME)/.{editorconfig,git*,mailmap}
 	rm -rf $(TARNAME)/tools/{eslint,eslint-rules,osx-pkg.pmdoc,pkgsrc}
 	rm -rf $(TARNAME)/tools/{osx-*,license-builder.sh,cpplint.py}
+	rm -rf $(TARNAME)/test*.tap
 	find $(TARNAME)/ -name ".eslint*" -maxdepth 2 | xargs rm
 	find $(TARNAME)/ -type l | xargs rm # annoying on windows
 	tar -cf $(TARNAME).tar $(TARNAME)
@@ -607,27 +706,20 @@ bench-idle:
 	$(NODE) benchmark/idle_clients.js &
 
 jslint:
-	$(NODE) tools/jslint.js -J benchmark lib src test tools/doc \
-	  tools/eslint-rules tools/jslint.js
+	$(NODE) tools/eslint/bin/eslint.js --cache --rulesdir=tools/eslint-rules \
+	  benchmark lib test tools
 
 jslint-ci:
 	$(NODE) tools/jslint.js $(PARALLEL_ARGS) -f tap -o test-eslint.tap \
-		benchmark lib src test tools/doc \
-		tools/eslint-rules tools/jslint.js
+		benchmark lib test tools
 
 CPPLINT_EXCLUDE ?=
-CPPLINT_EXCLUDE += src/node_lttng.cc
 CPPLINT_EXCLUDE += src/node_root_certs.h
-CPPLINT_EXCLUDE += src/node_lttng_tp.h
-CPPLINT_EXCLUDE += src/node_win32_perfctr_provider.cc
 CPPLINT_EXCLUDE += src/queue.h
 CPPLINT_EXCLUDE += src/tree.h
-CPPLINT_EXCLUDE += src/v8abbr.h
 CPPLINT_EXCLUDE += $(wildcard test/addons/??_*/*.cc test/addons/??_*/*.h)
 
 CPPLINT_FILES = $(filter-out $(CPPLINT_EXCLUDE), $(wildcard \
-	deps/debugger-agent/include/* \
-	deps/debugger-agent/src/* \
 	src/*.c \
 	src/*.cc \
 	src/*.h \
@@ -641,9 +733,18 @@ cpplint:
 	@$(PYTHON) tools/cpplint.py $(CPPLINT_FILES)
 	@$(PYTHON) tools/check-imports.py
 
-ifneq ("","$(wildcard tools/eslint/bin/eslint.js)")
+ifneq ("","$(wildcard tools/eslint/lib/eslint.js)")
 lint: jslint cpplint
+CONFLICT_RE=^>>>>>>> [0-9A-Fa-f]+|^<<<<<<< [A-Za-z]+
 lint-ci: jslint-ci cpplint
+	@if ! ( grep -IEqrs "$(CONFLICT_RE)" benchmark deps doc lib src test tools ) \
+		&& ! ( find . -maxdepth 1 -type f | xargs grep -IEqs "$(CONFLICT_RE)" ); then \
+		exit 0 ; \
+	else \
+		echo "" >&2 ; \
+		echo "Conflict marker detected in one or more files. Please fix them first." >&2 ; \
+		exit 1 ; \
+	fi
 else
 lint:
 	@echo "Linting is not available through the source tarball."
@@ -659,5 +760,5 @@ endif
 	blog blogclean tar binary release-only bench-http-simple bench-idle \
 	bench-all bench bench-misc bench-array bench-buffer bench-net \
 	bench-http bench-fs bench-tls cctest run-ci test-v8 test-v8-intl \
-	test-v8-benchmarks test-v8-all v8 lint-ci bench-ci jslint-ci \
-	$(TARBALL)-headers
+	test-v8-benchmarks test-v8-all v8 lint-ci bench-ci jslint-ci doc-only \
+	$(TARBALL)-headers test-ci test-ci-native test-ci-js build-ci

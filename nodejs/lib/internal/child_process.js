@@ -6,7 +6,7 @@ const EventEmitter = require('events');
 const net = require('net');
 const dgram = require('dgram');
 const util = require('util');
-const constants = require('constants');
+const constants = process.binding('constants').os.signals;
 const assert = require('assert');
 
 const Process = process.binding('process_wrap').Process;
@@ -87,17 +87,28 @@ const handleConversion = {
       // remove handle from socket object, it will be closed when the socket
       // will be sent
       if (!options.keepOpen) {
-        handle.onread = function() {};
+        handle.onread = nop;
         socket._handle = null;
       }
 
       return handle;
     },
 
-    postSend: function(handle, options) {
-      // Close the Socket handle after sending it
-      if (handle && !options.keepOpen)
-        handle.close();
+    postSend: function(handle, options, target) {
+      // Store the handle after successfully sending it, so it can be closed
+      // when the NODE_HANDLE_ACK is received. If the handle could not be sent,
+      // just close it.
+      if (handle && !options.keepOpen) {
+        if (target) {
+          // There can only be one _pendingHandle as passing handles are
+          // processed one at a time: handles are stored in _handleQueue while
+          // waiting for the NODE_HANDLE_ACK of the current passing handle.
+          assert(!target._pendingHandle);
+          target._pendingHandle = handle;
+        } else {
+          handle.close();
+        }
+      }
     },
 
     got: function(message, handle, emit) {
@@ -400,6 +411,7 @@ ChildProcess.prototype.unref = function() {
 function setupChannel(target, channel) {
   target._channel = channel;
   target._handleQueue = null;
+  target._pendingHandle = null;
 
   const control = new class extends EventEmitter {
     constructor() {
@@ -418,7 +430,7 @@ function setupChannel(target, channel) {
         this.emit('unref');
       }
     }
-  };
+  }();
 
   var decoder = new StringDecoder('utf8');
   var jsonBuffer = '';
@@ -465,6 +477,11 @@ function setupChannel(target, channel) {
   target.on('internalMessage', function(message, handle) {
     // Once acknowledged - continue sending handles.
     if (message.cmd === 'NODE_HANDLE_ACK') {
+      if (target._pendingHandle) {
+        target._pendingHandle.close();
+        target._pendingHandle = null;
+      }
+
       assert(Array.isArray(target._handleQueue));
       var queue = target._handleQueue;
       target._handleQueue = null;
@@ -610,13 +627,16 @@ function setupChannel(target, channel) {
     var err = channel.writeUtf8String(req, string, handle);
 
     if (err === 0) {
-      if (handle && !this._handleQueue)
-        this._handleQueue = [];
+      if (handle) {
+        if (!this._handleQueue)
+          this._handleQueue = [];
+        if (obj && obj.postSend)
+          obj.postSend(handle, options, target);
+      }
+
       req.oncomplete = function() {
         if (this.async === true)
           control.unref();
-        if (obj && obj.postSend)
-          obj.postSend(handle, options);
         if (typeof callback === 'function')
           callback(null);
       };
@@ -677,6 +697,11 @@ function setupChannel(target, channel) {
     // This marks the fact that the channel is actually disconnected.
     this._channel = null;
 
+    if (this._pendingHandle) {
+      this._pendingHandle.close();
+      this._pendingHandle = null;
+    }
+
     var fired = false;
     function finish() {
       if (fired) return;
@@ -715,7 +740,9 @@ function handleMessage(target, message, handle) {
       message.cmd.slice(0, INTERNAL_PREFIX.length) === INTERNAL_PREFIX) {
     eventName = 'internalMessage';
   }
-  target.emit(eventName, message, handle);
+  process.nextTick(() => {
+    target.emit(eventName, message, handle);
+  });
 }
 
 function nop() { }

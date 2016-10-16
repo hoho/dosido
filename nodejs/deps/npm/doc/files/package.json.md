@@ -70,12 +70,6 @@ discover your package as it's listed in `npm search`.
 
 The url to the project homepage.
 
-**NOTE**: This is *not* the same as "url".  If you put a "url" field,
-then the registry will think it's a redirection to your package that has
-been published somewhere else, and spit at you.
-
-Literally.  Spit.  I'm so not kidding.
-
 ## bugs
 
 The url to your project's issue tracker and / or the email address to which
@@ -189,9 +183,10 @@ Certain files are always included, regardless of settings:
 * `README`
 * `CHANGES` / `CHANGELOG` / `HISTORY`
 * `LICENSE` / `LICENCE`
+* `NOTICE`
 * The file in the "main" field
 
-`README`, `CHANGES` & `LICENSE` can have any case and extension.
+`README`, `CHANGES`, `LICENSE` & `NOTICE` can have any case and extension.
 
 Conversely, some files are always ignored:
 
@@ -207,6 +202,8 @@ Conversely, some files are always ignored:
 * `npm-debug.log`
 * `.npmrc`
 * `node_modules`
+* `config.gypi`
+* `*.orig`
 
 ## main
 
@@ -250,6 +247,10 @@ would be the same as this:
     { "name": "my-program"
     , "version": "1.2.5"
     , "bin" : { "my-program" : "./path/to/program" } }
+
+Please make sure that your file(s) referenced in `bin` starts with
+`#!/usr/bin/env node`, otherwise the scripts are started without the node
+executable!
 
 ## man
 
@@ -660,10 +661,10 @@ field is advisory only will produce warnings when your package is installed as a
 
 ## engineStrict
 
-**This feature was deprecated with npm 3.0.0**
+**This feature was removed in npm 3.0.0**
 
 Prior to npm 3.0.0, this feature was used to treat this package as if the
-user had set `engine-strict`.
+user had set `engine-strict`. It is no longer used.
 
 ## os
 
@@ -737,10 +738,10 @@ npm will default some values based on package contents.
   If there is a `server.js` file in the root of your package, then npm
   will default the `start` command to `node server.js`.
 
-* `"scripts":{"preinstall": "node-gyp rebuild"}`
+* `"scripts":{"install": "node-gyp rebuild"}`
 
-  If there is a `binding.gyp` file in the root of your package, npm will
-  default the `preinstall` command to compile using node-gyp.
+  If there is a `binding.gyp` file in the root of your package and you have not defined an `install` or `preinstall` script, npm will
+  default the `install` command to compile using node-gyp.
 
 * `"contributors": [...]`
 

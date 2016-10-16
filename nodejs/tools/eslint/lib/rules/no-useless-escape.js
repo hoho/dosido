@@ -1,7 +1,6 @@
 /**
  * @fileoverview Look for useless escapes in strings and regexes
  * @author Onur Temizkan
- * @copyright 2016 Onur Temizkan. All rights reserved.
  */
 
 "use strict";
@@ -10,7 +9,7 @@
 // Rule Definition
 //------------------------------------------------------------------------------
 
-var VALID_STRING_ESCAPES = [
+const VALID_STRING_ESCAPES = [
     "\\",
     "n",
     "r",
@@ -24,7 +23,7 @@ var VALID_STRING_ESCAPES = [
     "\r"
 ];
 
-var VALID_REGEX_ESCAPES = [
+const VALID_REGEX_ESCAPES = [
     "\\",
     ".",
     "-",
@@ -58,51 +57,77 @@ var VALID_REGEX_ESCAPES = [
     "u"
 ];
 
-module.exports = function(context) {
+module.exports = {
+    meta: {
+        docs: {
+            description: "disallow unnecessary escape characters",
+            category: "Best Practices",
+            recommended: false
+        },
 
-    /**
-     * Checks if the escape character in given slice is unnecessary.
-     *
-     * @private
-     * @param {string} elm - string slice to validate.
-     * @param {ASTNode} node - node to validate.
-     * @returns {void}
-     * @this escapes_quote_node
-     */
-    function validate(elm) {
-        var escapeNotFound = this.escapes.indexOf(elm[1]) === -1;
-        var isQuoteEscape = elm[1] === this.node.raw[0];
+        schema: []
+    },
 
-        if (escapeNotFound && !isQuoteEscape) {
-            context.report(this.node, "Unnecessary escape character: " + elm);
+    create(context) {
+
+        /**
+         * Checks if the escape character in given slice is unnecessary.
+         *
+         * @private
+         * @param {string[]} escapes - list of valid escapes
+         * @param {ASTNode} node - node to validate.
+         * @param {string} elm - string slice to validate.
+         * @returns {void}
+         */
+        function validate(escapes, node, elm) {
+            const escapeNotFound = escapes.indexOf(elm[0][1]) === -1;
+            const isQuoteEscape = elm[0][1] === node.raw[0];
+
+            if (escapeNotFound && !isQuoteEscape) {
+                context.report({
+                    node,
+                    loc: {
+                        line: node.loc.start.line,
+                        column: node.loc.start.column + elm.index
+                    },
+                    message: "Unnecessary escape character: {{character}}.",
+                    data: {
+                        character: elm[0]
+                    }
+                });
+            }
         }
-    }
 
-    /**
-     * Checks if a node has an escape.
-     *
-     * @param {ASTNode} node - node to check.
-     * @returns {void}
-     */
-    function check(node) {
-        var nodeEscapes;
+        /**
+         * Checks if a node has an escape.
+         *
+         * @param {ASTNode} node - node to check.
+         * @returns {void}
+         */
+        function check(node) {
+            let nodeEscapes, match;
+            const pattern = /\\[^\d]/g;
 
-        if (typeof node.value === "string") {
-            nodeEscapes = VALID_STRING_ESCAPES;
-        } else if (node.regex) {
-            nodeEscapes = VALID_REGEX_ESCAPES;
-        } else {
-            return;
+            if (typeof node.value === "string") {
+
+                // JSXAttribute doesn't have any escape sequence: https://facebook.github.io/jsx/
+                if (node.parent.type === "JSXAttribute") {
+                    return;
+                }
+
+                nodeEscapes = VALID_STRING_ESCAPES;
+            } else if (node.regex) {
+                nodeEscapes = VALID_REGEX_ESCAPES;
+            } else {
+                return;
+            }
+
+            while ((match = pattern.exec(node.raw))) {
+                validate(nodeEscapes, node, match);
+            }
         }
-
-        (node.raw.match(/\\[^\d]/g) || []).forEach(validate, {
-            "escapes": nodeEscapes,
-            "node": node
-        });
+        return {
+            Literal: check
+        };
     }
-    return {
-        "Literal": check
-    };
 };
-
-module.exports.schema = [];

@@ -1,10 +1,10 @@
 'use strict';
-require('../common');
+const common = require('../common');
 var assert = require('assert');
 var exec = require('child_process').exec;
 
-if (process.platform === 'darwin') {
-  console.log('1..0 # Skipped: Output of `id -G` is unreliable on Darwin.');
+if (common.isOSX) {
+  common.skip('Output of `id -G` is unreliable on Darwin.');
   return;
 }
 
@@ -22,5 +22,5 @@ if (typeof process.getgroups === 'function') {
 }
 
 function check(a, b) {
-  for (var i = 0; i < a.length; ++i) assert(b.indexOf(a[i]) !== -1);
+  for (var i = 0; i < a.length; ++i) assert.notStrictEqual(b.indexOf(a[i]), -1);
 }

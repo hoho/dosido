@@ -2,8 +2,8 @@
 #define SRC_NODE_VERSION_H_
 
 #define NODE_MAJOR_VERSION 6
-#define NODE_MINOR_VERSION 0
-#define NODE_PATCH_VERSION 0
+#define NODE_MINOR_VERSION 8
+#define NODE_PATCH_VERSION 1
 
 #define NODE_VERSION_IS_RELEASE 1
 
@@ -51,4 +51,4 @@
  */
 #define NODE_MODULE_VERSION 48 /* Node.js v6.0.0 */
 
-#endif  /* SRC_NODE_VERSION_H_ */
+#endif  // SRC_NODE_VERSION_H_

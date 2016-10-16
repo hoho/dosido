@@ -5,8 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
 
-if (process.platform !== 'linux') {
-  console.log('1..0 # Skipped: Test is linux specific.');
+if (!common.isLinux) {
+  common.skip('Test is linux specific.');
   return;
 }
 

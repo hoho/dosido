@@ -1,8 +1,10 @@
 'use strict';
 
 const internalUtil = require('internal/util');
-const constants = require('constants');
 const tls = require('tls');
+
+const SSL_OP_CIPHER_SERVER_PREFERENCE =
+    process.binding('constants').crypto.SSL_OP_CIPHER_SERVER_PREFERENCE;
 
 // Lazily loaded
 var crypto = null;
@@ -38,9 +40,10 @@ exports.createSecureContext = function createSecureContext(options, context) {
 
   var secureOptions = options.secureOptions;
   if (options.honorCipherOrder)
-    secureOptions |= constants.SSL_OP_CIPHER_SERVER_PREFERENCE;
+    secureOptions |= SSL_OP_CIPHER_SERVER_PREFERENCE;
 
   var c = new SecureContext(options.secureProtocol, secureOptions, context);
+  var i;
 
   if (context) return c;
 
@@ -48,7 +51,7 @@ exports.createSecureContext = function createSecureContext(options, context) {
   // cert's issuer in C++ code.
   if (options.ca) {
     if (Array.isArray(options.ca)) {
-      for (let i = 0, len = options.ca.length; i < len; i++) {
+      for (i = 0; i < options.ca.length; i++) {
         c.context.addCACert(options.ca[i]);
       }
     } else {
@@ -60,7 +63,7 @@ exports.createSecureContext = function createSecureContext(options, context) {
 
   if (options.cert) {
     if (Array.isArray(options.cert)) {
-      for (let i = 0; i < options.cert.length; i++)
+      for (i = 0; i < options.cert.length; i++)
         c.context.setCert(options.cert[i]);
     } else {
       c.context.setCert(options.cert);
@@ -73,9 +76,8 @@ exports.createSecureContext = function createSecureContext(options, context) {
   // which leads to the crash later on.
   if (options.key) {
     if (Array.isArray(options.key)) {
-      for (let i = 0; i < options.key.length; i++) {
-        var key = options.key[i];
-
+      for (i = 0; i < options.key.length; i++) {
+        const key = options.key[i];
         if (key.passphrase)
           c.context.setKey(key.pem, key.passphrase);
         else
@@ -101,14 +103,14 @@ exports.createSecureContext = function createSecureContext(options, context) {
     c.context.setECDHCurve(options.ecdhCurve);
 
   if (options.dhparam) {
-    var warning = c.context.setDHParam(options.dhparam);
+    const warning = c.context.setDHParam(options.dhparam);
     if (warning)
       internalUtil.trace(warning);
   }
 
   if (options.crl) {
     if (Array.isArray(options.crl)) {
-      for (let i = 0, len = options.crl.length; i < len; i++) {
+      for (i = 0; i < options.crl.length; i++) {
         c.context.addCRL(options.crl[i]);
       }
     } else {

@@ -5,7 +5,7 @@ const net = require('net');
 
 // skip test in FreeBSD jails
 if (common.inFreeBSDJail) {
-  console.log('1..0 # Skipped: In a FreeBSD jail');
+  common.skip('In a FreeBSD jail');
   return;
 }
 
@@ -24,7 +24,7 @@ server.on('close', common.mustCall(() => {
   assert.strictEqual(2, conns);
 }));
 
-server.listen(common.PORT, common.localhostIPv4, connect);
+server.listen(0, common.localhostIPv4, connect);
 
 function connect() {
   if (conns === 2) {
@@ -34,7 +34,7 @@ function connect() {
 
   conns++;
   client.once('close', connect);
-  client.connect(common.PORT, common.localhostIPv4, () => {
+  client.connect(server.address().port, common.localhostIPv4, () => {
     clientLocalPorts.push(client.localPort);
   });
 }

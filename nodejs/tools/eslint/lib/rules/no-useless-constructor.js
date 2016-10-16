@@ -1,8 +1,6 @@
 /**
  * @fileoverview Rule to flag the use of redundant constructors in classes.
  * @author Alberto Rodríguez
- * @copyright 2015 Alberto Rodríguez. All rights reserved.
- * See LICENSE file in root directory for full license.
  */
 "use strict";
 
@@ -111,7 +109,7 @@ function isPassingThrough(ctorParams, superArgs) {
         return false;
     }
 
-    for (var i = 0; i < ctorParams.length; ++i) {
+    for (let i = 0; i < ctorParams.length; ++i) {
         if (!isValidPair(ctorParams[i], superArgs[i])) {
             return false;
         }
@@ -142,33 +140,43 @@ function isRedundantSuperCall(body, ctorParams) {
 // Rule Definition
 //------------------------------------------------------------------------------
 
-module.exports = function(context) {
+module.exports = {
+    meta: {
+        docs: {
+            description: "disallow unnecessary constructors",
+            category: "ECMAScript 6",
+            recommended: false
+        },
 
-    /**
-     * Checks whether a node is a redundant constructor
-     * @param {ASTNode} node - node to check
-     * @returns {void}
-     */
-    function checkForConstructor(node) {
-        if (node.kind !== "constructor") {
-            return;
+        schema: []
+    },
+
+    create(context) {
+
+        /**
+         * Checks whether a node is a redundant constructor
+         * @param {ASTNode} node - node to check
+         * @returns {void}
+         */
+        function checkForConstructor(node) {
+            if (node.kind !== "constructor") {
+                return;
+            }
+
+            const body = node.value.body.body;
+            const ctorParams = node.value.params;
+            const superClass = node.parent.parent.superClass;
+
+            if (superClass ? isRedundantSuperCall(body, ctorParams) : (body.length === 0)) {
+                context.report({
+                    node,
+                    message: "Useless constructor."
+                });
+            }
         }
 
-        var body = node.value.body.body;
-        var ctorParams = node.value.params;
-        var superClass = node.parent.parent.superClass;
-
-        if (superClass ? isRedundantSuperCall(body, ctorParams) : (body.length === 0)) {
-            context.report({
-                node: node,
-                message: "Useless constructor."
-            });
-        }
+        return {
+            MethodDefinition: checkForConstructor
+        };
     }
-
-    return {
-        "MethodDefinition": checkForConstructor
-    };
 };
-
-module.exports.schema = [];

@@ -1,6 +1,6 @@
-## Building Node.js
+# Building Node.js
 
-Depending on what platform or features you require the build process may
+Depending on what platform or features you require, the build process may
 differ slightly. After you've successfully built a binary, running the
 test suite to validate that the binary works as intended is a good next step.
 
@@ -9,7 +9,7 @@ If you consistently can reproduce a test failure, search for it in the
 file a new issue.
 
 
-### Unix / Macintosh
+### Unix / OS X
 
 Prerequisites:
 
@@ -17,46 +17,70 @@ Prerequisites:
 * `clang` and `clang++` 3.4 or newer
 * Python 2.6 or 2.7
 * GNU Make 3.81 or newer
-* libexecinfo (FreeBSD and OpenBSD only)
 
-```text
+On OS X, you will also need:
+* [Xcode](https://developer.apple.com/xcode/download/)
+  * You also need to install the `Command Line Tools` via Xcode. You can find 
+    this under the menu `Xcode -> Preferences -> Downloads`
+  * This step will install `gcc` and the related toolchain containing `make`
+
+On FreeBSD and OpenBSD, you may also need:
+* libexecinfo
+
+To build Node.js:
+
+```console
 $ ./configure
 $ make
-$ [sudo] make install
 ```
 
-If your Python binary is in a non-standard location or has a
-non-standard name, run the following instead:
-
-```text
-$ export PYTHON=/path/to/python
-$ $PYTHON ./configure
-$ make
-$ [sudo] make install
-```
+Note that the above requires that `python` resolve to Python 2.6 or 2.7 and not a newer version.
 
 To run the tests:
 
-```text
+```console
 $ make test
+```
+
+To run the npm test suite:
+
+*note: to run the suite on node v4 or earlier you must first*
+*run `make install`*
+
+```console
+$ make test-npm
 ```
 
 To build the documentation:
 
-```text
+This will build Node.js first (if necessary) and then use it to build the docs:
+
+```console
 $ make doc
+```
+
+If you have an existing Node.js you can build just the docs with:
+
+```console
+$ NODE=/path/to/node make doc-only
 ```
 
 To read the documentation:
 
-```text
+```console
 $ man doc/node.1
 ```
 
 To test if Node.js was built correctly:
 
+```console
+$ ./node -e "console.log('Hello from Node.js ' + process.version)"
 ```
-$ node -e "console.log('Hello from Node.js ' + process.version)"
+
+To install this version of Node.js into a system directory:
+
+```console
+$ [sudo] make install
 ```
 
 
@@ -65,26 +89,28 @@ $ node -e "console.log('Hello from Node.js ' + process.version)"
 Prerequisites:
 
 * [Python 2.6 or 2.7](https://www.python.org/downloads/)
-* Visual Studio 2013 / 2015, all editions including the Community edition, or
-* Visual Studio Express 2013 / 2015 for Desktop
+* One of:
+  * [Visual C++ Build Tools](http://landinghub.visualstudio.com/visual-cpp-build-tools)
+  * [Visual Studio 2015 Update 3](https://www.visualstudio.com/), all editions
+    including the Community edition.
 * Basic Unix tools required for some tests,
   [Git for Windows](http://git-scm.com/download/win) includes Git Bash
   and tools which can be included in the global `PATH`.
 
-```text
-> vcbuild nosign
+```console
+> .\vcbuild nosign
 ```
 
 To run the tests:
 
-```text
-> vcbuild test
+```console
+> .\vcbuild test
 ```
 
 To test if Node.js was built correctly:
 
-```
-$ node -e "console.log('Hello from Node.js ' + process.version)"
+```console
+> Release\node -e "console.log('Hello from Node.js', process.version)"
 ```
 
 ### Android / Android-based devices (e.g., Firefox OS)
@@ -100,7 +126,7 @@ Be sure you have downloaded and extracted [Android NDK]
 (https://developer.android.com/tools/sdk/ndk/index.html)
 before in a folder. Then run:
 
-```
+```console
 $ ./android-configure /path/to/your/android-ndk
 $ make
 ```
@@ -108,29 +134,14 @@ $ make
 
 ### `Intl` (ECMA-402) support:
 
-[Intl](https://github.com/nodejs/node/wiki/Intl) support is not
-enabled by default.
+[Intl](https://github.com/nodejs/node/wiki/Intl) support is
+enabled by default, with English data only.
 
+#### Default: `small-icu` (English only) support
 
-#### "small" (English only) support
-
-This option will build with "small" (English only) support, but
-the full `Intl` (ECMA-402) APIs.  With `--download=all` it will
-download the ICU library as needed.
-
-##### Unix / Macintosh:
-
-```text
-$ ./configure --with-intl=small-icu --download=all
-```
-
-##### Windows:
-
-```text
-> vcbuild small-icu download-all
-```
-
-The `small-icu` mode builds with English-only data. You can add full
+By default, only English data is included, but
+the full `Intl` (ECMA-402) APIs.  It does not need to download
+any dependencies to function. You can add full
 data at runtime.
 
 *Note:* more docs are on
@@ -139,40 +150,41 @@ data at runtime.
 #### Build with full ICU support (all locales supported by ICU):
 
 With the `--download=all`, this may download ICU if you don't have an
-ICU in `deps/icu`.
+ICU in `deps/icu`. (The embedded `small-icu` included in the default
+Node.js source does not include all locales.)
 
-##### Unix / Macintosh:
+##### Unix / OS X:
 
-```text
+```console
 $ ./configure --with-intl=full-icu --download=all
 ```
 
 ##### Windows:
 
-```text
-> vcbuild full-icu download-all
+```console
+> .\vcbuild full-icu download-all
 ```
 
 #### Building without Intl support
 
-The `Intl` object will not be available. This is the default at
-present, so this option is not normally needed.
+The `Intl` object will not be available, nor some other APIs such as
+`String.normalize`.
 
-##### Unix / Macintosh:
+##### Unix / OS X:
 
-```text
-$ ./configure --with-intl=none
+```console
+$ ./configure --without-intl
 ```
 
 ##### Windows:
 
-```text
-> vcbuild intl-none
+```console
+> .\vcbuild without-intl
 ```
 
-#### Use existing installed ICU (Unix / Macintosh only):
+#### Use existing installed ICU (Unix / OS X only):
 
-```text
+```console
 $ pkg-config --modversion icu-i18n && ./configure --with-intl=system-icu
 ```
 
@@ -186,16 +198,20 @@ You can find other ICU releases at
 Download the file named something like `icu4c-**##.#**-src.tgz` (or
 `.zip`).
 
-##### Unix / Macintosh
+##### Unix / OS X
 
-```text
-# from an already-unpacked ICU:
+From an already-unpacked ICU:
+```console
 $ ./configure --with-intl=[small-icu,full-icu] --with-icu-source=/path/to/icu
+```
 
-# from a local ICU tarball
+From a local ICU tarball:
+```console
 $ ./configure --with-intl=[small-icu,full-icu] --with-icu-source=/path/to/icu.tgz
+```
 
-# from a tarball URL
+From a tarball URL:
+```console
 $ ./configure --with-intl=full-icu --with-icu-source=http://url/to/icu.tgz
 ```
 
@@ -205,8 +221,8 @@ First unpack latest ICU to `deps/icu`
 [icu4c-**##.#**-src.tgz](http://icu-project.org/download) (or `.zip`)
 as `deps/icu` (You'll have: `deps/icu/source/...`)
 
-```text
-> vcbuild full-icu
+```console
+> .\vcbuild full-icu
 ```
 
 ## Building Node.js with FIPS-compliant OpenSSL

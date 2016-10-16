@@ -11,7 +11,7 @@ let running = false;
 const queue = [];
 
 if (!common.hasIPv6) {
-  console.log('1..0 # Skipped: this test, no IPv6 support');
+  common.skip('this test, no IPv6 support');
   return;
 }
 
@@ -123,7 +123,7 @@ TEST(function test_lookup_ipv6_hint(done) {
   }, function(err, ip, family) {
     if (err) {
       // FreeBSD does not support V4MAPPED
-      if (process.platform === 'freebsd') {
+      if (common.isFreeBSD) {
         assert(err instanceof Error);
         assert.strictEqual(err.code, 'EAI_BADFLAGS');
         assert.strictEqual(err.hostname, 'www.google.com');
@@ -179,27 +179,15 @@ TEST(function test_lookup_all_ipv6(done) {
 
 TEST(function test_lookupservice_ip_ipv6(done) {
   var req = dns.lookupService('::1', 80, function(err, host, service) {
-    if (err) throw err;
+    if (err) {
+      // Not skipping the test, rather checking an alternative result,
+      // i.e. that ::1 may not be configured (e.g. in /etc/hosts)
+      assert.strictEqual(err.code, 'ENOTFOUND');
+      return done();
+    }
     assert.equal(typeof host, 'string');
     assert(host);
-
-    /*
-     * Retrieve the actual HTTP service name as setup on the host currently
-     * running the test by reading it from /etc/services. This is not ideal,
-     * as the service name lookup could use another mechanism (e.g nscd), but
-     * it's already better than hardcoding it.
-     */
-    var httpServiceName = common.getServiceName(80, 'tcp');
-    if (!httpServiceName) {
-      /*
-       * Couldn't find service name, reverting to the most sensible default
-       * for port 80.
-       */
-      httpServiceName = 'http';
-    }
-
-    assert.strictEqual(service, httpServiceName);
-
+    assert(['http', 'www', '80'].includes(service));
     done();
   });
 

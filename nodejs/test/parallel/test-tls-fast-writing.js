@@ -3,14 +3,13 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
 
 var fs = require('fs');
 
-var PORT = common.PORT;
 var dir = common.fixturesDir;
 var options = { key: fs.readFileSync(dir + '/test_key.pem'),
                 cert: fs.readFileSync(dir + '/test_cert.pem'),
@@ -41,9 +40,9 @@ function onconnection(conn) {
   });
 }
 
-server.listen(PORT, function() {
+server.listen(0, function() {
   var chunk = Buffer.alloc(1024, 'x');
-  var opt = { port: PORT, rejectUnauthorized: false };
+  var opt = { port: this.address().port, rejectUnauthorized: false };
   var conn = tls.connect(opt, function() {
     conn.on('drain', ondrain);
     write();

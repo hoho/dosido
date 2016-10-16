@@ -2,25 +2,26 @@
 var common = require('../common');
 
 if (!process.features.tls_ocsp) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL or ' +
+  common.skip('node compiled without OpenSSL or ' +
               'with old OpenSSL version.');
   return;
 }
 if (!common.opensslCli) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL CLI.');
+  common.skip('node compiled without OpenSSL CLI.');
   return;
 }
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
 
 var assert = require('assert');
-var constants = require('constants');
 var fs = require('fs');
 var join = require('path').join;
+
+const SSL_OP_NO_TICKET = require('crypto').constants.SSL_OP_NO_TICKET;
 
 var pfx = fs.readFileSync(join(common.fixturesDir, 'keys', 'agent1-pfx.pem'));
 
@@ -71,12 +72,12 @@ function test(testOptions, cb) {
                testOptions.response ? Buffer.from(testOptions.response) : null);
     }, 100);
   });
-  server.listen(common.PORT, function() {
+  server.listen(0, function() {
     var client = tls.connect({
-      port: common.PORT,
+      port: this.address().port,
       requestOCSP: testOptions.ocsp !== false,
       secureOptions: testOptions.ocsp === false ?
-          constants.SSL_OP_NO_TICKET : 0,
+          SSL_OP_NO_TICKET : 0,
       rejectUnauthorized: false
     }, function() {
       clientSecure++;

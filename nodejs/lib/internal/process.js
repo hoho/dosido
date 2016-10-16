@@ -4,11 +4,12 @@ var _lazyConstants = null;
 
 function lazyConstants() {
   if (!_lazyConstants) {
-    _lazyConstants = process.binding('constants');
+    _lazyConstants = process.binding('constants').os.signals;
   }
   return _lazyConstants;
 }
 
+exports.setup_cpuUsage = setup_cpuUsage;
 exports.setup_hrtime = setup_hrtime;
 exports.setupConfig = setupConfig;
 exports.setupKillAndExit = setupKillAndExit;
@@ -20,6 +21,57 @@ exports.setupRawDebug = setupRawDebug;
 const assert = process.assert = function(x, msg) {
   if (!x) throw new Error(msg || 'assertion error');
 };
+
+
+// Set up the process.cpuUsage() function.
+function setup_cpuUsage() {
+  // Get the native function, which will be replaced with a JS version.
+  const _cpuUsage = process.cpuUsage;
+
+  // Create the argument array that will be passed to the native function.
+  const cpuValues = new Float64Array(2);
+
+  // Replace the native function with the JS version that calls the native
+  // function.
+  process.cpuUsage = function cpuUsage(prevValue) {
+    // If a previous value was passed in, ensure it has the correct shape.
+    if (prevValue) {
+      if (!previousValueIsValid(prevValue.user)) {
+        throw new TypeError('value of user property of argument is invalid');
+      }
+
+      if (!previousValueIsValid(prevValue.system)) {
+        throw new TypeError('value of system property of argument is invalid');
+      }
+    }
+
+    // Call the native function to get the current values.
+    const errmsg = _cpuUsage(cpuValues);
+    if (errmsg) {
+      throw new Error('unable to obtain CPU usage: ' + errmsg);
+    }
+
+    // If a previous value was passed in, return diff of current from previous.
+    if (prevValue) return {
+      user: cpuValues[0] - prevValue.user,
+      system: cpuValues[1] - prevValue.system
+    };
+
+    // If no previous value passed in, return current value.
+    return {
+      user: cpuValues[0],
+      system: cpuValues[1]
+    };
+
+    // Ensure that a previously passed in value is valid. Currently, the native
+    // implementation always returns numbers <= Number.MAX_SAFE_INTEGER.
+    function previousValueIsValid(num) {
+      return Number.isFinite(num) &&
+          num <= Number.MAX_SAFE_INTEGER &&
+          num >= 0;
+    }
+  };
+}
 
 
 function setup_hrtime() {
@@ -65,6 +117,21 @@ function setupConfig(_source) {
     if (value === 'false') return false;
     return value;
   });
+  const processConfig = process.binding('config');
+  // Intl.v8BreakIterator() would crash w/ fatal error, so throw instead.
+  if (processConfig.hasIntl &&
+      processConfig.hasSmallICU &&
+      Intl.hasOwnProperty('v8BreakIterator') &&
+      !process.icu_data_dir) {
+    const des = Object.getOwnPropertyDescriptor(Intl, 'v8BreakIterator');
+    des.value = function v8BreakIterator() {
+      throw new Error('v8BreakIterator: full ICU data not installed. ' +
+                      'See https://github.com/nodejs/node/wiki/Intl');
+    };
+    Object.defineProperty(Intl, 'v8BreakIterator', des);
+  }
+  // Don’t let icu_data_dir leak through.
+  delete process.icu_data_dir;
 }
 
 
@@ -93,8 +160,7 @@ function setupKillAndExit() {
       err = process._kill(pid, 0);
     } else {
       sig = sig || 'SIGTERM';
-      if (lazyConstants()[sig] &&
-          sig.slice(0, 3) === 'SIG') {
+      if (lazyConstants()[sig]) {
         err = process._kill(pid, lazyConstants()[sig]);
       } else {
         throw new Error(`Unknown signal: ${sig}`);
@@ -102,7 +168,7 @@ function setupKillAndExit() {
     }
 
     if (err) {
-      var errnoException = require('util')._errnoException;
+      const errnoException = require('util')._errnoException;
       throw errnoException(err, 'kill');
     }
 
@@ -114,11 +180,10 @@ function setupKillAndExit() {
 function setupSignalHandlers() {
   // Load events module in order to access prototype elements on process like
   // process.addListener.
-  var signalWraps = {};
+  const signalWraps = {};
 
   function isSignal(event) {
     return typeof event === 'string' &&
-           event.slice(0, 3) === 'SIG' &&
            lazyConstants().hasOwnProperty(event);
   }
 
@@ -126,18 +191,18 @@ function setupSignalHandlers() {
   process.on('newListener', function(type, listener) {
     if (isSignal(type) &&
         !signalWraps.hasOwnProperty(type)) {
-      var Signal = process.binding('signal_wrap').Signal;
-      var wrap = new Signal();
+      const Signal = process.binding('signal_wrap').Signal;
+      const wrap = new Signal();
 
       wrap.unref();
 
       wrap.onsignal = function() { process.emit(type); };
 
-      var signum = lazyConstants()[type];
-      var err = wrap.start(signum);
+      const signum = lazyConstants()[type];
+      const err = wrap.start(signum);
       if (err) {
         wrap.close();
-        var errnoException = require('util')._errnoException;
+        const errnoException = require('util')._errnoException;
         throw errnoException(err, 'uv_signal_start');
       }
 
@@ -158,13 +223,13 @@ function setupChannel() {
   // If we were spawned with env NODE_CHANNEL_FD then load that up and
   // start parsing data from that stream.
   if (process.env.NODE_CHANNEL_FD) {
-    var fd = parseInt(process.env.NODE_CHANNEL_FD, 10);
+    const fd = parseInt(process.env.NODE_CHANNEL_FD, 10);
     assert(fd >= 0);
 
     // Make sure it's not accidentally inherited by child processes.
     delete process.env.NODE_CHANNEL_FD;
 
-    var cp = require('child_process');
+    const cp = require('child_process');
 
     // Load tcp_wrap to avoid situation where we might immediately receive
     // a message.
@@ -178,8 +243,8 @@ function setupChannel() {
 
 
 function setupRawDebug() {
-  var format = require('util').format;
-  var rawDebug = process._rawDebug;
+  const format = require('util').format;
+  const rawDebug = process._rawDebug;
   process._rawDebug = function() {
     rawDebug(format.apply(null, arguments));
   };

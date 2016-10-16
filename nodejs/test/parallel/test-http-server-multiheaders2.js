@@ -3,7 +3,7 @@
 // of the same header as per RFC2616: joining the handful of fields by ', '
 // that support it, and dropping duplicates for other fields.
 
-var common = require('../common');
+require('../common');
 var assert = require('assert');
 var http = require('http');
 
@@ -58,7 +58,7 @@ var srv = http.createServer(function(req, res) {
                  'foo, bar', 'header parsed incorrectly: ' + header);
   });
 
-  res.writeHead(200, {'Content-Type' : 'text/plain'});
+  res.writeHead(200, {'Content-Type': 'text/plain'});
   res.end('EOF');
 
   srv.close();
@@ -76,10 +76,10 @@ var headers = []
   .concat(multipleAllowed.map(makeHeader('bar')))
   .concat(multipleForbidden.map(makeHeader('bar')));
 
-srv.listen(common.PORT, function() {
+srv.listen(0, function() {
   http.get({
     host: 'localhost',
-    port: common.PORT,
+    port: this.address().port,
     path: '/',
     headers: headers,
   });

@@ -4,22 +4,16 @@ var domain = require('domain');
 var assert = require('assert');
 var d = domain.create();
 var expect = ['pbkdf2', 'randomBytes', 'pseudoRandomBytes'];
-var errors = 0;
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var crypto = require('crypto');
 
-process.on('exit', function() {
-  assert.equal(errors, 3);
-});
-
-d.on('error', function(e) {
+d.on('error', common.mustCall(function(e) {
   assert.equal(e.message, expect.shift());
-  errors += 1;
-});
+}, 3));
 
 d.run(function() {
   one();

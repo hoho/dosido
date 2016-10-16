@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var crypto = require('crypto');
@@ -13,10 +13,10 @@ var crypto = require('crypto');
 //
 function testPBKDF2(password, salt, iterations, keylen, expected) {
   var actual = crypto.pbkdf2Sync(password, salt, iterations, keylen, 'sha256');
-  assert.equal(actual.toString('binary'), expected);
+  assert.equal(actual.toString('latin1'), expected);
 
   crypto.pbkdf2(password, salt, iterations, keylen, 'sha256', (err, actual) => {
-    assert.equal(actual.toString('binary'), expected);
+    assert.equal(actual.toString('latin1'), expected);
   });
 }
 
@@ -84,3 +84,11 @@ assert.throws(function() {
 assert.throws(function() {
   crypto.pbkdf2('password', 'salt', 1, 4073741824, 'sha256', common.fail);
 }, /Bad key length/);
+
+// Should not get FATAL ERROR with empty password and salt
+// https://github.com/nodejs/node/issues/8571
+assert.doesNotThrow(() => {
+  crypto.pbkdf2('', '', 1, 32, 'sha256', common.mustCall((e) => {
+    assert.ifError(e);
+  }));
+});

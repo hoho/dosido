@@ -61,7 +61,7 @@ Worker.prototype.kill = function() {
 };
 
 Worker.prototype.send = function() {
-  this.process.send.apply(this.process, arguments);
+  return this.process.send.apply(this.process, arguments);
 };
 
 Worker.prototype.isDead = function isDead() {
@@ -74,7 +74,7 @@ Worker.prototype.isConnected = function isConnected() {
 
 // Master/worker specific methods are defined in the *Init() functions.
 
-function SharedHandle(key, address, port, addressType, backlog, fd, flags) {
+function SharedHandle(key, address, port, addressType, fd, flags) {
   this.key = key;
   this.workers = [];
   this.handle = null;
@@ -112,7 +112,7 @@ SharedHandle.prototype.remove = function(worker) {
 
 // Start a round-robin server. Master accepts connections and distributes
 // them over the workers.
-function RoundRobinHandle(key, address, port, addressType, backlog, fd) {
+function RoundRobinHandle(key, address, port, addressType, fd) {
   this.key = key;
   this.all = {};
   this.free = [];
@@ -127,12 +127,11 @@ function RoundRobinHandle(key, address, port, addressType, backlog, fd) {
   else
     this.server.listen(address);  // UNIX socket path.
 
-  var self = this;
-  this.server.once('listening', function() {
-    self.handle = self.server._handle;
-    self.handle.onconnection = self.distribute.bind(self);
-    self.server._handle = null;
-    self.server = null;
+  this.server.once('listening', () => {
+    this.handle = this.server._handle;
+    this.handle.onconnection = (err, handle) => this.distribute(err, handle);
+    this.server._handle = null;
+    this.server = null;
   });
 }
 
@@ -140,18 +139,17 @@ RoundRobinHandle.prototype.add = function(worker, send) {
   assert(worker.id in this.all === false);
   this.all[worker.id] = worker;
 
-  var self = this;
-  function done() {
-    if (self.handle.getsockname) {
+  const done = () => {
+    if (this.handle.getsockname) {
       var out = {};
-      self.handle.getsockname(out);
+      this.handle.getsockname(out);
       // TODO(bnoordhuis) Check err.
       send(null, { sockname: out }, null);
     } else {
       send(null, null, null);  // UNIX socket.
     }
-    self.handoff(worker);  // In case there are connections pending.
-  }
+    this.handoff(worker);  // In case there are connections pending.
+  };
 
   if (this.server === null) return done();
   // Still busy binding.
@@ -193,13 +191,13 @@ RoundRobinHandle.prototype.handoff = function(worker) {
     return;
   }
   var message = { act: 'newconn', key: this.key };
-  var self = this;
-  sendHelper(worker.process, message, handle, function(reply) {
+
+  sendHelper(worker.process, message, handle, (reply) => {
     if (reply.accepted)
       handle.close();
     else
-      self.distribute(0, handle);  // Worker is shutting down. Send to another.
-    self.handoff(worker);
+      this.distribute(0, handle);  // Worker is shutting down. Send to another.
+    this.handoff(worker);
   });
 };
 
@@ -299,16 +297,22 @@ function masterInit() {
   function createWorkerProcess(id, env) {
     var workerEnv = util._extend({}, process.env);
     var execArgv = cluster.settings.execArgv.slice();
+    var debugPort = 0;
 
     workerEnv = util._extend(workerEnv, env);
     workerEnv.NODE_UNIQUE_ID = '' + id;
 
     for (var i = 0; i < execArgv.length; i++) {
-      var match = execArgv[i].match(/^(--debug|--debug-(brk|port))(=\d+)?$/);
+      var match = execArgv[i].match(
+        /^(--inspect|--debug|--debug-(brk|port))(=\d+)?$/
+      );
 
       if (match) {
-        const debugPort = process.debugPort + debugPortOffset;
-        ++debugPortOffset;
+        if (debugPort === 0) {
+          debugPort = process.debugPort + debugPortOffset;
+          ++debugPortOffset;
+        }
+
         execArgv[i] = match[1] + '=' + debugPort;
       }
     }
@@ -317,6 +321,7 @@ function masterInit() {
       env: workerEnv,
       silent: cluster.settings.silent,
       execArgv: execArgv,
+      stdio: cluster.settings.stdio,
       gid: cluster.settings.gid,
       uid: cluster.settings.uid
     });
@@ -408,7 +413,7 @@ function masterInit() {
   cluster.disconnect = function(cb) {
     var workers = Object.keys(cluster.workers);
     if (workers.length === 0) {
-      process.nextTick(intercom.emit.bind(intercom, 'disconnect'));
+      process.nextTick(() => intercom.emit('disconnect'));
     } else {
       for (var key in workers) {
         key = workers[key];
@@ -430,7 +435,7 @@ function masterInit() {
     signo = signo || 'SIGTERM';
     var proc = this.process;
     if (this.isConnected()) {
-      this.once('disconnect', proc.kill.bind(proc, signo));
+      this.once('disconnect', () => proc.kill(signo));
       this.disconnect();
       return;
     }
@@ -487,7 +492,6 @@ function masterInit() {
                                               message.address,
                                               message.port,
                                               message.addressType,
-                                              message.backlog,
                                               message.fd,
                                               message.flags);
     }
@@ -527,7 +531,7 @@ function masterInit() {
   }
 
   function send(worker, message, handle, cb) {
-    sendHelper(worker.process, message, handle, cb);
+    return sendHelper(worker.process, message, handle, cb);
   }
 }
 
@@ -564,18 +568,18 @@ function workerInit() {
 
   // obj is a net#Server or a dgram#Socket object.
   cluster._getServer = function(obj, options, cb) {
-    const key = [ options.address,
-                options.port,
-                options.addressType,
-                options.fd ].join(':');
-    if (indexes[key] === undefined)
-      indexes[key] = 0;
+    const indexesKey = [ options.address,
+                         options.port,
+                         options.addressType,
+                         options.fd ].join(':');
+    if (indexes[indexesKey] === undefined)
+      indexes[indexesKey] = 0;
     else
-      indexes[key]++;
+      indexes[indexesKey]++;
 
     const message = util._extend({
       act: 'queryServer',
-      index: indexes[key],
+      index: indexes[indexesKey],
       data: null
     }, options);
 
@@ -585,9 +589,9 @@ function workerInit() {
       if (obj._setServerData) obj._setServerData(reply.data);
 
       if (handle)
-        shared(reply, handle, cb);  // Shared listen socket.
+        shared(reply, handle, indexesKey, cb);  // Shared listen socket.
       else
-        rr(reply, cb);              // Round-robin.
+        rr(reply, indexesKey, cb);              // Round-robin.
     });
     obj.once('listening', function() {
       cluster.worker.state = 'listening';
@@ -599,7 +603,7 @@ function workerInit() {
   };
 
   // Shared listen socket.
-  function shared(message, handle, cb) {
+  function shared(message, handle, indexesKey, cb) {
     var key = message.key;
     // Monkey-patch the close() method so we can keep track of when it's
     // closed. Avoids resource leaks when the handle is short-lived.
@@ -607,6 +611,7 @@ function workerInit() {
     handle.close = function() {
       send({ act: 'close', key: key });
       delete handles[key];
+      delete indexes[indexesKey];
       return close.apply(this, arguments);
     };
     assert(handles[key] === undefined);
@@ -615,7 +620,7 @@ function workerInit() {
   }
 
   // Round-robin. Master distributes handles across workers.
-  function rr(message, cb) {
+  function rr(message, indexesKey, cb) {
     if (message.errno)
       return cb(message.errno, null);
 
@@ -636,6 +641,7 @@ function workerInit() {
       if (key === undefined) return;
       send({ act: 'close', key: key });
       delete handles[key];
+      delete indexes[indexesKey];
       key = undefined;
     }
 
@@ -684,14 +690,16 @@ function workerInit() {
 
   Worker.prototype.destroy = function() {
     this.exitedAfterDisconnect = true;
-    if (!this.isConnected()) process.exit(0);
-    var exit = process.exit.bind(null, 0);
-    send({ act: 'exitedAfterDisconnect' }, () => process.disconnect());
-    process.once('disconnect', exit);
+    if (!this.isConnected()) {
+      process.exit(0);
+    } else {
+      send({ act: 'exitedAfterDisconnect' }, () => process.disconnect());
+      process.once('disconnect', () => process.exit(0));
+    }
   };
 
   function send(message, cb) {
-    sendHelper(process, message, null, cb);
+    return sendHelper(process, message, null, cb);
   }
 
   function _disconnect(masterInitiated) {
@@ -717,7 +725,11 @@ function workerInit() {
       const handle = handles[key];
       delete handles[key];
       waitingCount++;
-      handle.owner.close(checkWaitingCount);
+
+      if (handle.owner)
+        handle.owner.close(checkWaitingCount);
+      else
+        handle.close(checkWaitingCount);
     }
 
     checkWaitingCount();
@@ -728,12 +740,15 @@ function workerInit() {
 var seq = 0;
 var callbacks = {};
 function sendHelper(proc, message, handle, cb) {
+  if (!proc.connected)
+    return false;
+
   // Mark message as internal. See INTERNAL_PREFIX in lib/child_process.js
   message = util._extend({ cmd: 'NODE_CLUSTER' }, message);
   if (cb) callbacks[seq] = cb;
   message.seq = seq;
   seq += 1;
-  proc.send(message, handle);
+  return proc.send(message, handle);
 }
 
 
@@ -743,7 +758,7 @@ function internal(worker, cb) {
   return function(message, handle) {
     if (message.cmd !== 'NODE_CLUSTER') return;
     var fn = cb;
-    if (message.ack !== undefined) {
+    if (message.ack !== undefined && callbacks[message.ack] !== undefined) {
       fn = callbacks[message.ack];
       delete callbacks[message.ack];
     }

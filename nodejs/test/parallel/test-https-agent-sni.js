@@ -3,7 +3,7 @@ const common = require('../common');
 const assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 const https = require('https');
@@ -27,7 +27,7 @@ const server = https.Server(options, function(req, res) {
   res.end('hello world');
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   function expectResponse(id) {
     return common.mustCall(function(res) {
       res.resume();
@@ -43,7 +43,7 @@ server.listen(common.PORT, function() {
       agent: agent,
 
       path: '/',
-      port: common.PORT,
+      port: this.address().port,
       host: '127.0.0.1',
       servername: 'sni.' + j,
       rejectUnauthorized: false

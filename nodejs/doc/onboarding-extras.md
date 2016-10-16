@@ -1,26 +1,34 @@
+# Additional Onboarding Information
+
 ## Who to CC in issues
 
-* `lib/buffer`: @trevnorris
-* `lib/child_process`: @cjihrig, @bnoordhuis, @piscisaereus
-* `lib/cluster`: @cjihrig, @bnoordhuis, @piscisaereus
-* `lib/{crypto,tls,https}`: @indutny, @shigeki, @nodejs/crypto
-* `lib/domains`: @misterdjules
-* `lib/{_}http{*}`: @indutny, @bnoordhuis, @nodejs/http
-* `lib/net`: @indutny, @bnoordhuis, @piscisaereus, @chrisdickinson, @nodejs/streams
-* `lib/{_}stream{s|*}`: @nodejs/streams
-* `lib/repl`: @fishrock123
-* `lib/timers`: @fishrock123, @misterdjules
-* `lib/zlib`: @indutny, @bnoordhuis
-
-* `src/async-wrap.*`: @trevnorris
-* `src/node_crypto.*`: @indutny, @shigeki, @nodejs/crypto
-
-* `test/*`: @nodejs/testing, @trott
-
-* `tools/eslint`, `.eslintrc`: @silverwind, @trott
-
-* upgrading v8: @bnoordhuis / @targos / @ofrobots
-* upgrading npm: @thealphanerd, @fishrock123
+| subsystem | maintainers |
+| --- | --- |
+| `benchmark/*` | @nodejs/benchmarking, @mscdex |
+| `bootstrap_node.js` | @fishrock123 |
+| `lib/assert` | @nodejs/testing |
+| `lib/buffer` | @nodejs/buffer |
+| `lib/child_process` | @bnoordhuis, @cjihrig |
+| `lib/cluster` | @bnoordhuis, @cjihrig, @mcollina |
+| `lib/{crypto,tls,https}` | @nodejs/crypto |
+| `lib/domains` | @misterdjules |
+| `lib/fs`, `src/{fs|file}` | @nodejs/fs |
+| `lib/{_}http{*}` | @nodejs/http |
+| `lib/net` | @bnoordhuis, @indutny, @nodejs/streams |
+| `lib/{_}stream{s|*}` | @nodejs/streams |
+| `lib/repl` | @addaleax, @fishrock123 |
+| `lib/timers` | @fishrock123, @misterdjules |
+| `lib/util` | @bnoordhuis, @cjihrig, @evanlucas |
+| `lib/zlib` | @addaleax, @bnoordhuis, @indutny |
+| `src/async-wrap.*` | @trevnorris |
+| `src/node_crypto.*` | @nodejs/crypto |
+| `test/*` | @nodejs/testing |
+| `tools/eslint`, `.eslintrc` | @silverwind, @trott |
+| upgrading V8 | @nodejs/v8, @nodejs/post-mortem |
+| upgrading npm | @fishrock123, @thealphanerd |
+| upgrading c-ares | @jbergstroem |
+| upgrading http-parser | @jbergstroem, @nodejs/http |
+| upgrading libuv | @saghul |
 
 
 When things need extra attention, are controversial, or `semver-major`: @nodejs/ctc
@@ -52,13 +60,15 @@ Please use these when possible / appropriate
 * `feature request` - Any issue that requests a new feature (usually not PRs)
 * `good first contribution` - Issues suitable for newcomers to process
 
+--
+
 * `semver-{minor,major}`
   * be conservative – that is, if a change has the remote *chance* of breaking something, go for semver-major
   * when adding a semver label, add a comment explaining why you're adding it
   * minor vs. patch: roughly: "does it add a new method / does it add a new section to the docs"
   * major vs. everything else: run last versions tests against this version, if they pass, **probably** minor or patch
   * A breaking change helper ([full source](https://gist.github.com/chrisdickinson/ba532fa0e4e243fb7b44)):
-  ```
+  ```sh
   git checkout $(git show -s --pretty='%T' $(git show-ref -d $(git describe --abbrev=0) | tail -n1 | awk '{print $1}')) -- test; make -j8 test
   ```
 
@@ -94,7 +104,7 @@ to update from nodejs/node:
   * prefer to make the originating user update the code, since they have it fresh in mind
 * first, reattempt with `git am -3` (3-way merge)`
 * if `-3` still fails, and you need to get it merged:
-  * `git fetch origin pull/N/head:pr-N && git checkout pr-N && git rebase master`
+  * `git fetch upstream pull/N/head:pr-N && git checkout pr-N && git rebase master`
 
 
 ## best practices

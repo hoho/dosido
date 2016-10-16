@@ -2,12 +2,12 @@
 var common = require('../common');
 
 if (!common.opensslCli) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL CLI.');
+  common.skip('node compiled without OpenSSL CLI.');
   return;
 }
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 
@@ -99,12 +99,12 @@ function doTest() {
 
   server.listen(common.PORT, function() {
     Client(function(connectionType) {
-      assert(connectionType === 'New');
+      assert.strictEqual(connectionType, 'New');
       Client(function(connectionType) {
-        assert(connectionType === 'Reused');
+        assert.strictEqual(connectionType, 'Reused');
         setTimeout(function() {
           Client(function(connectionType) {
-            assert(connectionType === 'New');
+            assert.strictEqual(connectionType, 'New');
             server.close();
           });
         }, (SESSION_TIMEOUT + 1) * 1000);

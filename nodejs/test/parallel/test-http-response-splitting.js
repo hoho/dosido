@@ -29,24 +29,24 @@ const server = http.createServer((req, res) => {
       break;
     case 1:
       assert.throws(common.mustCall(() => {
-        res.writeHead(200, {'foo' : x});
+        res.writeHead(200, {'foo': x});
       }));
       break;
     case 2:
       assert.throws(common.mustCall(() => {
-        res.writeHead(200, {'foo' : y});
+        res.writeHead(200, {'foo': y});
       }));
       break;
     default:
-      assert.fail(null, null, 'should not get to here.');
+      common.fail('should not get to here.');
   }
   if (count === 3)
     server.close();
   res.end('ok');
 });
-server.listen(common.PORT, () => {
+server.listen(0, () => {
   const end = 'HTTP/1.1\r\n\r\n';
-  const client = net.connect({port: common.PORT}, () => {
+  const client = net.connect({port: server.address().port}, () => {
     client.write(`GET ${str} ${end}`);
     client.write(`GET / ${end}`);
     client.write(`GET / ${end}`);

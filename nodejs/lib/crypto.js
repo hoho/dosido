@@ -8,6 +8,7 @@ internalUtil.assertCrypto(exports);
 
 exports.DEFAULT_ENCODING = 'buffer';
 
+const constants = process.binding('constants').crypto;
 const binding = process.binding('crypto');
 const randomBytes = binding.randomBytes;
 const getCiphers = binding.getCiphers;
@@ -15,14 +16,20 @@ const getHashes = binding.getHashes;
 const getCurves = binding.getCurves;
 const getFipsCrypto = binding.getFipsCrypto;
 const setFipsCrypto = binding.setFipsCrypto;
+const timingSafeEqual = binding.timingSafeEqual;
 
 const Buffer = require('buffer').Buffer;
-const constants = require('constants');
 const stream = require('stream');
 const util = require('util');
 const LazyTransform = require('internal/streams/lazy_transform');
 
 const DH_GENERATOR = 2;
+
+Object.defineProperty(exports, 'constants', {
+  configurable: false,
+  enumerable: true,
+  value: constants
+});
 
 // This is here because many functions accepted binary strings without
 // any explicit encoding in older versions of node, and we don't want
@@ -94,7 +101,7 @@ Hmac.prototype._transform = Hash.prototype._transform;
 
 
 function getDecoder(decoder, encoding) {
-  if (encoding === 'utf-8') encoding = 'utf8';  // Normalize encoding.
+  encoding = internalUtil.normalizeEncoding(encoding);
   decoder = decoder || new StringDecoder(encoding);
   assert(decoder.encoding === encoding, 'Cannot change encoding');
   return decoder;
@@ -626,49 +633,40 @@ exports.randomBytes = exports.pseudoRandomBytes = randomBytes;
 
 exports.rng = exports.prng = randomBytes;
 
-exports.getCiphers = function() {
-  return filterDuplicates(getCiphers());
-};
+exports.getCiphers = internalUtil.cachedResult(() => {
+  return internalUtil.filterDuplicateStrings(getCiphers());
+});
 
+exports.getHashes = internalUtil.cachedResult(() => {
+  return internalUtil.filterDuplicateStrings(getHashes());
+});
 
-exports.getHashes = function() {
-  return filterDuplicates(getHashes());
-};
-
-
-exports.getCurves = function() {
-  return filterDuplicates(getCurves());
-};
+exports.getCurves = internalUtil.cachedResult(() => {
+  return internalUtil.filterDuplicateStrings(getCurves());
+});
 
 Object.defineProperty(exports, 'fips', {
   get: getFipsCrypto,
   set: setFipsCrypto
 });
 
-function filterDuplicates(names) {
-  // Drop all-caps names in favor of their lowercase aliases,
-  // for example, 'sha1' instead of 'SHA1'.
-  var ctx = {};
-  names.forEach(function(name) {
-    var key = name;
-    if (/^[0-9A-Z\-]+$/.test(key)) key = key.toLowerCase();
-    if (!ctx.hasOwnProperty(key) || ctx[key] < name)
-      ctx[key] = name;
-  });
-
-  return Object.getOwnPropertyNames(ctx).map(function(key) {
-    return ctx[key];
-  }).sort();
-}
+exports.timingSafeEqual = timingSafeEqual;
 
 // Legacy API
-exports.__defineGetter__('createCredentials',
-  internalUtil.deprecate(function() {
+Object.defineProperty(exports, 'createCredentials', {
+  configurable: true,
+  enumerable: true,
+  get: internalUtil.deprecate(function() {
     return require('tls').createSecureContext;
   }, 'crypto.createCredentials is deprecated. ' +
-     'Use tls.createSecureContext instead.'));
+     'Use tls.createSecureContext instead.')
+});
 
-exports.__defineGetter__('Credentials', internalUtil.deprecate(function() {
-  return require('tls').SecureContext;
-}, 'crypto.Credentials is deprecated. ' +
-   'Use tls.createSecureContext instead.'));
+Object.defineProperty(exports, 'Credentials', {
+  configurable: true,
+  enumerable: true,
+  get: internalUtil.deprecate(function() {
+    return require('tls').SecureContext;
+  }, 'crypto.Credentials is deprecated. ' +
+     'Use tls.SecureContext instead.')
+});

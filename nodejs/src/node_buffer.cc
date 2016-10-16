@@ -17,7 +17,7 @@
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-#define CHECK_NOT_OOB(r)                                                    \
+#define THROW_AND_RETURN_IF_OOB(r)                                          \
   do {                                                                      \
     if (!(r)) return env->ThrowRangeError("out of range index");            \
   } while (0)
@@ -42,21 +42,14 @@
 #define SLICE_START_END(start_arg, end_arg, end_max)                        \
   size_t start;                                                             \
   size_t end;                                                               \
-  CHECK_NOT_OOB(ParseArrayIndex(start_arg, 0, &start));                     \
-  CHECK_NOT_OOB(ParseArrayIndex(end_arg, end_max, &end));                   \
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(start_arg, 0, &start));           \
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(end_arg, end_max, &end));         \
   if (end < start) end = start;                                             \
-  CHECK_NOT_OOB(end <= end_max);                                            \
+  THROW_AND_RETURN_IF_OOB(end <= end_max);                                  \
   size_t length = end - start;
 
 #define BUFFER_MALLOC(length)                                               \
-  zero_fill_all_buffers ? calloc(length, 1) : malloc(length)
-
-#define SWAP_BYTES(arr, a, b)                                               \
-  do {                                                                      \
-    const uint8_t lo = arr[a];                                              \
-    arr[a] = arr[b];                                                        \
-    arr[b] = lo;                                                            \
-  } while (0)
+  zero_fill_all_buffers ? node::Calloc(length, 1) : node::Malloc(length)
 
 namespace node {
 
@@ -69,19 +62,15 @@ using v8::ArrayBuffer;
 using v8::ArrayBufferCreationMode;
 using v8::Context;
 using v8::EscapableHandleScope;
-using v8::Function;
 using v8::FunctionCallbackInfo;
-using v8::HandleScope;
 using v8::Integer;
 using v8::Isolate;
 using v8::Local;
 using v8::Maybe;
 using v8::MaybeLocal;
-using v8::Number;
 using v8::Object;
 using v8::Persistent;
 using v8::String;
-using v8::Uint32;
 using v8::Uint32Array;
 using v8::Uint8Array;
 using v8::Value;
@@ -167,6 +156,31 @@ void CallbackInfo::WeakCallback(Isolate* isolate) {
 }
 
 
+// Parse index for external array data.
+inline MUST_USE_RESULT bool ParseArrayIndex(Local<Value> arg,
+                                            size_t def,
+                                            size_t* ret) {
+  if (arg->IsUndefined()) {
+    *ret = def;
+    return true;
+  }
+
+  int64_t tmp_i = arg->IntegerValue();
+
+  if (tmp_i < 0)
+    return false;
+
+  // Check that the result fits in a size_t.
+  const uint64_t kSizeMax = static_cast<uint64_t>(static_cast<size_t>(-1));
+  // coverity[pointless_expression]
+  if (static_cast<uint64_t>(tmp_i) > kSizeMax)
+    return false;
+
+  *ret = static_cast<size_t>(tmp_i);
+  return true;
+}
+
+
 // Buffer methods
 
 bool HasInstance(Local<Value> val) {
@@ -218,10 +232,6 @@ MaybeLocal<Object> New(Isolate* isolate,
   size_t actual = 0;
   char* data = nullptr;
 
-  // malloc(0) and realloc(ptr, 0) have implementation-defined behavior in
-  // that the standard allows them to either return a unique pointer or a
-  // nullptr for zero-sized allocation requests.  Normalize by always using
-  // a nullptr.
   if (length > 0) {
     data = static_cast<char*>(BUFFER_MALLOC(length));
 
@@ -235,7 +245,7 @@ MaybeLocal<Object> New(Isolate* isolate,
       free(data);
       data = nullptr;
     } else if (actual < length) {
-      data = static_cast<char*>(realloc(data, actual));
+      data = static_cast<char*>(node::Realloc(data, actual));
       CHECK_NE(data, nullptr);
     }
   }
@@ -294,8 +304,8 @@ MaybeLocal<Object> New(Environment* env, size_t length) {
 
 
 MaybeLocal<Object> Copy(Isolate* isolate, const char* data, size_t length) {
+  EscapableHandleScope handle_scope(isolate);
   Environment* env = Environment::GetCurrent(isolate);
-  EscapableHandleScope handle_scope(env->isolate());
   Local<Object> obj;
   if (Buffer::Copy(env, data, length).ToLocal(&obj))
     return handle_scope.Escape(obj);
@@ -314,7 +324,7 @@ MaybeLocal<Object> Copy(Environment* env, const char* data, size_t length) {
   void* new_data;
   if (length > 0) {
     CHECK_NE(data, nullptr);
-    new_data = malloc(length);
+    new_data = node::Malloc(length);
     if (new_data == nullptr)
       return Local<Object>();
     memcpy(new_data, data, length);
@@ -344,8 +354,8 @@ MaybeLocal<Object> New(Isolate* isolate,
                        size_t length,
                        FreeCallback callback,
                        void* hint) {
+  EscapableHandleScope handle_scope(isolate);
   Environment* env = Environment::GetCurrent(isolate);
-  EscapableHandleScope handle_scope(env->isolate());
   Local<Object> obj;
   if (Buffer::New(env, data, length, callback, hint).ToLocal(&obj))
     return handle_scope.Escape(obj);
@@ -383,8 +393,8 @@ MaybeLocal<Object> New(Environment* env,
 
 
 MaybeLocal<Object> New(Isolate* isolate, char* data, size_t length) {
+  EscapableHandleScope handle_scope(isolate);
   Environment* env = Environment::GetCurrent(isolate);
-  EscapableHandleScope handle_scope(env->isolate());
   Local<Object> obj;
   if (Buffer::New(env, data, length).ToLocal(&obj))
     return handle_scope.Escape(obj);
@@ -424,33 +434,6 @@ void CreateFromString(const FunctionCallbackInfo<Value>& args) {
   Local<Object> buf;
   if (New(args.GetIsolate(), args[0].As<String>(), enc).ToLocal(&buf))
     args.GetReturnValue().Set(buf);
-}
-
-
-void CreateFromArrayBuffer(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  if (!args[0]->IsArrayBuffer())
-    return env->ThrowTypeError("argument is not an ArrayBuffer");
-  Local<ArrayBuffer> ab = args[0].As<ArrayBuffer>();
-
-  size_t ab_length = ab->ByteLength();
-  size_t offset;
-  size_t max_length;
-
-  CHECK_NOT_OOB(ParseArrayIndex(args[1], 0, &offset));
-  CHECK_NOT_OOB(ParseArrayIndex(args[2], ab_length - offset, &max_length));
-
-  if (offset >= ab_length)
-    return env->ThrowRangeError("'offset' is out of bounds");
-  if (max_length > ab_length - offset)
-    return env->ThrowRangeError("'length' is out of bounds");
-
-  Local<Uint8Array> ui = Uint8Array::New(ab, offset, max_length);
-  Maybe<bool> mb =
-      ui->SetPrototype(env->context(), env->buffer_prototype_object());
-  if (!mb.FromMaybe(false))
-    return env->ThrowError("Unable to set Object prototype");
-  args.GetReturnValue().Set(ui);
 }
 
 
@@ -518,8 +501,8 @@ void StringSlice<UCS2>(const FunctionCallbackInfo<Value>& args) {
 }
 
 
-void BinarySlice(const FunctionCallbackInfo<Value>& args) {
-  StringSlice<BINARY>(args);
+void Latin1Slice(const FunctionCallbackInfo<Value>& args) {
+  StringSlice<LATIN1>(args);
 }
 
 
@@ -562,9 +545,9 @@ void Copy(const FunctionCallbackInfo<Value> &args) {
   size_t source_start;
   size_t source_end;
 
-  CHECK_NOT_OOB(ParseArrayIndex(args[1], 0, &target_start));
-  CHECK_NOT_OOB(ParseArrayIndex(args[2], 0, &source_start));
-  CHECK_NOT_OOB(ParseArrayIndex(args[3], ts_obj_length, &source_end));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[1], 0, &target_start));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[2], 0, &source_start));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[3], ts_obj_length, &source_end));
 
   // Copy 0 bytes; we're done
   if (target_start >= target_length || source_start >= source_end)
@@ -693,16 +676,17 @@ void StringWrite(const FunctionCallbackInfo<Value>& args) {
   size_t offset;
   size_t max_length;
 
-  CHECK_NOT_OOB(ParseArrayIndex(args[1], 0, &offset));
-  CHECK_NOT_OOB(ParseArrayIndex(args[2], ts_obj_length - offset, &max_length));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[1], 0, &offset));
+  if (offset > ts_obj_length)
+    return env->ThrowRangeError("Offset is out of bounds");
+
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[2], ts_obj_length - offset,
+                                          &max_length));
 
   max_length = MIN(ts_obj_length - offset, max_length);
 
   if (max_length == 0)
     return args.GetReturnValue().Set(0);
-
-  if (offset >= ts_obj_length)
-    return env->ThrowRangeError("Offset is out of bounds");
 
   uint32_t written = StringBytes::Write(env->isolate(),
                                         ts_obj_data + offset,
@@ -719,8 +703,8 @@ void Base64Write(const FunctionCallbackInfo<Value>& args) {
 }
 
 
-void BinaryWrite(const FunctionCallbackInfo<Value>& args) {
-  StringWrite<BINARY>(args);
+void Latin1Write(const FunctionCallbackInfo<Value>& args) {
+  StringWrite<LATIN1>(args);
 }
 
 
@@ -822,8 +806,8 @@ void WriteFloatGeneric(const FunctionCallbackInfo<Value>& args) {
   size_t memcpy_num = sizeof(T);
 
   if (should_assert) {
-    CHECK_NOT_OOB(offset + memcpy_num >= memcpy_num);
-    CHECK_NOT_OOB(offset + memcpy_num <= ts_obj_length);
+    THROW_AND_RETURN_IF_OOB(offset + memcpy_num >= memcpy_num);
+    THROW_AND_RETURN_IF_OOB(offset + memcpy_num <= ts_obj_length);
   }
 
   if (offset + memcpy_num > ts_obj_length)
@@ -899,10 +883,10 @@ void CompareOffset(const FunctionCallbackInfo<Value> &args) {
   size_t source_end;
   size_t target_end;
 
-  CHECK_NOT_OOB(ParseArrayIndex(args[2], 0, &target_start));
-  CHECK_NOT_OOB(ParseArrayIndex(args[3], 0, &source_start));
-  CHECK_NOT_OOB(ParseArrayIndex(args[4], target_length, &target_end));
-  CHECK_NOT_OOB(ParseArrayIndex(args[5], ts_obj_length, &source_end));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[2], 0, &target_start));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[3], 0, &source_start));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[4], target_length, &target_end));
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(args[5], ts_obj_length, &source_end));
 
   if (source_start > ts_obj_length)
     return env->ThrowRangeError("out of range index");
@@ -994,10 +978,12 @@ void IndexOfString(const FunctionCallbackInfo<Value>& args) {
   bool is_forward = args[4]->IsTrue();
 
   const char* haystack = ts_obj_data;
-  const size_t haystack_length = ts_obj_length;
-  // Extended latin-1 characters are 2 bytes in Utf8.
+  // Round down to the nearest multiple of 2 in case of UCS2.
+  const size_t haystack_length = (enc == UCS2) ?
+      ts_obj_length &~ 1 : ts_obj_length;  // NOLINT(whitespace/operators)
+
   const size_t needle_length =
-      enc == BINARY ? needle->Length() : needle->Utf8Length();
+      StringBytes::Size(args.GetIsolate(), needle, enc);
 
   if (needle_length == 0 || haystack_length == 0) {
     return args.GetReturnValue().Set(-1);
@@ -1009,7 +995,8 @@ void IndexOfString(const FunctionCallbackInfo<Value>& args) {
   }
   size_t offset = static_cast<size_t>(opt_offset);
   CHECK_LT(offset, haystack_length);
-  if (is_forward && needle_length + offset > haystack_length) {
+  if ((is_forward && needle_length + offset > haystack_length) ||
+      needle_length > haystack_length) {
     return args.GetReturnValue().Set(-1);
   }
 
@@ -1059,8 +1046,8 @@ void IndexOfString(const FunctionCallbackInfo<Value>& args) {
                           needle_length,
                           offset,
                           is_forward);
-  } else if (enc == BINARY) {
-    uint8_t* needle_data = static_cast<uint8_t*>(malloc(needle_length));
+  } else if (enc == LATIN1) {
+    uint8_t* needle_data = static_cast<uint8_t*>(node::Malloc(needle_length));
     if (needle_data == nullptr) {
       return args.GetReturnValue().Set(-1);
     }
@@ -1111,7 +1098,8 @@ void IndexOfBuffer(const FunctionCallbackInfo<Value>& args) {
   }
   size_t offset = static_cast<size_t>(opt_offset);
   CHECK_LT(offset, haystack_length);
-  if (is_forward && needle_length + offset > haystack_length) {
+  if ((is_forward && needle_length + offset > haystack_length) ||
+      needle_length > haystack_length) {
     return args.GetReturnValue().Set(-1);
   }
 
@@ -1173,28 +1161,33 @@ void IndexOfNumber(const FunctionCallbackInfo<Value>& args) {
                                 : -1);
 }
 
+
 void Swap16(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  THROW_AND_RETURN_UNLESS_BUFFER(env, args.This());
-  SPREAD_ARG(args.This(), ts_obj);
-
-  for (size_t i = 0; i < ts_obj_length; i += 2) {
-    SWAP_BYTES(ts_obj_data, i, i + 1);
-  }
-  args.GetReturnValue().Set(args.This());
+  THROW_AND_RETURN_UNLESS_BUFFER(env, args[0]);
+  SPREAD_ARG(args[0], ts_obj);
+  SwapBytes16(ts_obj_data, ts_obj_length);
+  args.GetReturnValue().Set(args[0]);
 }
+
 
 void Swap32(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  THROW_AND_RETURN_UNLESS_BUFFER(env, args.This());
-  SPREAD_ARG(args.This(), ts_obj);
-
-  for (size_t i = 0; i < ts_obj_length; i += 4) {
-    SWAP_BYTES(ts_obj_data, i, i + 3);
-    SWAP_BYTES(ts_obj_data, i + 1, i + 2);
-  }
-  args.GetReturnValue().Set(args.This());
+  THROW_AND_RETURN_UNLESS_BUFFER(env, args[0]);
+  SPREAD_ARG(args[0], ts_obj);
+  SwapBytes32(ts_obj_data, ts_obj_length);
+  args.GetReturnValue().Set(args[0]);
 }
+
+
+void Swap64(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  THROW_AND_RETURN_UNLESS_BUFFER(env, args[0]);
+  SPREAD_ARG(args[0], ts_obj);
+  SwapBytes64(ts_obj_data, ts_obj_length);
+  args.GetReturnValue().Set(args[0]);
+}
+
 
 // pass Buffer object to load prototype methods
 void SetupBufferJS(const FunctionCallbackInfo<Value>& args) {
@@ -1206,14 +1199,14 @@ void SetupBufferJS(const FunctionCallbackInfo<Value>& args) {
 
   env->SetMethod(proto, "asciiSlice", AsciiSlice);
   env->SetMethod(proto, "base64Slice", Base64Slice);
-  env->SetMethod(proto, "binarySlice", BinarySlice);
+  env->SetMethod(proto, "latin1Slice", Latin1Slice);
   env->SetMethod(proto, "hexSlice", HexSlice);
   env->SetMethod(proto, "ucs2Slice", Ucs2Slice);
   env->SetMethod(proto, "utf8Slice", Utf8Slice);
 
   env->SetMethod(proto, "asciiWrite", AsciiWrite);
   env->SetMethod(proto, "base64Write", Base64Write);
-  env->SetMethod(proto, "binaryWrite", BinaryWrite);
+  env->SetMethod(proto, "latin1Write", Latin1Write);
   env->SetMethod(proto, "hexWrite", HexWrite);
   env->SetMethod(proto, "ucs2Write", Ucs2Write);
   env->SetMethod(proto, "utf8Write", Utf8Write);
@@ -1242,7 +1235,6 @@ void Initialize(Local<Object> target,
 
   env->SetMethod(target, "setupBufferJS", SetupBufferJS);
   env->SetMethod(target, "createFromString", CreateFromString);
-  env->SetMethod(target, "createFromArrayBuffer", CreateFromArrayBuffer);
 
   env->SetMethod(target, "byteLengthUtf8", ByteLengthUtf8);
   env->SetMethod(target, "compare", Compare);
@@ -1264,6 +1256,7 @@ void Initialize(Local<Object> target,
 
   env->SetMethod(target, "swap16", Swap16);
   env->SetMethod(target, "swap32", Swap32);
+  env->SetMethod(target, "swap64", Swap64);
 
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(env->isolate(), "kMaxLength"),

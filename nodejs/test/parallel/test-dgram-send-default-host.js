@@ -11,20 +11,27 @@ const toSend = [Buffer.alloc(256, 'x'),
                 Buffer.alloc(256, 'z'),
                 'hello'];
 
-client.on('listening', function() {
-  client.send(toSend[0], 0, toSend[0].length, common.PORT);
-  client.send(toSend[1], common.PORT);
-  client.send([toSend[2]], common.PORT);
-  client.send(toSend[3], 0, toSend[3].length, common.PORT);
-});
+const received = [];
 
-client.on('message', function(buf, info) {
-  const expected = toSend.shift().toString();
-  assert.ok(buf.toString() === expected, 'message was received correctly');
+client.on('listening', common.mustCall(() => {
+  const port = client.address().port;
+  client.send(toSend[0], 0, toSend[0].length, port);
+  client.send(toSend[1], port);
+  client.send([toSend[2]], port);
+  client.send(toSend[3], 0, toSend[3].length, port);
+}));
 
-  if (toSend.length === 0) {
+client.on('message', common.mustCall((buf, info) => {
+  received.push(buf.toString());
+
+  if (received.length === toSend.length) {
+    // The replies may arrive out of order -> sort them before checking.
+    received.sort();
+
+    const expected = toSend.map(String).sort();
+    assert.deepStrictEqual(received, expected);
     client.close();
   }
-});
+}, toSend.length));
 
-client.bind(common.PORT);
+client.bind(0);

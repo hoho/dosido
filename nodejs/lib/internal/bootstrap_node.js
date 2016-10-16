@@ -10,7 +10,7 @@
 (function(process) {
 
   function startup() {
-    var EventEmitter = NativeModule.require('events');
+    const EventEmitter = NativeModule.require('events');
     process._eventsCount = 0;
 
     Object.setPrototypeOf(process, Object.create(EventEmitter.prototype, {
@@ -47,6 +47,7 @@
     const _process = NativeModule.require('internal/process');
 
     _process.setup_hrtime();
+    _process.setup_cpuUsage();
     _process.setupConfig(NativeModule._source);
     NativeModule.require('internal/process/warning').setup();
     NativeModule.require('internal/process/next_tick').setup();
@@ -61,6 +62,11 @@
 
     _process.setupRawDebug();
 
+    Object.defineProperty(process, 'argv0', {
+      enumerable: true,
+      configurable: false,
+      value: process.argv[0]
+    });
     process.argv[0] = process.execPath;
 
     // There are various modes that Node can run in. The most common two
@@ -76,11 +82,15 @@
         NativeModule.require('_third_party_main');
       });
 
-    } else if (process.argv[1] == 'debug') {
+    } else if (process.argv[1] === 'debug') {
       // Start the debugger agent
       NativeModule.require('_debugger').start();
 
-    } else if (process.argv[1] == '--debug-agent') {
+    } else if (process.argv[1] === '--remote_debugging_server') {
+      // Start the debugging server
+      NativeModule.require('internal/inspector/remote_debugging_server');
+
+    } else if (process.argv[1] === '--debug-agent') {
       // Start the debugger agent
       NativeModule.require('_debug_agent').start();
 
@@ -94,7 +104,7 @@
       // channel. This needs to be done before any user code gets executed
       // (including preload modules).
       if (process.argv[1] && process.env.NODE_UNIQUE_ID) {
-        var cluster = NativeModule.require('cluster');
+        const cluster = NativeModule.require('cluster');
         cluster._setupWorker();
 
         // Make sure it's not accidentally inherited by child processes.
@@ -108,24 +118,26 @@
 
         const internalModule = NativeModule.require('internal/module');
         internalModule.addBuiltinLibsToObject(global);
-        evalScript('[eval]');
+        run(() => {
+          evalScript('[eval]');
+        });
       } else if (process.argv[1]) {
         // make process.argv[1] into a full path
-        var path = NativeModule.require('path');
+        const path = NativeModule.require('path');
         process.argv[1] = path.resolve(process.argv[1]);
 
-        var Module = NativeModule.require('module');
+        const Module = NativeModule.require('module');
 
         // check if user passed `-c` or `--check` arguments to Node.
         if (process._syntax_check_only != null) {
-          var vm = NativeModule.require('vm');
-          var fs = NativeModule.require('fs');
-          var internalModule = NativeModule.require('internal/module');
+          const vm = NativeModule.require('vm');
+          const fs = NativeModule.require('fs');
+          const internalModule = NativeModule.require('internal/module');
           // read the source
-          var filename = Module._resolveFilename(process.argv[1]);
+          const filename = Module._resolveFilename(process.argv[1]);
           var source = fs.readFileSync(filename, 'utf-8');
           // remove shebang and BOM
-          source = internalModule.stripBOM(source.replace(/^\#\!.*/, ''));
+          source = internalModule.stripBOM(source.replace(/^#!.*/, ''));
           // wrap it
           source = Module.wrap(source);
           // compile the script, this will throw if it fails
@@ -134,37 +146,13 @@
         }
 
         preloadModules();
-
-        if (global.v8debug &&
-            process.execArgv.some(function(arg) {
-              return arg.match(/^--debug-brk(=[0-9]*)?$/);
-            })) {
-
-          // XXX Fix this terrible hack!
-          //
-          // Give the client program a few ticks to connect.
-          // Otherwise, there's a race condition where `node debug foo.js`
-          // will not be able to connect in time to catch the first
-          // breakpoint message on line 1.
-          //
-          // A better fix would be to somehow get a message from the
-          // global.v8debug object about a connection, and runMain when
-          // that occurs.  --isaacs
-
-          var debugTimeout = +process.env.NODE_DEBUG_TIMEOUT || 50;
-          setTimeout(Module.runMain, debugTimeout);
-
-        } else {
-          // Main entry point into most programs:
-          Module.runMain();
-        }
-
+        run(Module.runMain);
       } else {
         preloadModules();
         // If -i or --interactive were passed, or stdin is a TTY.
         if (process._forceRepl || NativeModule.require('tty').isatty(0)) {
           // REPL
-          var cliRepl = NativeModule.require('internal/repl');
+          const cliRepl = NativeModule.require('internal/repl');
           cliRepl.createInternalRepl(process.env, function(err, repl) {
             if (err) {
               throw err;
@@ -250,9 +238,50 @@
   }
 
   function setupGlobalConsole() {
-    global.__defineGetter__('console', function() {
-      return NativeModule.require('console');
+    var inspectorConsole;
+    var wrapConsoleCall;
+    if (process.inspector) {
+      inspectorConsole = global.console;
+      wrapConsoleCall = process.inspector.wrapConsoleCall;
+      delete process.inspector;
+    }
+    var console;
+    Object.defineProperty(global, 'console', {
+      configurable: true,
+      enumerable: true,
+      get: function() {
+        if (!console) {
+          console = NativeModule.require('console');
+          installInspectorConsoleIfNeeded(console,
+                                          inspectorConsole,
+                                          wrapConsoleCall);
+        }
+        return console;
+      }
     });
+  }
+
+  function installInspectorConsoleIfNeeded(console,
+                                           inspectorConsole,
+                                           wrapConsoleCall) {
+    if (!inspectorConsole)
+      return;
+    const config = {};
+    for (const key of Object.keys(console)) {
+      if (!inspectorConsole.hasOwnProperty(key))
+        continue;
+      // If node console has the same method as inspector console,
+      // then wrap these two methods into one. Native wrapper will preserve
+      // the original stack.
+      console[key] = wrapConsoleCall(inspectorConsole[key],
+                                     console[key],
+                                     config);
+    }
+    for (const key of Object.keys(inspectorConsole)) {
+      if (console.hasOwnProperty(key))
+        continue;
+      console[key] = inspectorConsole[key];
+    }
   }
 
   function setupProcessFatal() {
@@ -337,13 +366,42 @@
     }
   }
 
+  function isDebugBreak() {
+    return process.execArgv.some((arg) => {
+      return arg.match(/^--debug-brk(=[0-9]*)?$/);
+    });
+  }
+
+  function run(entryFunction) {
+    if (process._debugWaitConnect && isDebugBreak()) {
+
+      // XXX Fix this terrible hack!
+      //
+      // Give the client program a few ticks to connect.
+      // Otherwise, there's a race condition where `node debug foo.js`
+      // will not be able to connect in time to catch the first
+      // breakpoint message on line 1.
+      //
+      // A better fix would be to somehow get a message from the
+      // V8 debug object about a connection, and runMain when
+      // that occurs.  --isaacs
+
+      const debugTimeout = +process.env.NODE_DEBUG_TIMEOUT || 50;
+      setTimeout(entryFunction, debugTimeout);
+
+    } else {
+      // Main entry point into most programs:
+      entryFunction();
+    }
+  }
+
   // Below you find a minimal module system, which is used to load the node
   // core modules found in lib/*.js. All core modules are compiled into the
   // node binary, so they can be loaded faster.
 
-  var ContextifyScript = process.binding('contextify').ContextifyScript;
+  const ContextifyScript = process.binding('contextify').ContextifyScript;
   function runInThisContext(code, options) {
-    var script = new ContextifyScript(code, options);
+    const script = new ContextifyScript(code, options);
     return script.runInThisContext();
   }
 
@@ -352,18 +410,19 @@
     this.id = id;
     this.exports = {};
     this.loaded = false;
+    this.loading = false;
   }
 
   NativeModule._source = process.binding('natives');
   NativeModule._cache = {};
 
   NativeModule.require = function(id) {
-    if (id == 'native_module') {
+    if (id === 'native_module') {
       return NativeModule;
     }
 
-    var cached = NativeModule.getCached(id);
-    if (cached) {
+    const cached = NativeModule.getCached(id);
+    if (cached && (cached.loaded || cached.loading)) {
       return cached.exports;
     }
 
@@ -373,7 +432,7 @@
 
     process.moduleLoadList.push(`NativeModule ${id}`);
 
-    var nativeModule = new NativeModule(id);
+    const nativeModule = new NativeModule(id);
 
     nativeModule.cache();
     nativeModule.compile();
@@ -427,14 +486,20 @@
     var source = NativeModule.getSource(this.id);
     source = NativeModule.wrap(source);
 
-    var fn = runInThisContext(source, {
-      filename: this.filename,
-      lineOffset: 0,
-      displayErrors: true
-    });
-    fn(this.exports, NativeModule.require, this, this.filename);
+    this.loading = true;
 
-    this.loaded = true;
+    try {
+      const fn = runInThisContext(source, {
+        filename: this.filename,
+        lineOffset: 0,
+        displayErrors: true
+      });
+      fn(this.exports, NativeModule.require, this, this.filename);
+
+      this.loaded = true;
+    } finally {
+      this.loading = false;
+    }
   };
 
   NativeModule.prototype.cache = function() {

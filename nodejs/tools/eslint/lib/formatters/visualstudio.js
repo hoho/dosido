@@ -1,8 +1,6 @@
 /**
  * @fileoverview Visual Studio compatible formatter
  * @author Ronald Pijnacker
- * @copyright 2015 Ronald Pijnacker. All rights reserved.
- * See LICENSE file in root directory for full license.
  */
 
 "use strict";
@@ -13,7 +11,7 @@
 
 /**
  * Returns the severity of warning or error
- * @param {object} message message object to examine
+ * @param {Object} message message object to examine
  * @returns {string} severity level
  * @private
  */
@@ -32,12 +30,12 @@ function getMessageType(message) {
 
 module.exports = function(results) {
 
-    var output = "",
+    let output = "",
         total = 0;
 
     results.forEach(function(result) {
 
-        var messages = result.messages;
+        const messages = result.messages;
 
         total += messages.length;
 

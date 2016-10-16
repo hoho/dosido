@@ -1,9 +1,11 @@
 'use strict';
-require('../common');
-var assert = require('assert');
-var readline = require('readline');
-var EventEmitter = require('events').EventEmitter;
-var inherits = require('util').inherits;
+const common = require('../common');
+const assert = require('assert');
+const readline = require('readline');
+const EventEmitter = require('events').EventEmitter;
+const inherits = require('util').inherits;
+const Writable = require('stream').Writable;
+const Readable = require('stream').Readable;
 
 function FakeInput() {
   EventEmitter.call(this);
@@ -20,6 +22,34 @@ function isWarned(emitter) {
     if (listeners.warned) return true;
   }
   return false;
+}
+
+{
+  // Default crlfDelay is 100ms
+  const fi = new FakeInput();
+  const rli = new readline.Interface({ input: fi, output: fi });
+  assert.strictEqual(rli.crlfDelay, 100);
+  rli.close();
+}
+
+{
+  // Minimum crlfDelay is 100ms
+  const fi = new FakeInput();
+  const rli = new readline.Interface({ input: fi, output: fi, crlfDelay: 0});
+  assert.strictEqual(rli.crlfDelay, 100);
+  rli.close();
+}
+
+{
+  // Maximum crlfDelay is 2000ms
+  const fi = new FakeInput();
+  const rli = new readline.Interface({
+    input: fi,
+    output: fi,
+    crlfDelay: 1 << 30
+  });
+  assert.strictEqual(rli.crlfDelay, 2000);
+  rli.close();
 }
 
 [ true, false ].forEach(function(terminal) {
@@ -195,6 +225,29 @@ function isWarned(emitter) {
   assert.equal(callCount, expectedLines.length);
   rli.close();
 
+  // Emit two line events when the delay
+  //   between \r and \n exceeds crlfDelay
+  {
+    const fi = new FakeInput();
+    const delay = 200;
+    const rli = new readline.Interface({
+      input: fi,
+      output: fi,
+      terminal: terminal,
+      crlfDelay: delay
+    });
+    let callCount = 0;
+    rli.on('line', function(line) {
+      callCount++;
+    });
+    fi.emit('data', '\r');
+    setTimeout(common.mustCall(() => {
+      fi.emit('data', '\n');
+      assert.equal(callCount, 2);
+      rli.close();
+    }), delay * 2);
+  }
+
   // \t when there is no completer function should behave like an ordinary
   //   character
   fi = new FakeInput();
@@ -227,7 +280,9 @@ function isWarned(emitter) {
     assert.strictEqual(called, false);
     called = true;
   });
-  fi.emit('data', '\tfo\to\t');
+  for (var character of '\tfo\to\t') {
+    fi.emit('data', character);
+  }
   fi.emit('data', '\n');
   assert.ok(called);
   rli.close();
@@ -321,6 +376,11 @@ function isWarned(emitter) {
     rli.close();
   }
 
+  // isFullWidthCodePoint() should return false for non-numeric values
+  [true, false, null, undefined, {}, [], 'あ'].forEach((v) => {
+    assert.strictEqual(readline.isFullWidthCodePoint('あ'), false);
+  });
+
   // wide characters should be treated as two columns.
   assert.equal(readline.isFullWidthCodePoint('a'.charCodeAt(0)), false);
   assert.equal(readline.isFullWidthCodePoint('あ'.charCodeAt(0)), true);
@@ -330,9 +390,9 @@ function isWarned(emitter) {
   assert.equal(readline.codePointAt('ABC', 0), 0x41);
   assert.equal(readline.codePointAt('あいう', 1), 0x3044);
   assert.equal(readline.codePointAt('\ud800\udc00', 0),  // surrogate
-      0x10000);
+               0x10000);
   assert.equal(readline.codePointAt('\ud800\udc00A', 2), // surrogate
-      0x41);
+               0x41);
   assert.equal(readline.getStringWidth('abcde'), 5);
   assert.equal(readline.getStringWidth('古池や'), 6);
   assert.equal(readline.getStringWidth('ノード.js'), 9);
@@ -341,14 +401,22 @@ function isWarned(emitter) {
   assert.equal(readline.getStringWidth('A\ud83c\ude00BC'), 5); // surrogate
 
   // check if vt control chars are stripped
-  assert.equal(readline
-               .stripVTControlCharacters('\u001b[31m> \u001b[39m'), '> ');
-  assert.equal(readline
-               .stripVTControlCharacters('\u001b[31m> \u001b[39m> '), '> > ');
-  assert.equal(readline
-               .stripVTControlCharacters('\u001b[31m\u001b[39m'), '');
-  assert.equal(readline
-               .stripVTControlCharacters('> '), '> ');
+  assert.strictEqual(
+    readline.stripVTControlCharacters('\u001b[31m> \u001b[39m'),
+    '> '
+  );
+  assert.strictEqual(
+    readline.stripVTControlCharacters('\u001b[31m> \u001b[39m> '),
+    '> > '
+  );
+  assert.strictEqual(
+    readline.stripVTControlCharacters('\u001b[31m\u001b[39m'),
+    ''
+  );
+  assert.strictEqual(
+    readline.stripVTControlCharacters('> '),
+    '> '
+  );
   assert.equal(readline.getStringWidth('\u001b[31m> \u001b[39m'), 2);
   assert.equal(readline.getStringWidth('\u001b[31m> \u001b[39m> '), 4);
   assert.equal(readline.getStringWidth('\u001b[31m\u001b[39m'), 0);
@@ -398,4 +466,29 @@ function isWarned(emitter) {
     });
   });
 
+  {
+    const expected = terminal
+      ? ['\u001b[1G', '\u001b[0J', '$ ', '\u001b[3G']
+      : ['$ '];
+
+    let counter = 0;
+    const output = new Writable({
+      write: common.mustCall((chunk, enc, cb) => {
+        assert.strictEqual(chunk.toString(), expected[counter++]);
+        cb();
+        rl.close();
+      }, expected.length)
+    });
+
+    const rl = readline.createInterface({
+      input: new Readable({ read: () => {} }),
+      output: output,
+      prompt: '$ ',
+      terminal: terminal
+    });
+
+    rl.prompt();
+
+    assert.strictEqual(rl._prompt, '$ ');
+  }
 });

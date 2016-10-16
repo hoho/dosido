@@ -256,9 +256,14 @@ function _addListener(target, type, listener, prepend) {
       m = $getMaxListeners(target);
       if (m && m > 0 && existing.length > m) {
         existing.warned = true;
-        process.emitWarning('Possible EventEmitter memory leak detected. ' +
+        const w = new Error('Possible EventEmitter memory leak detected. ' +
                             `${existing.length} ${type} listeners added. ` +
                             'Use emitter.setMaxListeners() to increase limit');
+        w.name = 'Warning';
+        w.emitter = target;
+        w.type = type;
+        w.count = existing.length;
+        process.emitWarning(w);
       }
     }
   }
@@ -308,7 +313,7 @@ EventEmitter.prototype.prependOnceListener =
 // emits a 'removeListener' event iff the listener was removed
 EventEmitter.prototype.removeListener =
     function removeListener(type, listener) {
-      var list, events, position, i;
+      var list, events, position, i, originalListener;
 
       if (typeof listener !== 'function')
         throw new TypeError('"listener" argument must be a function');
@@ -327,7 +332,7 @@ EventEmitter.prototype.removeListener =
         else {
           delete events[type];
           if (events.removeListener)
-            this.emit('removeListener', type, listener);
+            this.emit('removeListener', type, list.listener || listener);
         }
       } else if (typeof list !== 'function') {
         position = -1;
@@ -335,6 +340,7 @@ EventEmitter.prototype.removeListener =
         for (i = list.length; i-- > 0;) {
           if (list[i] === listener ||
               (list[i].listener && list[i].listener === listener)) {
+            originalListener = list[i].listener;
             position = i;
             break;
           }
@@ -356,7 +362,7 @@ EventEmitter.prototype.removeListener =
         }
 
         if (events.removeListener)
-          this.emit('removeListener', type, listener);
+          this.emit('removeListener', type, originalListener || listener);
       }
 
       return this;

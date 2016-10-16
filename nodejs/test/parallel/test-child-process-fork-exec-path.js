@@ -1,8 +1,8 @@
 'use strict';
+const common = require('../common');
 var assert = require('assert');
 var fs = require('fs');
 var path = require('path');
-var common = require('../common');
 var msg = {test: 'this'};
 var nodePath = process.execPath;
 var copyPath = path.join(common.tmpDir, 'node-copy.exe');
@@ -12,13 +12,11 @@ if (process.env.FORK) {
   assert.equal(process.argv[0], copyPath);
   process.send(msg);
   process.exit();
-}
-else {
+} else {
   common.refreshTmpDir();
   try {
     fs.unlinkSync(copyPath);
-  }
-  catch (e) {
+  } catch (e) {
     if (e.code !== 'ENOENT') throw e;
   }
   fs.writeFileSync(copyPath, fs.readFileSync(nodePath));

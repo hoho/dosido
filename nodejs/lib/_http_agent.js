@@ -102,21 +102,34 @@ Agent.prototype.getName = function(options) {
   if (options.localAddress)
     name += options.localAddress;
 
+  // Pacify parallel/test-http-agent-getname by only appending
+  // the ':' when options.family is set.
+  if (options.family === 4 || options.family === 6)
+    name += ':' + options.family;
+
   return name;
 };
 
 Agent.prototype.addRequest = function(req, options) {
-  // Legacy API: addRequest(req, host, port, path)
+  // Legacy API: addRequest(req, host, port, localAddress)
   if (typeof options === 'string') {
     options = {
       host: options,
       port: arguments[2],
-      path: arguments[3]
+      localAddress: arguments[3]
     };
   }
 
   options = util._extend({}, options);
   options = util._extend(options, this.options);
+
+  if (!options.servername) {
+    options.servername = options.host;
+    const hostHeader = req.getHeader('host');
+    if (hostHeader) {
+      options.servername = hostHeader.replace(/:.*$/, '');
+    }
+  }
 
   var name = this.getName(options);
   if (!this.sockets[name]) {

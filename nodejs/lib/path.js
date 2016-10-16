@@ -169,10 +169,12 @@ const win32 = {
       } else {
         // Windows has the concept of drive-specific current working
         // directories. If we've resolved a drive letter but not yet an
-        // absolute path, get cwd for that drive. We're sure the device is not
+        // absolute path, get cwd for that drive, or the process cwd if
+        // the drive cwd is not available. We're sure the device is not
         // a UNC path at this points, because UNC paths are always absolute.
-        path = process.env['=' + resolvedDevice];
-        // Verify that a drive-local cwd was found and that it actually points
+        path = process.env['=' + resolvedDevice] || process.cwd();
+
+        // Verify that a cwd was found and that it actually points
         // to our drive. If not, default to the drive's root.
         if (path === undefined ||
             path.slice(0, 3).toLowerCase() !==
@@ -619,12 +621,8 @@ const win32 = {
 
     // We found a mismatch before the first common path separator was seen, so
     // return the original `to`.
-    // TODO: do this just for device roots (and not UNC paths)?
     if (i !== length && lastCommonSep === -1) {
-      if (toStart > 0)
-        return toOrig.slice(toStart);
-      else
-        return toOrig;
+      return toOrig;
     }
 
     var out = '';
@@ -779,7 +777,7 @@ const win32 = {
           end = i;
           break;
         }
-      } else  {
+      } else {
         // We saw the first non-path separator
         matchedSlash = false;
       }
@@ -855,8 +853,10 @@ const win32 = {
         }
       }
 
-      if (end === -1)
-        return '';
+      if (start === end)
+        end = firstNonSlashEnd;
+      else if (end === -1)
+        end = path.length;
       return path.slice(start, end);
     } else {
       for (i = path.length - 1; i >= start; --i) {
@@ -1335,7 +1335,7 @@ const posix = {
           end = i;
           break;
         }
-      } else  {
+      } else {
         // We saw the first non-path separator
         matchedSlash = false;
       }
@@ -1398,8 +1398,10 @@ const posix = {
         }
       }
 
-      if (end === -1)
-        return '';
+      if (start === end)
+        end = firstNonSlashEnd;
+      else if (end === -1)
+        end = path.length;
       return path.slice(start, end);
     } else {
       for (i = path.length - 1; i >= 0; --i) {

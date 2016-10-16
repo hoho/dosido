@@ -7,7 +7,55 @@ const binding = process.binding('util');
 
 const isError = internalUtil.isError;
 
+const inspectDefaultOptions = Object.seal({
+  showHidden: false,
+  depth: 2,
+  colors: false,
+  customInspect: true,
+  showProxy: false,
+  maxArrayLength: 100,
+  breakLength: 60
+});
+
 var Debug;
+var simdFormatters;
+
+// SIMD is only available when --harmony_simd is specified on the command line
+// and the set of available types differs between v5 and v6, that's why we use
+// a map to look up and store the formatters.  It also provides a modicum of
+// protection against users monkey-patching the SIMD object.
+if (typeof global.SIMD === 'object' && global.SIMD !== null) {
+  simdFormatters = new Map();
+
+  const make = (extractLane, count) => {
+    return (ctx, value, recurseTimes, visibleKeys, keys) => {
+      const output = new Array(count);
+      for (var i = 0; i < count; i += 1)
+        output[i] = formatPrimitive(ctx, extractLane(value, i));
+      return output;
+    };
+  };
+
+  const SIMD = global.SIMD;  // Pacify eslint.
+
+  const countPerType = {
+    Bool16x8: 8,
+    Bool32x4: 4,
+    Bool8x16: 16,
+    Float32x4: 4,
+    Int16x8: 8,
+    Int32x4: 4,
+    Int8x16: 16,
+    Uint16x8: 8,
+    Uint32x4: 4,
+    Uint8x16: 16
+  };
+
+  for (const key in countPerType) {
+    const type = SIMD[key];
+    simdFormatters.set(type, make(type.extractLane, countPerType[key]));
+  }
+}
 
 function tryStringify(arg) {
   try {
@@ -125,41 +173,47 @@ function inspect(obj, opts) {
     stylize: stylizeNoColor
   };
   // legacy...
-  if (arguments.length >= 3) ctx.depth = arguments[2];
-  if (arguments.length >= 4) ctx.colors = arguments[3];
+  if (arguments[2] !== undefined) ctx.depth = arguments[2];
+  if (arguments[3] !== undefined) ctx.colors = arguments[3];
   if (typeof opts === 'boolean') {
     // legacy...
     ctx.showHidden = opts;
-  } else if (opts) {
-    // got an "options" object
-    exports._extend(ctx, opts);
   }
-  // set default options
-  if (ctx.showHidden === undefined) ctx.showHidden = false;
-  if (ctx.depth === undefined) ctx.depth = 2;
-  if (ctx.colors === undefined) ctx.colors = false;
-  if (ctx.customInspect === undefined) ctx.customInspect = true;
+  // Set default and user-specified options
+  ctx = Object.assign({}, inspect.defaultOptions, ctx, opts);
   if (ctx.colors) ctx.stylize = stylizeWithColor;
+  if (ctx.maxArrayLength === null) ctx.maxArrayLength = Infinity;
   return formatValue(ctx, obj, ctx.depth);
 }
-exports.inspect = inspect;
 
+Object.defineProperty(inspect, 'defaultOptions', {
+  get: function() {
+    return inspectDefaultOptions;
+  },
+  set: function(options) {
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError('"options" must be an object');
+    }
+    Object.assign(inspectDefaultOptions, options);
+    return inspectDefaultOptions;
+  }
+});
 
 // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
 inspect.colors = {
-  'bold' : [1, 22],
-  'italic' : [3, 23],
-  'underline' : [4, 24],
-  'inverse' : [7, 27],
-  'white' : [37, 39],
-  'grey' : [90, 39],
-  'black' : [30, 39],
-  'blue' : [34, 39],
-  'cyan' : [36, 39],
-  'green' : [32, 39],
-  'magenta' : [35, 39],
-  'red' : [31, 39],
-  'yellow' : [33, 39]
+  'bold': [1, 22],
+  'italic': [3, 23],
+  'underline': [4, 24],
+  'inverse': [7, 27],
+  'white': [37, 39],
+  'grey': [90, 39],
+  'black': [30, 39],
+  'blue': [34, 39],
+  'cyan': [36, 39],
+  'green': [32, 39],
+  'magenta': [35, 39],
+  'red': [31, 39],
+  'yellow': [33, 39]
 };
 
 // Don't use 'blue' not visible on cmd.exe
@@ -176,6 +230,10 @@ inspect.styles = {
   'regexp': 'red'
 };
 
+const customInspectSymbol = internalUtil.customInspectSymbol;
+
+exports.inspect = inspect;
+exports.inspect.custom = customInspectSymbol;
 
 function stylizeWithColor(str, styleType) {
   var style = inspect.styles[styleType];
@@ -231,30 +289,77 @@ function ensureDebugIsInitialized() {
 
 
 function inspectPromise(p) {
-  ensureDebugIsInitialized();
   // Only create a mirror if the object is a Promise.
   if (!binding.isPromise(p))
     return null;
+  ensureDebugIsInitialized();
   const mirror = Debug.MakeMirror(p, true);
   return {status: mirror.status(), value: mirror.promiseValue().value_};
 }
 
 
 function formatValue(ctx, value, recurseTimes) {
+  if (ctx.showProxy &&
+      ((typeof value === 'object' && value !== null) ||
+       typeof value === 'function')) {
+    var proxy = undefined;
+    var proxyCache = ctx.proxyCache;
+    if (!proxyCache)
+      proxyCache = ctx.proxyCache = new Map();
+    // Determine if we've already seen this object and have
+    // determined that it either is or is not a proxy.
+    if (proxyCache.has(value)) {
+      // We've seen it, if the value is not undefined, it's a Proxy.
+      proxy = proxyCache.get(value);
+    } else {
+      // Haven't seen it. Need to check.
+      // If it's not a Proxy, this will return undefined.
+      // Otherwise, it'll return an array. The first item
+      // is the target, the second item is the handler.
+      // We ignore (and do not return) the Proxy isRevoked property.
+      proxy = binding.getProxyDetails(value);
+      if (proxy) {
+        // We know for a fact that this isn't a Proxy.
+        // Mark it as having already been evaluated.
+        // We do this because this object is passed
+        // recursively to formatValue below in order
+        // for it to get proper formatting, and because
+        // the target and handle objects also might be
+        // proxies... it's unfortunate but necessary.
+        proxyCache.set(proxy, undefined);
+      }
+      // If the object is not a Proxy, then this stores undefined.
+      // This tells the code above that we've already checked and
+      // ruled it out. If the object is a proxy, this caches the
+      // results of the getProxyDetails call.
+      proxyCache.set(value, proxy);
+    }
+    if (proxy) {
+      return 'Proxy ' + formatValue(ctx, proxy, recurseTimes);
+    }
+  }
+
   // Provide a hook for user-specified inspect functions.
   // Check that value is an object with an inspect function on it
-  if (ctx.customInspect &&
-      value &&
-      typeof value.inspect === 'function' &&
-      // Filter out the util module, it's inspect function is special
-      value.inspect !== exports.inspect &&
-      // Also filter out any prototype objects using the circular check.
-      !(value.constructor && value.constructor.prototype === value)) {
-    var ret = value.inspect(recurseTimes, ctx);
-    if (typeof ret !== 'string') {
-      ret = formatValue(ctx, ret, recurseTimes);
+  if (ctx.customInspect && value) {
+    const maybeCustomInspect = value[customInspectSymbol] || value.inspect;
+
+    if (typeof maybeCustomInspect === 'function' &&
+        // Filter out the util module, its inspect function is special
+        maybeCustomInspect !== exports.inspect &&
+        // Also filter out any prototype objects using the circular check.
+        !(value.constructor && value.constructor.prototype === value)) {
+      let ret = maybeCustomInspect.call(value, recurseTimes, ctx);
+
+      // If the custom inspection method returned `this`, don't go into
+      // infinite recursion.
+      if (ret !== value) {
+        if (typeof ret !== 'string') {
+          ret = formatValue(ctx, ret, recurseTimes);
+        }
+        return ret;
+      }
     }
-    return ret;
   }
 
   // Primitive types cannot have properties
@@ -304,7 +409,11 @@ function formatValue(ctx, value, recurseTimes) {
       return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
     }
     if (isDate(value)) {
-      return ctx.stylize(Date.prototype.toISOString.call(value), 'date');
+      if (Number.isNaN(value.getTime())) {
+        return ctx.stylize(value.toString(), 'date');
+      } else {
+        return ctx.stylize(Date.prototype.toISOString.call(value), 'date');
+      }
     }
     if (isError(value)) {
       return formatError(value);
@@ -314,6 +423,10 @@ function formatValue(ctx, value, recurseTimes) {
       formatted = formatPrimitiveNoColor(ctx, raw);
       return ctx.stylize('[String: ' + formatted + ']', 'string');
     }
+    if (typeof raw === 'symbol') {
+      formatted = formatPrimitiveNoColor(ctx, raw);
+      return ctx.stylize('[Symbol: ' + formatted + ']', 'symbol');
+    }
     if (typeof raw === 'number') {
       formatted = formatPrimitiveNoColor(ctx, raw);
       return ctx.stylize('[Number: ' + formatted + ']', 'number');
@@ -322,9 +435,10 @@ function formatValue(ctx, value, recurseTimes) {
       formatted = formatPrimitiveNoColor(ctx, raw);
       return ctx.stylize('[Boolean: ' + formatted + ']', 'boolean');
     }
-    // Fast path for ArrayBuffer.  Can't do the same for DataView because it
-    // has a non-primitive .buffer property that we need to recurse for.
-    if (binding.isArrayBuffer(value)) {
+    // Fast path for ArrayBuffer and SharedArrayBuffer.
+    // Can't do the same for DataView because it has a non-primitive
+    // .buffer property that we need to recurse for.
+    if (binding.isArrayBuffer(value) || binding.isSharedArrayBuffer(value)) {
       return `${getConstructorOf(value).name}` +
              ` { byteLength: ${formatNumber(ctx, value.byteLength)} }`;
     }
@@ -362,7 +476,8 @@ function formatValue(ctx, value, recurseTimes) {
       keys.unshift('size');
     empty = value.size === 0;
     formatter = formatMap;
-  } else if (binding.isArrayBuffer(value)) {
+  } else if (binding.isArrayBuffer(value) ||
+             binding.isSharedArrayBuffer(value)) {
     braces = ['{', '}'];
     keys.unshift('byteLength');
     visibleKeys.byteLength = true;
@@ -390,6 +505,7 @@ function formatValue(ctx, value, recurseTimes) {
       braces = ['{', '}'];
       formatter = formatPromise;
     } else {
+      let maybeSimdFormatter;
       if (binding.isMapIterator(value)) {
         constructor = { name: 'MapIterator' };
         braces = ['{', '}'];
@@ -400,6 +516,11 @@ function formatValue(ctx, value, recurseTimes) {
         braces = ['{', '}'];
         empty = false;
         formatter = formatCollectionIterator;
+      } else if (simdFormatters &&
+                 typeof constructor === 'function' &&
+                 (maybeSimdFormatter = simdFormatters.get(constructor))) {
+        braces = ['[', ']'];
+        formatter = maybeSimdFormatter;
       } else {
         // Unset the constructor to prevent "Object {...}" for ordinary objects.
         if (constructor && constructor.name === 'Object')
@@ -473,7 +594,7 @@ function formatValue(ctx, value, recurseTimes) {
 
   ctx.seen.pop();
 
-  return reduceToSingleString(output, base, braces);
+  return reduceToSingleString(output, base, braces, ctx.breakLength);
 }
 
 
@@ -538,13 +659,18 @@ function formatObject(ctx, value, recurseTimes, visibleKeys, keys) {
 
 function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
   var output = [];
-  for (var i = 0, l = value.length; i < l; ++i) {
+  const maxLength = Math.min(Math.max(0, ctx.maxArrayLength), value.length);
+  const remaining = value.length - maxLength;
+  for (var i = 0; i < maxLength; ++i) {
     if (hasOwnProperty(value, String(i))) {
       output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
           String(i), true));
     } else {
       output.push('');
     }
+  }
+  if (remaining > 0) {
+    output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
   }
   keys.forEach(function(key) {
     if (typeof key === 'symbol' || !key.match(/^\d+$/)) {
@@ -557,9 +683,14 @@ function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
 
 
 function formatTypedArray(ctx, value, recurseTimes, visibleKeys, keys) {
-  var output = new Array(value.length);
-  for (var i = 0, l = value.length; i < l; ++i)
+  const maxLength = Math.min(Math.max(0, ctx.maxArrayLength), value.length);
+  const remaining = value.length - maxLength;
+  var output = new Array(maxLength);
+  for (var i = 0; i < maxLength; ++i)
     output[i] = formatNumber(ctx, value[i]);
+  if (remaining > 0) {
+    output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
+  }
   for (const key of keys) {
     if (typeof key === 'symbol' || !key.match(/^\d+$/)) {
       output.push(
@@ -695,12 +826,12 @@ function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
 }
 
 
-function reduceToSingleString(output, base, braces) {
+function reduceToSingleString(output, base, braces, breakLength) {
   var length = output.reduce(function(prev, cur) {
     return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
   }, 0);
 
-  if (length > 60) {
+  if (length > breakLength) {
     return braces[0] +
            // If the opening "brace" is too large, like in the case of "Set {",
            // we need to force the first item to be on the next line or the
@@ -785,7 +916,6 @@ exports.isPrimitive = isPrimitive;
 
 exports.isBuffer = Buffer.isBuffer;
 
-
 function pad(n) {
   return n < 10 ? '0' + n.toString(10) : n.toString(10);
 }
@@ -843,16 +973,16 @@ exports.inherits = function(ctor, superCtor) {
   Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
 };
 
-exports._extend = function(origin, add) {
-  // Don't do anything if add isn't an object
-  if (add === null || typeof add !== 'object') return origin;
+exports._extend = function(target, source) {
+  // Don't do anything if source isn't an object
+  if (source === null || typeof source !== 'object') return target;
 
-  var keys = Object.keys(add);
+  var keys = Object.keys(source);
   var i = keys.length;
   while (i--) {
-    origin[keys[i]] = add[keys[i]];
+    target[keys[i]] = source[keys[i]];
   }
-  return origin;
+  return target;
 };
 
 function hasOwnProperty(obj, prop) {

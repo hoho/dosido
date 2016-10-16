@@ -7,24 +7,36 @@ var os = require('os');
 var child_process = require('child_process');
 const stream = require('stream');
 const util = require('util');
+const Timer = process.binding('timer_wrap').Timer;
 
-const testRoot = path.resolve(process.env.NODE_TEST_DIR ||
-                              path.dirname(__filename));
+const testRoot = process.env.NODE_TEST_DIR ?
+                   path.resolve(process.env.NODE_TEST_DIR) : __dirname;
 
-exports.testDir = path.dirname(__filename);
+exports.testDir = __dirname;
 exports.fixturesDir = path.join(exports.testDir, 'fixtures');
 exports.libDir = path.join(exports.testDir, '../lib');
 exports.tmpDirName = 'tmp';
+// PORT should match the definition in test/testpy/__init__.py.
 exports.PORT = +process.env.NODE_COMMON_PORT || 12346;
 exports.isWindows = process.platform === 'win32';
+exports.isWOW64 = exports.isWindows &&
+                  (process.env.PROCESSOR_ARCHITEW6432 !== undefined);
 exports.isAix = process.platform === 'aix';
 exports.isLinuxPPCBE = (process.platform === 'linux') &&
                        (process.arch === 'ppc64') &&
                        (os.endianness() === 'BE');
 exports.isSunOS = process.platform === 'sunos';
 exports.isFreeBSD = process.platform === 'freebsd';
+exports.isLinux = process.platform === 'linux';
+exports.isOSX = process.platform === 'darwin';
 
-exports.enoughTestMem = os.totalmem() > 0x20000000; /* 512MB */
+exports.enoughTestMem = os.totalmem() > 0x40000000; /* 1 Gb */
+
+const cpus = os.cpus();
+exports.enoughTestCpu = cpus.length > 1 || cpus[0].speed > 999;
+
+exports.rootDir = exports.isWindows ? 'c:\\' : '/';
+exports.buildType = process.config.target_defaults.default_configuration;
 
 function rimrafSync(p) {
   try {
@@ -57,7 +69,7 @@ function rmdirSync(p, originalEr) {
     if (e.code === 'ENOTDIR')
       throw originalEr;
     if (e.code === 'ENOTEMPTY' || e.code === 'EEXIST' || e.code === 'EPERM') {
-      const enc = process.platform === 'linux' ? 'buffer' : 'utf8';
+      const enc = exports.isLinux ? 'buffer' : 'utf8';
       fs.readdirSync(p, enc).forEach((f) => {
         if (f instanceof Buffer) {
           const buf = Buffer.concat([Buffer.from(p), Buffer.from(path.sep), f]);
@@ -87,7 +99,7 @@ var inFreeBSDJail = null;
 var localhostIPv4 = null;
 
 exports.localIPv6Hosts = ['localhost'];
-if (process.platform === 'linux') {
+if (exports.isLinux) {
   exports.localIPv6Hosts = [
     // Debian/Ubuntu
     'ip6-localhost',
@@ -106,7 +118,7 @@ Object.defineProperty(exports, 'inFreeBSDJail', {
   get: function() {
     if (inFreeBSDJail !== null) return inFreeBSDJail;
 
-    if (process.platform === 'freebsd' &&
+    if (exports.isFreeBSD &&
       child_process.execSync('sysctl -n security.jail.jailed').toString() ===
       '1\n') {
       inFreeBSDJail = true;
@@ -160,7 +172,7 @@ Object.defineProperty(exports, 'opensslCli', {get: function() {
     opensslCli = false;
   }
   return opensslCli;
-}, enumerable: true });
+}, enumerable: true});
 
 Object.defineProperty(exports, 'hasCrypto', {
   get: function() {
@@ -241,6 +253,17 @@ exports.spawnPwd = function(options) {
   }
 };
 
+
+exports.spawnSyncPwd = function(options) {
+  const spawnSync = require('child_process').spawnSync;
+
+  if (exports.isWindows) {
+    return spawnSync('cmd.exe', ['/c', 'cd'], options);
+  } else {
+    return spawnSync('pwd', [], options);
+  }
+};
+
 exports.platformTimeout = function(ms) {
   if (process.config.target_defaults.default_configuration === 'Debug')
     ms = 2 * ms;
@@ -275,7 +298,7 @@ var knownGlobals = [setTimeout,
                     global];
 
 if (global.gc) {
-  knownGlobals.push(gc);
+  knownGlobals.push(global.gc);
 }
 
 if (global.DTRACE_HTTP_SERVER_RESPONSE) {
@@ -327,6 +350,11 @@ if (global.Proxy) {
 if (global.Symbol) {
   knownGlobals.push(Symbol);
 }
+
+function allowGlobals(...whitelist) {
+  knownGlobals = knownGlobals.concat(whitelist);
+}
+exports.allowGlobals = allowGlobals;
 
 function leakedGlobals() {
   var leaked = [];
@@ -395,55 +423,6 @@ exports.mustCall = function(fn, expected) {
   };
 };
 
-var etcServicesFileName = path.join('/etc', 'services');
-if (exports.isWindows) {
-  etcServicesFileName = path.join(process.env.SystemRoot, 'System32', 'drivers',
-    'etc', 'services');
-}
-
-/*
- * Returns a string that represents the service name associated
- * to the service bound to port "port" and using protocol "protocol".
- *
- * If the service is not defined in the services file, it returns
- * the port number as a string.
- *
- * Returns undefined if /etc/services (or its equivalent on non-UNIX
- * platforms) can't be read.
- */
-exports.getServiceName = function getServiceName(port, protocol) {
-  if (port == null) {
-    throw new Error('Missing port number');
-  }
-
-  if (typeof protocol !== 'string') {
-    throw new Error('Protocol must be a string');
-  }
-
-  /*
-   * By default, if a service can't be found in /etc/services,
-   * its name is considered to be its port number.
-   */
-  var serviceName = port.toString();
-
-  try {
-    var servicesContent = fs.readFileSync(etcServicesFileName,
-      { encoding: 'utf8'});
-    var regexp = `^(\\w+)\\s+\\s${port}/${protocol}\\s`;
-    var re = new RegExp(regexp, 'm');
-
-    var matches = re.exec(servicesContent);
-    if (matches && matches.length > 1) {
-      serviceName = matches[1];
-    }
-  } catch (e) {
-    console.error('Cannot read file: ', etcServicesFileName);
-    return undefined;
-  }
-
-  return serviceName;
-};
-
 exports.hasMultiLocalhost = function hasMultiLocalhost() {
   var TCP = process.binding('tcp_wrap').TCP;
   var t = new TCP();
@@ -465,6 +444,9 @@ exports.fail = function(msg) {
   assert.fail(null, null, msg);
 };
 
+exports.skip = function(msg) {
+  console.log(`1..0 # Skipped: ${msg}`);
+};
 
 // A stream to push an array into a REPL
 function ArrayStream() {
@@ -500,7 +482,7 @@ exports.nodeProcessAborted = function nodeProcessAborted(exitCode, signal) {
 
   // On Windows, v8's base::OS::Abort triggers an access violation,
   // which corresponds to exit code 3221225477 (0xC0000005)
-  if (process.platform === 'win32')
+  if (exports.isWindows)
     expectedExitCodes = [3221225477];
 
   // When using --abort-on-uncaught-exception, V8 will use
@@ -515,4 +497,32 @@ exports.nodeProcessAborted = function nodeProcessAborted(exitCode, signal) {
   } else {
     return expectedExitCodes.indexOf(exitCode) > -1;
   }
+};
+
+exports.busyLoop = function busyLoop(time) {
+  var startTime = Timer.now();
+  var stopTime = startTime + time;
+  while (Timer.now() < stopTime) {}
+};
+
+exports.isAlive = function isAlive(pid) {
+  try {
+    process.kill(pid, 'SIGCONT');
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+exports.expectWarning = function(name, expected) {
+  if (typeof expected === 'string')
+    expected = [expected];
+  process.on('warning', exports.mustCall((warning) => {
+    assert.strictEqual(warning.name, name);
+    assert.ok(expected.includes(warning.message),
+              `unexpected error message: "${warning.message}"`);
+    // Remove a warning message after it is seen so that we guarantee that we
+    // get each message only once.
+    expected.splice(expected.indexOf(warning.message), 1);
+  }, expected.length));
 };

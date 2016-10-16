@@ -3,7 +3,7 @@
 const util = require('util');
 const internalUtil = require('internal/util');
 const debug = util.debuglog('child_process');
-const constants = require('constants');
+const constants = process.binding('constants').os.signals;
 
 const uv = process.binding('uv');
 const spawn_sync = process.binding('spawn_sync');
@@ -44,10 +44,14 @@ exports.fork = function(modulePath /*, args, options*/) {
 
   args = execArgv.concat([modulePath], args);
 
-  // Leave stdin open for the IPC channel. stdout and stderr should be the
-  // same as the parent's if silent isn't set.
-  options.stdio = options.silent ? ['pipe', 'pipe', 'pipe', 'ipc'] :
-      [0, 1, 2, 'ipc'];
+  if (!Array.isArray(options.stdio)) {
+    // Leave stdin open for the IPC channel. stdout and stderr should be the
+    // same as the parent's if silent isn't set.
+    options.stdio = options.silent ? ['pipe', 'pipe', 'pipe', 'ipc'] :
+        [0, 1, 2, 'ipc'];
+  } else if (options.stdio.indexOf('ipc') === -1) {
+    throw new TypeError('Forked processes must have an IPC channel');
+  }
 
   options.execPath = options.execPath || process.execPath;
 
@@ -179,12 +183,12 @@ exports.execFile = function(file /*, args, options, callback*/) {
     // merge chunks
     var stdout;
     var stderr;
-    if (!encoding) {
-      stdout = Buffer.concat(_stdout);
-      stderr = Buffer.concat(_stderr);
-    } else {
+    if (encoding) {
       stdout = _stdout;
       stderr = _stderr;
+    } else {
+      stdout = Buffer.concat(_stdout);
+      stderr = Buffer.concat(_stderr);
     }
 
     if (ex) {
@@ -249,16 +253,16 @@ exports.execFile = function(file /*, args, options, callback*/) {
       child.stdout.setEncoding(encoding);
 
     child.stdout.addListener('data', function(chunk) {
-      stdoutLen += chunk.length;
+      stdoutLen += encoding ? Buffer.byteLength(chunk, encoding) : chunk.length;
 
       if (stdoutLen > options.maxBuffer) {
         ex = new Error('stdout maxBuffer exceeded');
         kill();
       } else {
-        if (!encoding)
-          _stdout.push(chunk);
-        else
+        if (encoding)
           _stdout += chunk;
+        else
+          _stdout.push(chunk);
       }
     });
   }
@@ -268,16 +272,16 @@ exports.execFile = function(file /*, args, options, callback*/) {
       child.stderr.setEncoding(encoding);
 
     child.stderr.addListener('data', function(chunk) {
-      stderrLen += chunk.length;
+      stderrLen += encoding ? Buffer.byteLength(chunk, encoding) : chunk.length;
 
       if (stderrLen > options.maxBuffer) {
         ex = new Error('stderr maxBuffer exceeded');
         kill();
       } else {
-        if (!encoding)
-          _stderr.push(chunk);
-        else
+        if (encoding)
           _stderr += chunk;
+        else
+          _stderr.push(chunk);
       }
     });
   }
@@ -332,12 +336,21 @@ function normalizeSpawnArguments(file /*, args, options*/) {
       args = ['/s', '/c', '"' + command + '"'];
       options.windowsVerbatimArguments = true;
     } else {
-      file = typeof options.shell === 'string' ? options.shell : '/bin/sh';
+      if (typeof options.shell === 'string')
+        file = options.shell;
+      else if (process.platform === 'android')
+        file = '/system/bin/sh';
+      else
+        file = '/bin/sh';
       args = ['-c', command];
     }
   }
 
-  args.unshift(file);
+  if (typeof options.argv0 === 'string') {
+    args.unshift(options.argv0);
+  } else {
+    args.unshift(file);
+  }
 
   var env = options.env || process.env;
   var envPairs = [];
@@ -433,7 +446,7 @@ function spawnSync(/*file, args, options*/) {
 
   var result = spawn_sync.spawn(options);
 
-  if (result.output && options.encoding) {
+  if (result.output && options.encoding && options.encoding !== 'buffer') {
     for (i = 0; i < result.output.length; i++) {
       if (!result.output[i])
         continue;
@@ -484,7 +497,7 @@ function execFileSync(/*command, args, options*/) {
 
   var ret = spawnSync(opts.file, opts.args.slice(1), opts.options);
 
-  if (inheritStderr)
+  if (inheritStderr && ret.stderr)
     process.stderr.write(ret.stderr);
 
   var err = checkExecSyncError(ret);
@@ -504,7 +517,7 @@ function execSync(command /*, options*/) {
   var ret = spawnSync(opts.file, opts.options);
   ret.cmd = command;
 
-  if (inheritStderr)
+  if (inheritStderr && ret.stderr)
     process.stderr.write(ret.stderr);
 
   var err = checkExecSyncError(ret);

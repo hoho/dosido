@@ -3,14 +3,14 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
 
 var fs = require('fs');
 
-var hosterr = /Hostname\/IP doesn\'t match certificate\'s altnames/g;
+var hosterr = /Hostname\/IP doesn't match certificate's altnames/g;
 var testCases =
     [{ ca: ['ca1-cert'],
        key: 'agent2-key',
@@ -75,10 +75,11 @@ function testServers(index, servers, clientOptions, cb) {
     s.end('hello world\n');
   });
 
-  server.listen(common.PORT, function() {
+  server.listen(0, function() {
     var b = '';
 
     console.error('connecting...');
+    clientOptions.port = this.address().port;
     var client = tls.connect(clientOptions, function() {
       var authorized = client.authorized ||
                        hosterr.test(client.authorizationError);
@@ -109,7 +110,7 @@ function runTest(testIndex) {
   if (!tcase) return;
 
   var clientOptions = {
-    port: common.PORT,
+    port: undefined,
     ca: tcase.ca.map(loadPEM),
     key: loadPEM(tcase.key),
     cert: loadPEM(tcase.cert),

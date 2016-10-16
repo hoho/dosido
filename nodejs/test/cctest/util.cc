@@ -56,3 +56,50 @@ TEST(UtilTest, ListHead) {
   EXPECT_TRUE(list.IsEmpty());
   EXPECT_FALSE(list.begin() != list.end());
 }
+
+TEST(UtilTest, StringEqualNoCase) {
+  using node::StringEqualNoCase;
+  EXPECT_FALSE(StringEqualNoCase("a", "b"));
+  EXPECT_TRUE(StringEqualNoCase("", ""));
+  EXPECT_TRUE(StringEqualNoCase("equal", "equal"));
+  EXPECT_TRUE(StringEqualNoCase("equal", "EQUAL"));
+  EXPECT_TRUE(StringEqualNoCase("EQUAL", "EQUAL"));
+  EXPECT_FALSE(StringEqualNoCase("equal", "equals"));
+  EXPECT_FALSE(StringEqualNoCase("equals", "equal"));
+}
+
+TEST(UtilTest, StringEqualNoCaseN) {
+  using node::StringEqualNoCaseN;
+  EXPECT_FALSE(StringEqualNoCaseN("a", "b", strlen("a")));
+  EXPECT_TRUE(StringEqualNoCaseN("", "", strlen("")));
+  EXPECT_TRUE(StringEqualNoCaseN("equal", "equal", strlen("equal")));
+  EXPECT_TRUE(StringEqualNoCaseN("equal", "EQUAL", strlen("equal")));
+  EXPECT_TRUE(StringEqualNoCaseN("EQUAL", "EQUAL", strlen("equal")));
+  EXPECT_TRUE(StringEqualNoCaseN("equal", "equals", strlen("equal")));
+  EXPECT_FALSE(StringEqualNoCaseN("equal", "equals", strlen("equals")));
+  EXPECT_TRUE(StringEqualNoCaseN("equals", "equal", strlen("equal")));
+  EXPECT_FALSE(StringEqualNoCaseN("equals", "equal", strlen("equals")));
+  EXPECT_TRUE(StringEqualNoCaseN("abc\0abc", "abc\0efg", strlen("abcdefgh")));
+  EXPECT_FALSE(StringEqualNoCaseN("abc\0abc", "abcd\0efg", strlen("abcdefgh")));
+}
+
+TEST(UtilTest, ToLower) {
+  using node::ToLower;
+  EXPECT_EQ('0', ToLower('0'));
+  EXPECT_EQ('a', ToLower('a'));
+  EXPECT_EQ('a', ToLower('A'));
+}
+
+TEST(UtilTest, Malloc) {
+  using node::Malloc;
+  EXPECT_NE(nullptr, Malloc(0));
+  EXPECT_NE(nullptr, Malloc(1));
+}
+
+TEST(UtilTest, Calloc) {
+  using node::Calloc;
+  EXPECT_NE(nullptr, Calloc(0, 0));
+  EXPECT_NE(nullptr, Calloc(1, 0));
+  EXPECT_NE(nullptr, Calloc(0, 1));
+  EXPECT_NE(nullptr, Calloc(1, 1));
+}

@@ -3,7 +3,7 @@ const common = require('../common');
 const fs = require('fs');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 const https = require('https');
@@ -39,10 +39,10 @@ function shutdown() {
   }
 }
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   var requestOptions = {
     hostname: '127.0.0.1',
-    port: common.PORT,
+    port: this.address().port,
     path: '/',
     method: 'GET',
     rejectUnauthorized: false

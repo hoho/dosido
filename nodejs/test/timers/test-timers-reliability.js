@@ -3,10 +3,10 @@
 
 require('../common');
 
-var Timer  = process.binding('timer_wrap').Timer;
+var Timer = process.binding('timer_wrap').Timer;
 var assert = require('assert');
 
-var timerFired    = false;
+var timerFired = false;
 var intervalFired = false;
 
 /*
@@ -42,7 +42,7 @@ monoTimer[Timer.kOnTimeout] = function() {
   assert(intervalFired);
 };
 
-monoTimer.start(300, 0);
+monoTimer.start(300);
 
 setTimeout(function() {
   timerFired = true;

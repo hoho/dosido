@@ -1,13 +1,9 @@
 /**
  * @fileoverview Default CLIEngineOptions.
  * @author Ian VanSchooten
- * @copyright 2016 Ian VanSchooten. All rights reserved.
- * See LICENSE in root directory for full license.
  */
 
 "use strict";
-
-var DEFAULT_PARSER = require("../conf/eslint.json").parser;
 
 module.exports = {
     configFile: null,
@@ -20,8 +16,9 @@ module.exports = {
     extensions: [".js"],
     ignore: true,
     ignorePath: null,
-    parser: DEFAULT_PARSER,
+    parser: "",     // must be empty
     cache: false,
+
     // in order to honor the cacheFile option if specified
     // this option should not have a default value otherwise
     // it will always be used

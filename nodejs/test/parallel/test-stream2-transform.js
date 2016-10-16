@@ -22,7 +22,7 @@ function run() {
   var fn = next[1];
   console.log('# %s', name);
   fn({
-    same: assert.deepEqual,
+    same: assert.deepStrictEqual,
     equal: assert.equal,
     ok: assert,
     end: function() {
@@ -267,7 +267,7 @@ test('assymetric transform (compress)', function(t) {
 test('complex transform', function(t) {
   var count = 0;
   var saved = null;
-  var pt = new Transform({highWaterMark:3});
+  var pt = new Transform({highWaterMark: 3});
   pt._transform = function(c, e, cb) {
     if (count++ === 1)
       saved = c;

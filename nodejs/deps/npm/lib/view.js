@@ -1,8 +1,5 @@
 // npm view [pkg [pkg ...]]
-
 module.exports = view
-view.usage = 'npm view [<@scope>/]<pkg>[@<version>] [<field>[.subfield]...]' +
-             '\n\naliases: info, show, v'
 
 var npm = require('./npm.js')
 var readJson = require('read-package-json')
@@ -12,6 +9,12 @@ var semver = require('semver')
 var mapToRegistry = require('./utils/map-to-registry.js')
 var npa = require('npm-package-arg')
 var path = require('path')
+var usage = require('./utils/usage')
+
+view.usage = usage(
+  'view',
+  'npm view [<@scope>/]<pkg>[@<version>] [<field>[.subfield]...]'
+)
 
 view.completion = function (opts, cb) {
   if (opts.conf.argv.remain.length <= 2) {
@@ -246,7 +249,7 @@ function printData (data, name, cb) {
   versions.forEach(function (v) {
     var fields = Object.keys(data[v])
     includeFields = includeFields || (fields.length > 1)
-    msgJson.push({})
+    if (npm.config.get('json')) msgJson.push({})
     fields.forEach(function (f) {
       var d = cleanup(data[v][f])
       if (fields.length === 1 && npm.config.get('json')) {
@@ -284,6 +287,10 @@ function printData (data, name, cb) {
   // preserve output symmetry by adding a whitespace-only line at the end if
   // there's one at the beginning
   if (/^\s*\n/.test(msg)) msg += '\n'
+
+  // disable the progress bar entirely, as we can't meaningfully update it if
+  // we may have partial lines printed.
+  log.disableProgress()
 
   // print directly to stdout to not unnecessarily add blank lines
   process.stdout.write(msg)

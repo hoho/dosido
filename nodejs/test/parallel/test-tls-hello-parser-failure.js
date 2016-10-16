@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -20,8 +20,8 @@ var bonkers = Buffer.alloc(1024 * 1024, 42);
 
 var server = tls.createServer(options, function(c) {
 
-}).listen(common.PORT, function() {
-  var client = net.connect(common.PORT, function() {
+}).listen(0, function() {
+  var client = net.connect(this.address().port, function() {
     client.write(bonkers);
   });
 

@@ -4,7 +4,7 @@ var assert = require('assert');
 var spawn = require('child_process').spawn;
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -12,22 +12,22 @@ var tls = require('tls');
 var fs = require('fs');
 
 if (!common.opensslCli) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL CLI.');
+  common.skip('node compiled without OpenSSL CLI.');
   return;
 }
 
 // renegotiation limits to test
 var LIMITS = [0, 1, 2, 3, 5, 10, 16];
 
-(function() {
-  var n = 0;
+{
+  let n = 0;
   function next() {
     if (n >= LIMITS.length) return;
     tls.CLIENT_RENEG_LIMIT = LIMITS[n++];
     test(next);
   }
   next();
-})();
+}
 
 function test(next) {
   var options = {

@@ -25,11 +25,11 @@ var server = net.createServer(function(s) {
   setTimeout(function() {
     s.destroy();
   }, 100);
-}).listen(common.PORT, function() {
+}).listen(0, function() {
   var worker = cluster.fork();
 
   function send(callback) {
-    var s = net.connect(common.PORT, function() {
+    var s = net.connect(server.address().port, function() {
       worker.send({}, s, callback);
     });
 
@@ -45,18 +45,23 @@ var server = net.createServer(function(s) {
 
   worker.process.once('close', common.mustCall(function() {
     // Otherwise the crash on `_channel.fd` access may happen
-    assert(worker.process._channel === null);
+    assert.strictEqual(worker.process._channel, null);
     server.close();
   }));
 
-  send();
-  send(function(err) {
-    // Ignore errors when sending the second handle because the worker
-    // may already have exited.
-    if (err) {
-      if (err.code !== 'ECONNREFUSED') {
-        throw err;
-      }
-    }
+  worker.on('online', function() {
+    send(function(err) {
+      assert.ifError(err);
+      send(function(err) {
+        // Ignore errors when sending the second handle because the worker
+        // may already have exited.
+        if (err) {
+          if ((err.message !== 'channel closed') &&
+             (err.code !== 'ECONNREFUSED')) {
+            throw err;
+          }
+        }
+      });
+    });
   });
 });

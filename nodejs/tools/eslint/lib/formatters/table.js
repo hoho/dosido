@@ -1,7 +1,6 @@
 /**
  * @fileoverview "table reporter.
  * @author Gajus Kuizinas <gajus@gajus.com>
- * @copyright 2016 Gajus Kuizinas <gajus@gajus.com>. All rights reserved.
  */
 "use strict";
 
@@ -9,13 +8,9 @@
 // Requirements
 //------------------------------------------------------------------------------
 
-var chalk,
-    table,
-    pluralize;
-
-chalk = require("chalk");
-table = require("table").default;
-pluralize = require("pluralize");
+const chalk = require("chalk"),
+    table = require("table").default,
+    pluralize = require("pluralize");
 
 //------------------------------------------------------------------------------
 // Helpers
@@ -27,9 +22,7 @@ pluralize = require("pluralize");
  * @returns {string} A text table.
  */
 function drawTable(messages) {
-    var rows;
-
-    rows = [];
+    const rows = [];
 
     if (messages.length === 0) {
         return "";
@@ -44,7 +37,7 @@ function drawTable(messages) {
     ]);
 
     messages.forEach(function(message) {
-        var messageType;
+        let messageType;
 
         if (message.fatal || message.severity === 2) {
             messageType = chalk.red("error");
@@ -85,7 +78,7 @@ function drawTable(messages) {
                 wrapWord: true
             }
         },
-        drawHorizontalLine: function(index) {
+        drawHorizontalLine(index) {
             return index === 1;
         }
     });
@@ -97,7 +90,7 @@ function drawTable(messages) {
  * @returns {string} A column of text tables.
  */
 function drawReport(results) {
-    var files;
+    let files;
 
     files = results.map(function(result) {
         if (!result.messages.length) {
@@ -119,7 +112,7 @@ function drawReport(results) {
 //------------------------------------------------------------------------------
 
 module.exports = function(report) {
-    var result,
+    let result,
         errorCount,
         warningCount;
 
@@ -150,7 +143,7 @@ module.exports = function(report) {
                 wrapWord: true
             }
         },
-        drawHorizontalLine: function() {
+        drawHorizontalLine() {
             return true;
         }
     });

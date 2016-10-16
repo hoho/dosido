@@ -144,13 +144,13 @@ if (process.argv[2] === 'child') {
 
   tests.forEach(function(test, testIndex) {
     var testCmd = '';
-    if (process.platform !== 'win32') {
+    if (!common.isWindows) {
       // Do not create core files, as it can take a lot of disk space on
       // continuous testing and developers' machines
       testCmd += 'ulimit -c 0 && ';
     }
 
-    testCmd +=  process.argv[0];
+    testCmd += process.argv[0];
     testCmd += ' ' + '--abort-on-uncaught-exception';
     testCmd += ' ' + process.argv[1];
     testCmd += ' ' + 'child';

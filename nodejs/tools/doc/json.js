@@ -5,7 +5,17 @@ module.exports = doJSON;
 // Take the lexed input, and return a JSON-encoded object
 // A module looks like this: https://gist.github.com/1777387
 
-var marked = require('marked');
+const common = require('./common.js');
+const marked = require('marked');
+
+// customized heading without id attribute
+var renderer = new marked.Renderer();
+renderer.heading = function(text, level) {
+  return '<h' + level + '>' + text + '</h' + level + '>\n';
+};
+marked.setOptions({
+  renderer: renderer
+});
 
 function doJSON(input, filename, cb) {
   var root = {source: filename};
@@ -72,31 +82,34 @@ function doJSON(input, filename, cb) {
 
     // Immediately after a heading, we can expect the following
     //
-    // { type: 'code', text: 'Stability: ...' },
+    // { type: 'blockquote_start' }
+    // { type: 'paragraph', text: 'Stability: ...' },
+    // { type: 'blockquote_end' }
     //
     // a list: starting with list_start, ending with list_end,
     // maybe containing other nested lists in each item.
     //
-    // If one of these isnt' found, then anything that comes between
+    // If one of these isn't found, then anything that comes between
     // here and the next heading should be parsed as the desc.
     var stability;
     if (state === 'AFTERHEADING') {
-      if (type === 'code' &&
-          (stability = text.match(/^Stability: ([0-5])(?:\s*-\s*)?(.*)$/))) {
-        current.stability = parseInt(stability[1], 10);
-        current.stabilityText = stability[2].trim();
+      if (type === 'blockquote_start') {
+        state = 'AFTERHEADING_BLOCKQUOTE';
         return;
       } else if (type === 'list_start' && !tok.ordered) {
         state = 'AFTERHEADING_LIST';
         current.list = current.list || [];
         current.list.push(tok);
         current.list.level = 1;
+      } else if (type === 'html' && common.isYAMLBlock(tok.text)) {
+        current.meta = parseYAML(tok.text);
       } else {
         current.desc = current.desc || [];
         if (!Array.isArray(current.desc)) {
           current.shortDesc = current.desc;
           current.desc = [];
         }
+        current.desc.links = lexed.links;
         current.desc.push(tok);
         state = 'DESC';
       }
@@ -117,7 +130,22 @@ function doJSON(input, filename, cb) {
       return;
     }
 
+    if (state === 'AFTERHEADING_BLOCKQUOTE') {
+      if (type === 'blockquote_end') {
+        state = 'AFTERHEADING';
+        return;
+      }
+
+      if (type === 'paragraph' &&
+          (stability = text.match(/^Stability: ([0-5])(?:\s*-\s*)?(.*)$/))) {
+        current.stability = parseInt(stability[1], 10);
+        current.stabilityText = stability[2].trim();
+        return;
+      }
+    }
+
     current.desc = current.desc || [];
+    current.desc.links = lexed.links;
     current.desc.push(tok);
 
   });
@@ -274,6 +302,9 @@ function processList(section) {
   delete section.list;
 }
 
+function parseYAML(text) {
+  return common.extractAndParseYAML(text);
+}
 
 // textRaw = "someobject.someMethod(a[, b=100][, c])"
 function parseSignature(text, sig) {

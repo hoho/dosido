@@ -5,6 +5,8 @@
 #ifndef SRC_STRING_SEARCH_H_
 #define SRC_STRING_SEARCH_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include "node.h"
 #include <string.h>
 
@@ -42,7 +44,7 @@ class Vector {
 
   // Access individual vector elements - checks bounds in debug mode.
   T& operator[](size_t index) const {
-    ASSERT(0 <= index && index < length_);
+    ASSERT(index < length_);
     return start_[is_forward_ ? index : (length_ - index - 1)];
   }
 
@@ -132,16 +134,10 @@ class StringSearch : private StringSearchBase {
   }
 
  private:
-  typedef size_t (*SearchFunction)(  // NOLINT - it's not a cast!
+  typedef size_t (*SearchFunction)(
       StringSearch<Char>*,
       Vector<const Char>,
       size_t);
-
-  static size_t FailSearch(StringSearch<Char>*,
-                           Vector<const Char> subject,
-                           size_t) {
-    return subject.length();
-  }
 
   static size_t SingleCharSearch(StringSearch<Char>* search,
                                  Vector<const Char> subject,
@@ -167,12 +163,6 @@ class StringSearch : private StringSearchBase {
   void PopulateBoyerMooreHorspoolTable();
 
   void PopulateBoyerMooreTable();
-
-  static inline bool exceedsOneByte(uint8_t c) { return false; }
-
-  static inline bool exceedsOneByte(uint16_t c) {
-    return c > kMaxOneByteCharCodeU;
-  }
 
   static inline int CharOccurrence(int* bad_char_occurrence,
                                    Char char_code) {
@@ -252,7 +242,7 @@ inline const void* MemrchrFill(const void* haystack, uint8_t needle,
 // `subject`. Does not check that the whole pattern matches.
 template <typename Char>
 inline size_t FindFirstCharacter(Vector<const Char> pattern,
-                              Vector<const Char> subject, size_t index) {
+                                 Vector<const Char> subject, size_t index) {
   const Char pattern_first_char = pattern[0];
   const size_t max_n = (subject.length() - pattern.length() + 1);
 
@@ -261,19 +251,19 @@ inline size_t FindFirstCharacter(Vector<const Char> pattern,
   const uint8_t search_byte = GetHighestValueByte(pattern_first_char);
   size_t pos = index;
   do {
-    size_t bytes_to_search;
+    const size_t bytes_to_search = (max_n - pos) * sizeof(Char);
     const void* void_pos;
     if (subject.forward()) {
       // Assert that bytes_to_search won't overflow
       CHECK_LE(pos, max_n);
       CHECK_LE(max_n - pos, SIZE_MAX / sizeof(Char));
-      bytes_to_search = (max_n - pos) * sizeof(Char);
       void_pos = memchr(subject.start() + pos, search_byte, bytes_to_search);
     } else {
       CHECK_LE(pos, subject.length());
       CHECK_LE(subject.length() - pos, SIZE_MAX / sizeof(Char));
-      bytes_to_search = (subject.length() - pos) * sizeof(Char);
-      void_pos = MemrchrFill(subject.start(), search_byte, bytes_to_search);
+      void_pos = MemrchrFill(subject.start() + pattern.length() - 1,
+                             search_byte,
+                             bytes_to_search);
     }
     const Char* char_pos = static_cast<const Char*>(void_pos);
     if (char_pos == nullptr)
@@ -308,7 +298,9 @@ inline size_t FindFirstCharacter(Vector<const uint8_t> pattern,
   if (subject.forward()) {
     pos = memchr(subject.start() + index, pattern_first_char, max_n - index);
   } else {
-    pos = MemrchrFill(subject.start(), pattern_first_char, subj_len - index);
+    pos = MemrchrFill(subject.start() + pattern.length() - 1,
+                      pattern_first_char,
+                      max_n - index);
   }
   const uint8_t* char_pos = static_cast<const uint8_t*>(pos);
   if (char_pos == nullptr) {
@@ -397,7 +389,7 @@ size_t StringSearch<Char>::BoyerMooreSearch(
         return subject.length();
       }
     }
-    while (j >= 0 && pattern[j] == (c = subject[index + j])) {
+    while (pattern[j] == (c = subject[index + j])) {
       if (j == 0) {
         return index;
       }
@@ -525,7 +517,7 @@ size_t StringSearch<Char>::BoyerMooreHorspoolSearch(
       }
     }
     j--;
-    while (j >= 0 && pattern[j] == (subject[index + j])) {
+    while (pattern[j] == (subject[index + j])) {
       if (j == 0) {
         return index;
       }
@@ -631,8 +623,8 @@ size_t SearchString(Vector<const Char> subject,
   StringSearch<Char> search(pattern);
   return search.Search(subject, start_index);
 }
-}
-}  // namespace node::stringsearch
+}  // namespace stringsearch
+}  // namespace node
 
 namespace node {
 using node::stringsearch::Vector;
@@ -671,5 +663,7 @@ size_t SearchString(const Char* haystack,
   return is_forward ? pos : (haystack_length - needle_length - pos);
 }
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_STRING_SEARCH_H_

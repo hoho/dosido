@@ -1,6 +1,7 @@
 'use strict';
 
 // Regexes used for ansi escape code splitting
+// eslint-disable-next-line no-control-regex
 const metaKeyCodeReAnywhere = /(?:\x1b)([a-zA-Z0-9])/;
 const functionKeyCodeReAnywhere = new RegExp('(?:\x1b+)(O|N|\\[|\\[\\[)(?:' + [
   '(\\d+)(?:;(\\d+))?([~^$])',
@@ -25,7 +26,7 @@ function getStringWidth(str) {
 
   str = stripVTControlCharacters(str);
 
-  for (let i = 0; i < str.length; i++) {
+  for (var i = 0; i < str.length; i++) {
     const code = str.codePointAt(i);
 
     if (code >= 0x10000) { // surrogates
@@ -375,11 +376,15 @@ function* emitKeys(stream) {
       key.name = ch.toLowerCase();
       key.shift = /^[A-Z]$/.test(ch);
       key.meta = escaped;
+    } else if (escaped) {
+      // Escape sequence timeout
+      key.name = ch.length ? undefined : 'escape';
+      key.meta = true;
     }
 
     key.sequence = s;
 
-    if (key.name !== undefined) {
+    if (s.length !== 0 && (key.name !== undefined || escaped)) {
       /* Named character or sequence */
       stream.emit('keypress', escaped ? undefined : s, key);
     } else if (s.length === 1) {

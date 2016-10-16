@@ -33,7 +33,7 @@ template int StreamBase::WriteString<UTF8>(
     const FunctionCallbackInfo<Value>& args);
 template int StreamBase::WriteString<UCS2>(
     const FunctionCallbackInfo<Value>& args);
-template int StreamBase::WriteString<BINARY>(
+template int StreamBase::WriteString<LATIN1>(
     const FunctionCallbackInfo<Value>& args);
 
 
@@ -102,8 +102,7 @@ int StreamBase::Writev(const FunctionCallbackInfo<Value>& args) {
 
   size_t count = chunks->Length() >> 1;
 
-  uv_buf_t bufs_[16];
-  uv_buf_t* bufs = bufs_;
+  MaybeStackBuffer<uv_buf_t, 16> bufs(count);
 
   // Determine storage size first
   size_t storage_size = 0;
@@ -131,9 +130,6 @@ int StreamBase::Writev(const FunctionCallbackInfo<Value>& args) {
 
   if (storage_size > INT_MAX)
     return UV_ENOBUFS;
-
-  if (arraysize(bufs_) < count)
-    bufs = new uv_buf_t[count];
 
   WriteWrap* req_wrap = WriteWrap::New(env,
                                        req_wrap_obj,
@@ -174,11 +170,7 @@ int StreamBase::Writev(const FunctionCallbackInfo<Value>& args) {
     bytes += str_size;
   }
 
-  int err = DoWrite(req_wrap, bufs, count, nullptr);
-
-  // Deallocate space
-  if (bufs != bufs_)
-    delete[] bufs;
+  int err = DoWrite(req_wrap, *bufs, count, nullptr);
 
   req_wrap->object()->Set(env->async(), True(env->isolate()));
   req_wrap->object()->Set(env->bytes_string(),
@@ -227,6 +219,7 @@ int StreamBase::WriteBuffer(const FunctionCallbackInfo<Value>& args) {
 
   err = DoWrite(req_wrap, bufs, count, nullptr);
   req_wrap_obj->Set(env->async(), True(env->isolate()));
+  req_wrap_obj->Set(env->buffer_string(), args[1]);
 
   if (err)
     req_wrap->Dispose();
@@ -329,7 +322,8 @@ int StreamBase::WriteString(const FunctionCallbackInfo<Value>& args) {
     uv_handle_t* send_handle = nullptr;
 
     if (!send_handle_obj.IsEmpty()) {
-      HandleWrap* wrap = Unwrap<HandleWrap>(send_handle_obj);
+      HandleWrap* wrap;
+      ASSIGN_OR_RETURN_UNWRAP(&wrap, send_handle_obj, UV_EINVAL);
       send_handle = wrap->GetHandle();
       // Reference StreamWrap instance to prevent it from being garbage
       // collected before `AfterWrite` is called.

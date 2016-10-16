@@ -1,8 +1,6 @@
 /**
  * @fileoverview Defining the hashing function in one place.
  * @author Michael Ficarra
- * @copyright 2016 Michael Ficarra. All rights reserved.
- * See LICENSE file in root directory for full license.
  */
 
 "use strict";
@@ -11,7 +9,7 @@
 // Requirements
 //------------------------------------------------------------------------------
 
-var murmur = require("imurmurhash");
+const murmur = require("imurmurhash");
 
 //------------------------------------------------------------------------------
 // Helpers

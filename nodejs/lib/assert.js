@@ -28,7 +28,6 @@
 const compare = process.binding('buffer').compare;
 const util = require('util');
 const Buffer = require('buffer').Buffer;
-const pSlice = Array.prototype.slice;
 const pToString = (obj) => Object.prototype.toString.call(obj);
 
 // 1. The assert module provides functions that throw
@@ -62,11 +61,7 @@ assert.AssertionError = function AssertionError(options) {
 util.inherits(assert.AssertionError, Error);
 
 function truncate(s, n) {
-  if (typeof s === 'string') {
-    return s.length < n ? s : s.slice(0, n);
-  } else {
-    return s;
-  }
+  return s.slice(0, n);
 }
 
 function getMessage(self) {
@@ -131,11 +126,13 @@ assert.notEqual = function notEqual(actual, expected, message) {
 // 7. The equivalence assertion tests a deep equality relation.
 // assert.deepEqual(actual, expected, message_opt);
 
+/* eslint-disable no-restricted-properties */
 assert.deepEqual = function deepEqual(actual, expected, message) {
   if (!_deepEqual(actual, expected, false)) {
     fail(actual, expected, message, 'deepEqual', assert.deepEqual);
   }
 };
+/* eslint-enable */
 
 assert.deepStrictEqual = function deepStrictEqual(actual, expected, message) {
   if (!_deepEqual(actual, expected, true)) {
@@ -143,7 +140,7 @@ assert.deepStrictEqual = function deepStrictEqual(actual, expected, message) {
   }
 };
 
-function _deepEqual(actual, expected, strict) {
+function _deepEqual(actual, expected, strict, memos) {
   // 7.1. All identical values are equivalent, as determined by ===.
   if (actual === expected) {
     return true;
@@ -181,8 +178,12 @@ function _deepEqual(actual, expected, strict) {
              pToString(actual) === pToString(expected) &&
              !(actual instanceof Float32Array ||
                actual instanceof Float64Array)) {
-    return compare(Buffer.from(actual.buffer),
-                   Buffer.from(expected.buffer)) === 0;
+    return compare(Buffer.from(actual.buffer,
+                               actual.byteOffset,
+                               actual.byteLength),
+                   Buffer.from(expected.buffer,
+                               expected.byteOffset,
+                               expected.byteLength)) === 0;
 
   // 7.5 For all other Object pairs, including Array objects, equivalence is
   // determined by having the same number of owned properties (as verified
@@ -191,7 +192,19 @@ function _deepEqual(actual, expected, strict) {
   // corresponding key, and an identical 'prototype' property. Note: this
   // accounts for both named and indexed properties on Arrays.
   } else {
-    return objEquiv(actual, expected, strict);
+    memos = memos || {actual: [], expected: []};
+
+    const actualIndex = memos.actual.indexOf(actual);
+    if (actualIndex !== -1) {
+      if (actualIndex === memos.expected.indexOf(expected)) {
+        return true;
+      }
+    }
+
+    memos.actual.push(actual);
+    memos.expected.push(expected);
+
+    return objEquiv(actual, expected, strict, memos);
   }
 }
 
@@ -199,7 +212,7 @@ function isArguments(object) {
   return Object.prototype.toString.call(object) == '[object Arguments]';
 }
 
-function objEquiv(a, b, strict) {
+function objEquiv(a, b, strict, actualVisitedObjects) {
   if (a === null || a === undefined || b === null || b === undefined)
     return false;
   // if one is a primitive, the other must be same
@@ -211,11 +224,6 @@ function objEquiv(a, b, strict) {
   const bIsArgs = isArguments(b);
   if ((aIsArgs && !bIsArgs) || (!aIsArgs && bIsArgs))
     return false;
-  if (aIsArgs) {
-    a = pSlice.call(a);
-    b = pSlice.call(b);
-    return _deepEqual(a, b, strict);
-  }
   const ka = Object.keys(a);
   const kb = Object.keys(b);
   var key, i;
@@ -235,7 +243,8 @@ function objEquiv(a, b, strict) {
   //~~~possibly expensive deep test
   for (i = ka.length - 1; i >= 0; i--) {
     key = ka[i];
-    if (!_deepEqual(a[key], b[key], strict)) return false;
+    if (!_deepEqual(a[key], b[key], strict, actualVisitedObjects))
+      return false;
   }
   return true;
 }

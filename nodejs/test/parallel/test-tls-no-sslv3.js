@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -12,7 +12,7 @@ var fs = require('fs');
 var spawn = require('child_process').spawn;
 
 if (common.opensslCli === false) {
-  console.log('1..0 # Skipped: node compiled without OpenSSL CLI.');
+  common.skip('node compiled without OpenSSL CLI.');
   return;
 }
 
@@ -22,14 +22,10 @@ var server = tls.createServer({ cert: cert, key: key }, common.fail);
 var errors = [];
 var stderr = '';
 
-server.listen(common.PORT, '127.0.0.1', function() {
+server.listen(0, '127.0.0.1', function() {
   var address = this.address().address + ':' + this.address().port;
   var args = ['s_client',
-              '-no_ssl2',
               '-ssl3',
-              '-no_tls1',
-              '-no_tls1_1',
-              '-no_tls1_2',
               '-connect', address];
 
   // for the performance and stability issue in s_client on Windows
@@ -52,7 +48,7 @@ server.on('tlsClientError', (err) => errors.push(err));
 
 process.on('exit', function() {
   if (/unknown option -ssl3/.test(stderr)) {
-    console.log('1..0 # Skipped: `openssl s_client -ssl3` not supported.');
+    common.skip('`openssl s_client -ssl3` not supported.');
   } else {
     assert.equal(errors.length, 1);
     assert(/:wrong version number/.test(errors[0].message));

@@ -12,7 +12,6 @@ namespace node {
 
 using v8::Array;
 using v8::Context;
-using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
@@ -40,6 +39,7 @@ class ProcessWrap : public HandleWrap {
 
     env->SetProtoMethod(constructor, "ref", HandleWrap::Ref);
     env->SetProtoMethod(constructor, "unref", HandleWrap::Unref);
+    env->SetProtoMethod(constructor, "hasRef", HandleWrap::HasRef);
 
     target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "Process"),
                 constructor->GetFunction());
@@ -85,6 +85,7 @@ class ProcessWrap : public HandleWrap {
             UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE);
         Local<String> handle_key = env->handle_string();
         Local<Object> handle = stdio->Get(handle_key).As<Object>();
+        CHECK(!handle.IsEmpty());
         options->stdio[i].data.stream =
             reinterpret_cast<uv_stream_t*>(
                 Unwrap<PipeWrap>(handle)->UVHandle());
@@ -108,7 +109,8 @@ class ProcessWrap : public HandleWrap {
   static void Spawn(const FunctionCallbackInfo<Value>& args) {
     Environment* env = Environment::GetCurrent(args);
 
-    ProcessWrap* wrap = Unwrap<ProcessWrap>(args.Holder());
+    ProcessWrap* wrap;
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
     Local<Object> js_options = args[0]->ToObject(env->isolate());
 
@@ -120,12 +122,9 @@ class ProcessWrap : public HandleWrap {
     // options.uid
     Local<Value> uid_v = js_options->Get(env->uid_string());
     if (uid_v->IsInt32()) {
-      int32_t uid = uid_v->Int32Value();
-      if (uid & ~((uv_uid_t) ~0)) {
-        return env->ThrowRangeError("options.uid is out of range");
-      }
+      const int32_t uid = uid_v->Int32Value(env->context()).FromJust();
       options.flags |= UV_PROCESS_SETUID;
-      options.uid = (uv_uid_t) uid;
+      options.uid = static_cast<uv_uid_t>(uid);
     } else if (!uid_v->IsUndefined() && !uid_v->IsNull()) {
       return env->ThrowTypeError("options.uid should be a number");
     }
@@ -133,12 +132,9 @@ class ProcessWrap : public HandleWrap {
     // options.gid
     Local<Value> gid_v = js_options->Get(env->gid_string());
     if (gid_v->IsInt32()) {
-      int32_t gid = gid_v->Int32Value();
-      if (gid & ~((uv_gid_t) ~0)) {
-        return env->ThrowRangeError("options.gid is out of range");
-      }
+      const int32_t gid = gid_v->Int32Value(env->context()).FromJust();
       options.flags |= UV_PROCESS_SETGID;
-      options.gid = (uv_gid_t) gid;
+      options.gid = static_cast<uv_gid_t>(gid);
     } else if (!gid_v->IsUndefined() && !gid_v->IsNull()) {
       return env->ThrowTypeError("options.gid should be a number");
     }
@@ -232,7 +228,8 @@ class ProcessWrap : public HandleWrap {
   }
 
   static void Kill(const FunctionCallbackInfo<Value>& args) {
-    ProcessWrap* wrap = Unwrap<ProcessWrap>(args.Holder());
+    ProcessWrap* wrap;
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
     int signal = args[0]->Int32Value();
     int err = uv_process_kill(&wrap->process_, signal);
     args.GetReturnValue().Set(err);

@@ -70,7 +70,7 @@ const sameHistoryFilePaths = '\nThe old repl history file has the same name ' +
                              path.join(common.tmpDir, '.node_repl_history') +
                              ' and is empty.\nUsing it as is.\n';
 // File paths
-const fixtures = path.join(common.testDir, 'fixtures');
+const fixtures = common.fixturesDir;
 const historyFixturePath = path.join(fixtures, '.node_repl_history');
 const historyPath = path.join(common.tmpDir, '.fixture_copy_repl_history');
 const historyPathFail = path.join(common.tmpDir, '.node_repl\u0000_history');
@@ -139,17 +139,7 @@ const tests = [
     test: [UP, CLEAR, '\'42\'', ENTER],
     expected: [prompt, convertMsg, prompt, prompt + '\'=^.^=\'', prompt, '\'',
                '4', '2', '\'', '\'42\'\n', prompt, prompt],
-    after: function ensureHistoryFixture() {
-      // XXX(Fishrock123) Make sure nothing weird happened to our fixture
-      //  or it's temporary copy.
-      // Sometimes this test used to erase the fixture and I'm not sure why.
-      const history = fs.readFileSync(historyFixturePath, 'utf8');
-      assert.strictEqual(history,
-                         '\'you look fabulous today\'\n\'Stay Fresh~\'\n');
-      const historyCopy = fs.readFileSync(historyPath, 'utf8');
-      assert.strictEqual(historyCopy, '\'you look fabulous today\'' + os.EOL +
-                                      '\'Stay Fresh~\'' + os.EOL);
-    }
+    clean: false
   },
   { // Requires the above testcase
     env: {},
@@ -229,7 +219,7 @@ function runTest(assertCleaned) {
   const env = opts.env;
   const test = opts.test;
   const expected = opts.expected;
-  const after = opts.after;
+  const clean = opts.clean;
   const before = opts.before;
 
   if (before) before();
@@ -262,6 +252,9 @@ function runTest(assertCleaned) {
       throw err;
     }
 
+    // The REPL registers 'module' and 'require' globals
+    common.allowGlobals(repl.context.module, repl.context.require);
+
     repl.once('close', () => {
       if (repl._flushing) {
         repl.once('flushHistory', onClose);
@@ -272,7 +265,7 @@ function runTest(assertCleaned) {
     });
 
     function onClose() {
-      const cleaned = after ? after() : cleanupTmpFile();
+      const cleaned = clean === false ? false : cleanupTmpFile();
 
       try {
         // Ensure everything that we expected was output

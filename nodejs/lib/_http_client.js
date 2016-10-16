@@ -67,6 +67,7 @@ function ClientRequest(options, cb) {
   }
 
   self.socketPath = options.socketPath;
+  self.timeout = options.timeout;
 
   var method = self.method = (options.method || 'GET').toUpperCase();
   if (!common._checkIsHttpToken(method)) {
@@ -134,7 +135,8 @@ function ClientRequest(options, cb) {
     self._last = true;
     self.shouldKeepAlive = false;
     const optionsPath = {
-      path: self.socketPath
+      path: self.socketPath,
+      timeout: self.timeout
     };
     const newSocket = self.agent.createConnection(optionsPath, oncreate);
     if (newSocket && !called) {
@@ -195,6 +197,8 @@ function ClientRequest(options, cb) {
     self._flush();
     self = null;
   });
+
+  this._ended = false;
 }
 
 util.inherits(ClientRequest, OutgoingMessage);
@@ -466,6 +470,7 @@ function parserOnIncomingClient(res, shouldKeepAlive) {
 
   // add our listener first, so that we guarantee socket cleanup
   res.on('end', responseOnEnd);
+  req.on('prefinish', requestOnPrefinish);
   var handled = req.emit('response', res);
 
   // If the user did not listen for the 'response' event, then they
@@ -478,9 +483,7 @@ function parserOnIncomingClient(res, shouldKeepAlive) {
 }
 
 // client
-function responseOnEnd() {
-  var res = this;
-  var req = res.req;
+function responseKeepAlive(res, req) {
   var socket = req.socket;
 
   if (!req.shouldKeepAlive) {
@@ -502,6 +505,26 @@ function responseOnEnd() {
     // handlers have a chance to run.
     process.nextTick(emitFreeNT, socket);
   }
+}
+
+function responseOnEnd() {
+  const res = this;
+  const req = this.req;
+
+  req._ended = true;
+  if (!req.shouldKeepAlive || req.finished)
+    responseKeepAlive(res, req);
+}
+
+function requestOnPrefinish() {
+  const req = this;
+  const res = this.res;
+
+  if (!req.shouldKeepAlive)
+    return;
+
+  if (req._ended)
+    responseKeepAlive(res, req);
 }
 
 function emitFreeNT(socket) {
@@ -538,6 +561,10 @@ function tickOnSocket(req, socket) {
   socket.on('data', socketOnData);
   socket.on('end', socketOnEnd);
   socket.on('close', socketCloseListener);
+
+  if (req.timeout) {
+    socket.once('timeout', () => req.emit('timeout'));
+  }
   req.emit('socket', socket);
 }
 

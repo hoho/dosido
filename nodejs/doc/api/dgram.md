@@ -1,6 +1,6 @@
 # UDP / Datagram Sockets
 
-    Stability: 2 - Stable
+> Stability: 2 - Stable
 
 <!-- name=dgram -->
 
@@ -29,6 +29,9 @@ server.bind(41234);
 ```
 
 ## Class: dgram.Socket
+<!-- YAML
+added: v0.1.99
+-->
 
 The `dgram.Socket` object is an [`EventEmitter`][] that encapsulates the
 datagram functionality.
@@ -37,11 +40,17 @@ New instances of `dgram.Socket` are created using [`dgram.createSocket()`][].
 The `new` keyword is not to be used to create `dgram.Socket` instances.
 
 ### Event: 'close'
+<!-- YAML
+added: v0.1.99
+-->
 
 The `'close'` event is emitted after a socket is closed with [`close()`][].
 Once triggered, no new `'message'` events will be emitted on this socket.
 
 ### Event: 'error'
+<!-- YAML
+added: v0.1.99
+-->
 
 * `exception` {Error}
 
@@ -49,11 +58,17 @@ The `'error'` event is emitted whenever any error occurs. The event handler
 function is passed a single Error object.
 
 ### Event: 'listening'
+<!-- YAML
+added: v0.1.99
+-->
 
 The `'listening'` event is emitted whenever a socket begins listening for
 datagram messages. This occurs as soon as UDP sockets are created.
 
 ### Event: 'message'
+<!-- YAML
+added: v0.1.99
+-->
 
 * `msg` {Buffer} - The message
 * `rinfo` {Object} - Remote address information
@@ -71,22 +86,32 @@ socket.on('message', (msg, rinfo) => {
 ```
 
 ### socket.addMembership(multicastAddress[, multicastInterface])
+<!-- YAML
+added: v0.6.9
+-->
 
 * `multicastAddress` {String}
 * `multicastInterface` {String}, Optional
 
-Tells the kernel to join a multicast group at the given `multicastAddress`
-using the `IP_ADD_MEMBERSHIP` socket option. If the `multicastInterface`
-argument is not specified, the operating system will try to add membership to
-all valid networking interfaces.
+Tells the kernel to join a multicast group at the given `multicastAddress` and
+`multicastInterface` using the `IP_ADD_MEMBERSHIP` socket option. If the
+`multicastInterface` argument is not specified, the operating system will choose
+one interface and will add membership to it. To add membership to every
+available interface, call `addMembership` multiple times, once per interface.
 
 ### socket.address()
+<!-- YAML
+added: v0.1.99
+-->
 
 Returns an object containing the address information for a socket.
 For UDP sockets, this object will contain `address`, `family` and `port`
 properties.
 
 ### socket.bind([port][, address][, callback])
+<!-- YAML
+added: v0.1.99
+-->
 
 * `port` {Number} - Integer, Optional
 * `address` {String}, Optional
@@ -135,6 +160,9 @@ server.bind(41234);
 ```
 
 ### socket.bind(options[, callback])
+<!-- YAML
+added: v0.11.14
+-->
 
 * `options` {Object} - Required. Supports the following properties:
   * `port` {Number} - Required.
@@ -168,11 +196,17 @@ socket.bind({
 ```
 
 ### socket.close([callback])
+<!-- YAML
+added: v0.1.99
+-->
 
 Close the underlying socket and stop listening for data on it. If a callback is
 provided, it is added as a listener for the [`'close'`][] event.
 
 ### socket.dropMembership(multicastAddress[, multicastInterface])
+<!-- YAML
+added: v0.6.9
+-->
 
 * `multicastAddress` {String}
 * `multicastInterface` {String}, Optional
@@ -186,6 +220,9 @@ If `multicastInterface` is not specified, the operating system will attempt to
 drop membership on all valid interfaces.
 
 ### socket.send(msg, [offset, length,] port, address[, callback])
+<!-- YAML
+added: v0.1.99
+-->
 
 * `msg` {Buffer|String|Array} Message to be sent
 * `offset` {Number} Integer. Optional. Offset in the buffer where the message starts.
@@ -233,7 +270,7 @@ Example of sending a UDP packet to a random port on `localhost`;
 
 ```js
 const dgram = require('dgram');
-const message = new Buffer('Some bytes');
+const message = Buffer.from('Some bytes');
 const client = dgram.createSocket('udp4');
 client.send(message, 41234, 'localhost', (err) => {
   client.close();
@@ -244,8 +281,8 @@ Example of sending a UDP packet composed of multiple buffers to a random port on
 
 ```js
 const dgram = require('dgram');
-const buf1 = new Buffer('Some ');
-const buf2 = new Buffer('bytes');
+const buf1 = Buffer.from('Some ');
+const buf2 = Buffer.from('bytes');
 const client = dgram.createSocket('udp4');
 client.send([buf1, buf2], 41234, 'localhost', (err) => {
   client.close();
@@ -283,6 +320,9 @@ not work because the packet will get silently dropped without informing the
 source that the data did not reach its intended recipient.
 
 ### socket.setBroadcast(flag)
+<!-- YAML
+added: v0.6.9
+-->
 
 * `flag` {Boolean}
 
@@ -290,6 +330,9 @@ Sets or clears the `SO_BROADCAST` socket option.  When set to `true`, UDP
 packets may be sent to a local interface's broadcast address.
 
 ### socket.setMulticastLoopback(flag)
+<!-- YAML
+added: v0.3.8
+-->
 
 * `flag` {Boolean}
 
@@ -297,6 +340,9 @@ Sets or clears the `IP_MULTICAST_LOOP` socket option.  When set to `true`,
 multicast packets will also be received on the local interface.
 
 ### socket.setMulticastTTL(ttl)
+<!-- YAML
+added: v0.3.8
+-->
 
 * `ttl` {Number} Integer
 
@@ -310,6 +356,9 @@ The argument passed to to `socket.setMulticastTTL()` is a number of hops
 between 0 and 255. The default on most systems is `1` but can vary.
 
 ### socket.setTTL(ttl)
+<!-- YAML
+added: v0.1.101
+-->
 
 * `ttl` {Number} Integer
 
@@ -323,6 +372,9 @@ The argument to `socket.setTTL()` is a number of hops between 1 and 255.
 The default on most systems is 64 but can vary.
 
 ### socket.ref()
+<!-- YAML
+added: v0.9.1
+-->
 
 By default, binding a socket will cause it to block the Node.js process from
 exiting as long as the socket is open. The `socket.unref()` method can be used
@@ -336,6 +388,9 @@ The `socket.ref()` method returns a reference to the socket so calls can be
 chained.
 
 ### socket.unref()
+<!-- YAML
+added: v0.9.1
+-->
 
 By default, binding a socket will cause it to block the Node.js process from
 exiting as long as the socket is open. The `socket.unref()` method can be used
@@ -373,6 +428,9 @@ s.bind(1234, () => {
 ## `dgram` module functions
 
 ### dgram.createSocket(options[, callback])
+<!-- YAML
+added: v0.11.13
+-->
 
 * `options` {Object}
 * `callback` {Function} Attached as a listener to `'message'` events.
@@ -395,6 +453,9 @@ and `udp6` sockets). The bound address and port can be retrieved using
 [`socket.address().address`][] and [`socket.address().port`][].
 
 ### dgram.createSocket(type[, callback])
+<!-- YAML
+added: v0.1.99
+-->
 
 * `type` {String} - Either 'udp4' or 'udp6'
 * `callback` {Function} - Attached as a listener to `'message'` events.
@@ -415,8 +476,8 @@ and `udp6` sockets). The bound address and port can be retrieved using
 [`EventEmitter`]: events.html
 [`Buffer`]: buffer.html
 [`'close'`]: #dgram_event_close
-[`addMembership()`]: #dgram_socket_addmembership_multicastaddress_multicastinterface
 [`close()`]: #dgram_socket_close_callback
+[`cluster`]: cluster.html
 [`dgram.createSocket()`]: #dgram_dgram_createsocket_options_callback
 [`dgram.Socket#bind()`]: #dgram_socket_bind_options_callback
 [`Error`]: errors.html#errors_class_error

@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -17,16 +17,15 @@ var options = {
   cert: fs.readFileSync(join(common.fixturesDir, 'keys', 'agent1-cert.pem')),
   ca: [ fs.readFileSync(join(common.fixturesDir, 'keys', 'ca1-cert.pem')) ]
 };
-var verified = false;
 
 var server = tls.createServer(options, function(cleartext) {
   cleartext.end('World');
 });
-server.listen(common.PORT, function() {
+server.listen(0, common.mustCall(function() {
   var socket = tls.connect({
-    port: common.PORT,
+    port: this.address().port,
     rejectUnauthorized: false
-  }, function() {
+  }, common.mustCall(function() {
     var peerCert = socket.getPeerCertificate();
     assert.ok(!peerCert.issuerCertificate);
 
@@ -41,17 +40,12 @@ server.listen(common.PORT, function() {
     assert.equal(peerCert.fingerprint,
                  '8D:06:3A:B3:E5:8B:85:29:72:4F:7D:1B:54:CD:95:19:3C:EF:6F:AA');
     assert.deepStrictEqual(peerCert.infoAccess['OCSP - URI'],
-                     [ 'http://ocsp.nodejs.org/' ]);
+                           [ 'http://ocsp.nodejs.org/' ]);
 
     var issuer = peerCert.issuerCertificate;
     assert.ok(issuer.issuerCertificate === issuer);
     assert.equal(issuer.serialNumber, '8DF21C01468AF393');
-    verified = true;
     server.close();
-  });
+  }));
   socket.end('Hello');
-});
-
-process.on('exit', function() {
-  assert.ok(verified);
-});
+}));

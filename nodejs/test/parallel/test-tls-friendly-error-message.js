@@ -3,7 +3,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -16,7 +16,7 @@ var cert = fs.readFileSync(common.fixturesDir + '/keys/agent1-cert.pem');
 tls.createServer({ key: key, cert: cert }, function(conn) {
   conn.end();
   this.close();
-}).listen(common.PORT, function() {
+}).listen(0, function() {
   var options = { port: this.address().port, rejectUnauthorized: true };
   tls.connect(options).on('error', common.mustCall(function(err) {
     assert.equal(err.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');

@@ -4,12 +4,13 @@ const NativeModule = require('native_module');
 const util = require('util');
 const internalModule = require('internal/module');
 const internalUtil = require('internal/util');
-const runInThisContext = require('vm').runInThisContext;
+const vm = require('vm');
 const assert = require('assert').ok;
 const fs = require('fs');
 const path = require('path');
 const internalModuleReadFile = process.binding('fs').internalModuleReadFile;
 const internalModuleStat = process.binding('fs').internalModuleStat;
+const preserveSymlinks = !!process.binding('config').preserveSymlinks;
 
 // If obj.hasOwnProperty has been overridden, then calling
 // obj.hasOwnProperty(prop) will break.
@@ -108,15 +109,30 @@ function tryPackage(requestPath, exts, isMain) {
          tryExtensions(path.resolve(filename, 'index'), exts, isMain);
 }
 
+// In order to minimize unnecessary lstat() calls,
+// this cache is a list of known-real paths.
+// Set to an empty Map to reset.
+const realpathCache = new Map();
+
+const realpathCacheKey = fs.realpathCacheKey;
+delete fs.realpathCacheKey;
+
 // check if the file exists and is not a directory
-// resolve to the absolute realpath if running main module,
-// otherwise resolve to absolute while keeping symlinks intact.
+// if using --preserve-symlinks and isMain is false,
+// keep symlinks intact, otherwise resolve to the
+// absolute realpath.
 function tryFile(requestPath, isMain) {
   const rc = stat(requestPath);
-  if (isMain) {
-    return rc === 0 && fs.realpathSync(requestPath);
+  if (preserveSymlinks && !isMain) {
+    return rc === 0 && path.resolve(requestPath);
   }
-  return rc === 0 && path.resolve(requestPath);
+  return rc === 0 && toRealPath(requestPath);
+}
+
+function toRealPath(requestPath) {
+  return fs.realpathSync(requestPath, {
+    [realpathCacheKey]: realpathCache
+  });
 }
 
 // given a path check a the file exists with any of the set extensions
@@ -159,10 +175,10 @@ Module._findPath = function(request, paths, isMain) {
     if (!trailingSlash) {
       const rc = stat(basePath);
       if (rc === 0) {  // File.
-        if (!isMain) {
+        if (preserveSymlinks && !isMain) {
           filename = path.resolve(basePath);
         } else {
-          filename = fs.realpathSync(basePath);
+          filename = toRealPath(basePath);
         }
       } else if (rc === 1) {  // Directory.
         if (exts === undefined)
@@ -219,17 +235,29 @@ if (process.platform === 'win32') {
     // note: this approach *only* works when the path is guaranteed
     // to be absolute.  Doing a fully-edge-case-correct path.split
     // that works on both Windows and Posix is non-trivial.
+
+    // return root node_modules when path is 'D:\\'.
+    // path.resolve will make sure from.length >=3 in Windows.
+    if (from.charCodeAt(from.length - 1) === 92/*\*/ &&
+        from.charCodeAt(from.length - 2) === 58/*:*/)
+      return [from + 'node_modules'];
+
     const paths = [];
     var p = 0;
     var last = from.length;
     for (var i = from.length - 1; i >= 0; --i) {
       const code = from.charCodeAt(i);
-      if (code === 92/*\*/ || code === 47/*/*/) {
+      // The path segment separator check ('\' and '/') was used to get
+      // node_modules path for every path segment.
+      // Use colon as an extra condition since we can get node_modules
+      // path for dirver root like 'C:\node_modules' and don't need to
+      // parse driver name.
+      if (code === 92/*\*/ || code === 47/*/*/ || code === 58/*:*/) {
         if (p !== nmLen)
           paths.push(from.slice(0, last) + '\\node_modules');
         last = i;
         p = 0;
-      } else if (p !== -1 && p < nmLen) {
+      } else if (p !== -1) {
         if (nmChars[p] === code) {
           ++p;
         } else {
@@ -263,7 +291,7 @@ if (process.platform === 'win32') {
           paths.push(from.slice(0, last) + '/node_modules');
         last = i;
         p = 0;
-      } else if (p !== -1 && p < nmLen) {
+      } else if (p !== -1) {
         if (nmChars[p] === code) {
           ++p;
         } else {
@@ -271,6 +299,9 @@ if (process.platform === 'win32') {
         }
       }
     }
+
+    // Append /node_modules to handle root paths.
+    paths.push('/node_modules');
 
     return paths;
   };
@@ -508,13 +539,13 @@ Module.prototype._compile = function(content, filename) {
   // create wrapper function
   var wrapper = Module.wrap(content);
 
-  var compiledWrapper = runInThisContext(wrapper, {
+  var compiledWrapper = vm.runInThisContext(wrapper, {
     filename: filename,
     lineOffset: 0,
     displayErrors: true
   });
 
-  if (global.v8debug) {
+  if (process._debugWaitConnect) {
     if (!resolvedArgv) {
       // we enter the repl if we're not given a filename argument.
       if (process.argv[1]) {
@@ -526,11 +557,9 @@ Module.prototype._compile = function(content, filename) {
 
     // Set breakpoint on module start
     if (filename === resolvedArgv) {
-      // Installing this dummy debug event listener tells V8 to start
-      // the debugger.  Without it, the setBreakPoint() fails with an
-      // 'illegal access' error.
-      global.v8debug.Debug.setListener(function() {});
-      global.v8debug.Debug.setBreakPoint(compiledWrapper, 0, 0);
+      delete process._debugWaitConnect;
+      const Debug = vm.runInDebugContext('Debug');
+      Debug.setBreakPoint(compiledWrapper, 0, 0);
     }
   }
   var dirname = path.dirname(filename);
@@ -603,7 +632,7 @@ Module._initPaths = function() {
 
   modulePaths = paths;
 
-  // clone as a read-only copy, for introspection.
+  // clone as a shallow copy, for introspection.
   Module.globalPaths = modulePaths.slice(0);
 };
 
@@ -622,8 +651,7 @@ Module._preloadModules = function(requests) {
   var parent = new Module('internal/preload', null);
   try {
     parent.paths = Module._nodeModulePaths(process.cwd());
-  }
-  catch (e) {
+  } catch (e) {
     if (e.code !== 'ENOENT') {
       throw e;
     }

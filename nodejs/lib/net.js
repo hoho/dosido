@@ -60,13 +60,17 @@ exports.createServer = function(options, connectionListener) {
 // connect(path, [cb]);
 //
 exports.connect = exports.createConnection = function() {
-  const argsLen = arguments.length;
-  var args = new Array(argsLen);
-  for (var i = 0; i < argsLen; i++)
+  var args = new Array(arguments.length);
+  for (var i = 0; i < arguments.length; i++)
     args[i] = arguments[i];
   args = normalizeConnectArgs(args);
   debug('createConnection', args);
   var s = new Socket(args[0]);
+
+  if (args[0].timeout) {
+    s.setTimeout(args[0].timeout);
+  }
+
   return Socket.prototype.connect.apply(s, args);
 };
 
@@ -75,7 +79,9 @@ exports.connect = exports.createConnection = function() {
 function normalizeConnectArgs(args) {
   var options = {};
 
-  if (args[0] !== null && typeof args[0] === 'object') {
+  if (args.length === 0) {
+    return [options];
+  } else if (args[0] !== null && typeof args[0] === 'object') {
     // connect(options, [cb])
     options = args[0];
   } else if (isPipeName(args[0])) {
@@ -84,7 +90,7 @@ function normalizeConnectArgs(args) {
   } else {
     // connect(port, [host], [cb])
     options.port = args[0];
-    if (typeof args[1] === 'string') {
+    if (args.length > 1 && typeof args[1] === 'string') {
       options.host = args[1];
     }
   }
@@ -119,7 +125,7 @@ const BYTES_READ = Symbol('bytesRead');
 function Socket(options) {
   if (!(this instanceof Socket)) return new Socket(options);
 
-  this._connecting = false;
+  this.connecting = false;
   this._hadError = false;
   this._handle = null;
   this._parent = null;
@@ -202,7 +208,7 @@ Socket.prototype._unrefTimer = function unrefTimer() {
 // so that only the writable side will be cleaned up.
 function onSocketFinish() {
   // If still connecting - defer handling 'finish' until 'connect' will happen
-  if (this._connecting) {
+  if (this.connecting) {
     debug('osF: not yet connected');
     return this.once('connect', onSocketFinish);
   }
@@ -367,9 +373,16 @@ Socket.prototype.address = function() {
 };
 
 
+Object.defineProperty(Socket.prototype, '_connecting', {
+  get: function() {
+    return this.connecting;
+  }
+});
+
+
 Object.defineProperty(Socket.prototype, 'readyState', {
   get: function() {
-    if (this._connecting) {
+    if (this.connecting) {
       return 'opening';
     } else if (this.readable && this.writable) {
       return 'open';
@@ -397,7 +410,7 @@ Object.defineProperty(Socket.prototype, 'bufferSize', {
 Socket.prototype._read = function(n) {
   debug('_read');
 
-  if (this._connecting || !this._handle) {
+  if (this.connecting || !this._handle) {
     debug('_read wait for connection');
     this.once('connect', () => this._read(n));
   } else if (!this._handle.reading) {
@@ -430,7 +443,7 @@ function maybeDestroy(socket) {
   if (!socket.readable &&
       !socket.writable &&
       !socket.destroyed &&
-      !socket._connecting &&
+      !socket.connecting &&
       !socket._writableState.length) {
     socket.destroy();
   }
@@ -465,7 +478,7 @@ Socket.prototype._destroy = function(exception, cb) {
     return;
   }
 
-  this._connecting = false;
+  this.connecting = false;
 
   this.readable = this.writable = false;
 
@@ -648,7 +661,7 @@ Socket.prototype._writeGeneric = function(writev, data, encoding, cb) {
   // If we are still connecting, then buffer this for later.
   // The Writable logic will buffer up any more writes while
   // waiting for this one to be done.
-  if (this._connecting) {
+  if (this.connecting) {
     this._pendingData = data;
     this._pendingEncoding = encoding;
     this.once('connect', function() {
@@ -686,7 +699,6 @@ Socket.prototype._writeGeneric = function(writev, data, encoding, cb) {
   } else {
     var enc;
     if (data instanceof Buffer) {
-      req.buffer = data;  // Keep reference alive.
       enc = 'buffer';
     } else {
       enc = encoding;
@@ -719,8 +731,9 @@ Socket.prototype._write = function(data, encoding, cb) {
 
 function createWriteReq(req, handle, data, encoding) {
   switch (encoding) {
+    case 'latin1':
     case 'binary':
-      return handle.writeBinaryString(req, data);
+      return handle.writeLatin1String(req, data);
 
     case 'buffer':
       return handle.writeBuffer(req, data);
@@ -803,7 +816,7 @@ function connect(self, address, port, addressType, localAddress, localPort) {
   // TODO return promise from Socket.prototype.connect which
   // wraps _connectReq.
 
-  assert.ok(self._connecting);
+  assert.ok(self.connecting);
 
   var err;
 
@@ -877,9 +890,8 @@ Socket.prototype.connect = function(options, cb) {
     // Old API:
     // connect(port, [host], [cb])
     // connect(path, [cb]);
-    const argsLen = arguments.length;
-    var args = new Array(argsLen);
-    for (var i = 0; i < argsLen; i++)
+    var args = new Array(arguments.length);
+    for (var i = 0; i < arguments.length; i++)
       args[i] = arguments[i];
     args = normalizeConnectArgs(args);
     return Socket.prototype.connect.apply(this, args);
@@ -913,7 +925,7 @@ Socket.prototype.connect = function(options, cb) {
 
   this._unrefTimer();
 
-  this._connecting = true;
+  this.connecting = true;
   this.writable = true;
 
   if (pipe) {
@@ -952,7 +964,7 @@ function lookupAndConnect(self, options) {
   var addressType = exports.isIP(host);
   if (addressType) {
     process.nextTick(function() {
-      if (self._connecting)
+      if (self.connecting)
         connect(self, host, port, addressType, localAddress, localPort);
     });
     return;
@@ -980,7 +992,7 @@ function lookupAndConnect(self, options) {
     // It's possible we were destroyed while looking this up.
     // XXX it would be great if we could cancel the promise returned by
     // the look up.
-    if (!self._connecting) return;
+    if (!self.connecting) return;
 
     if (err) {
       // net.createConnection() creates a net.Socket object and
@@ -1048,8 +1060,8 @@ function afterConnect(status, handle, req, readable, writable) {
 
   debug('afterConnect');
 
-  assert.ok(self._connecting);
-  self._connecting = false;
+  assert.ok(self.connecting);
+  self.connecting = false;
   self._sockname = null;
 
   if (status == 0) {
@@ -1065,7 +1077,7 @@ function afterConnect(status, handle, req, readable, writable) {
       self.read(0);
 
   } else {
-    self._connecting = false;
+    self.connecting = false;
     var details;
     if (req.localAddress && req.localPort) {
       details = req.localAddress + ':' + req.localPort;
@@ -1151,8 +1163,7 @@ function createServerHandle(address, port, addressType, fd) {
   if (typeof fd === 'number' && fd >= 0) {
     try {
       handle = createHandle(fd);
-    }
-    catch (e) {
+    } catch (e) {
       // Not a fd we can listen on.  This will trigger an error.
       debug('listen invalid fd=' + fd + ': ' + e.message);
       return uv.UV_EINVAL;
@@ -1574,14 +1585,10 @@ Server.prototype.unref = function() {
 exports.isIP = cares.isIP;
 
 
-exports.isIPv4 = function(input) {
-  return cares.isIPv4(input);
-};
+exports.isIPv4 = cares.isIPv4;
 
 
-exports.isIPv6 = function(input) {
-  return cares.isIPv6(input);
-};
+exports.isIPv6 = cares.isIPv6;
 
 
 if (process.platform === 'win32') {

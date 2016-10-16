@@ -1,9 +1,8 @@
 'use strict';
-var assert = require('assert');
 var common = require('../common');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
@@ -37,18 +36,11 @@ function test(cert, key, cb) {
   var server = tls.createServer({
     cert: cert,
     key: key
-  }).listen(common.PORT, function() {
+  }).listen(0, function() {
     server.close(cb);
   });
 }
 
-var completed = false;
-test(cert, key, function() {
-  test(Buffer.from(cert), Buffer.from(key), function() {
-    completed = true;
-  });
-});
-
-process.on('exit', function() {
-  assert(completed);
-});
+test(cert, key, common.mustCall(function() {
+  test(Buffer.from(cert), Buffer.from(key), common.mustCall(function() {}));
+}));

@@ -5,10 +5,11 @@ var path = require('path')
 var rimraf = require('rimraf')
 var mkdirp = require('mkdirp')
 var fs = require('graceful-fs')
+var tar = require('tar')
+var zlib = require('zlib')
 var basepath = path.resolve(__dirname, path.basename(__filename, '.js'))
 var fixturepath = path.resolve(basepath, 'npm-test-files')
-var modulepath = path.resolve(basepath, 'node_modules')
-var installedpath = path.resolve(modulepath, 'npm-test-files')
+var targetpath = path.resolve(basepath, 'target')
 var Tacks = require('tacks')
 var File = Tacks.File
 var Dir = Tacks.Dir
@@ -403,7 +404,8 @@ test('certain files ignored unconditionally', function (t) {
           '.npmrc',
           '.foo.swp',
           '.DS_Store',
-          '._ohno'
+          '._ohno',
+          'foo.orig'
         ]
       }),
       '.git': Dir({foo: File('')}),
@@ -420,7 +422,8 @@ test('certain files ignored unconditionally', function (t) {
       '.foo.swp': File(''),
       '.DS_Store': Dir({foo: File('')}),
       '._ohno': File(''),
-      '._ohnoes': Dir({noes: File('')})
+      '._ohnoes': Dir({noes: File('')}),
+      'foo.orig': File('')
     })
   )
   withFixture(t, fixture, function (done) {
@@ -439,6 +442,7 @@ test('certain files ignored unconditionally', function (t) {
     t.notOk(fileExists('.DS_Store'), '.DS_Store not included')
     t.notOk(fileExists('._ohno'), '._ohno not included')
     t.notOk(fileExists('._ohnoes'), '._ohnoes not included')
+    t.notOk(fileExists('foo.orig'), 'foo.orig not included')
     done()
   })
 })
@@ -459,6 +463,9 @@ test('certain files included unconditionally', function (t) {
         'changelog',
         'CHAngelog',
         'ChangeLOG.txt',
+        'history',
+        'HistorY',
+        'HistorY.md',
         'license',
         'licence',
         'LICENSE',
@@ -471,6 +478,9 @@ test('certain files included unconditionally', function (t) {
       'changelog': File(''),
       'CHAngelog': File(''),
       'ChangeLOG.txt': File(''),
+      'history': File(''),
+      'HistorY': File(''),
+      'HistorY.md': File(''),
       'license': File(''),
       'licence': File(''),
       'LICENSE': File(''),
@@ -490,6 +500,39 @@ test('certain files included unconditionally', function (t) {
     t.ok(fileExists('licence'), 'licence included')
     t.ok(fileExists('LICENSE'), 'LICENSE included')
     t.ok(fileExists('LICENCE'), 'LICENCE included')
+    done()
+  })
+})
+
+test('unconditional inclusion does not capture modules', function (t) {
+  var fixture = new Tacks(
+    Dir({
+      'package.json': File({
+        name: 'npm-test-files',
+        version: '1.2.5'
+      }),
+      'node_modules': Dir({
+        'readme': Dir({ 'file': File('') }),
+        'README': Dir({ 'file': File('') }),
+        'licence': Dir({ 'file': File('') }),
+        'license': Dir({ 'file': File('') }),
+        'history': Dir({ 'file': File('') }),
+        'History': Dir({ 'file': File('') }),
+        'changelog': Dir({ 'file': File('') }),
+        'ChangeLOG': Dir({ 'file': File('') })
+      })
+    })
+  )
+  withFixture(t, fixture, function (done) {
+    t.notOk(fileExists('node_modules/readme/file'), 'readme module not included')
+    t.notOk(fileExists('node_modules/README/file'), 'README module not included')
+    t.notOk(fileExists('node_modules/licence/file'), 'licence module not included')
+    t.notOk(fileExists('node_modules/license/file'), 'license module not included')
+    t.notOk(fileExists('node_modules/history/file'), 'history module not included')
+    t.notOk(fileExists('node_modules/History/file'), 'History module not included')
+    t.notOk(fileExists('node_modules/changelog/file'), 'changelog module not included')
+    t.notOk(fileExists('node_modules/ChangeLOG/file'), 'ChangeLOG module not included')
+
     done()
   })
 })
@@ -534,7 +577,7 @@ test('folder-based inclusion works', function (t) {
 
 function fileExists (file) {
   try {
-    return !!fs.statSync(path.resolve(installedpath, file))
+    return !!fs.statSync(path.resolve(targetpath, 'package', file))
   } catch (_) {
     return false
   }
@@ -542,11 +585,15 @@ function fileExists (file) {
 
 function withFixture (t, fixture, tester) {
   fixture.create(fixturepath)
-  mkdirp.sync(modulepath)
-  common.npm(['install', fixturepath], {cwd: basepath}, installCheckAndTest)
-  function installCheckAndTest (err, code) {
+  mkdirp.sync(targetpath)
+  common.npm(['pack', fixturepath], {cwd: basepath}, extractAndCheck)
+  function extractAndCheck (err, code) {
     if (err) throw err
-    t.is(code, 0, 'install went ok')
+    t.is(code, 0, 'pack went ok')
+    extractTarball(checkTests)
+  }
+  function checkTests (err) {
+    if (err) throw err
     tester(removeAndDone)
   }
   function removeAndDone (err) {
@@ -555,4 +602,14 @@ function withFixture (t, fixture, tester) {
     rimraf.sync(basepath)
     t.done()
   }
+}
+
+function extractTarball (cb) {
+  // Unpack to disk so case-insensitive filesystems are consistent
+  fs.createReadStream(path.join(basepath, 'npm-test-files-1.2.5.tgz'))
+    .pipe(zlib.Unzip())
+    .on('error', cb)
+    .pipe(tar.Extract(targetpath))
+    .on('error', cb)
+    .on('end', function () { cb() })
 }

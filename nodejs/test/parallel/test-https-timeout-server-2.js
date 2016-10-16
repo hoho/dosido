@@ -4,7 +4,7 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var https = require('https');
@@ -27,10 +27,10 @@ server.on('secureConnection', function(cleartext) {
   assert.ok(s instanceof tls.TLSSocket);
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   tls.connect({
     host: '127.0.0.1',
-    port: common.PORT,
+    port: this.address().port,
     rejectUnauthorized: false
   });
 });

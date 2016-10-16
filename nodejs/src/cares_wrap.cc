@@ -9,6 +9,7 @@
 #include "req-wrap-inl.h"
 #include "tree.h"
 #include "util.h"
+#include "util-inl.h"
 #include "uv.h"
 
 #include <errno.h>
@@ -35,7 +36,6 @@ namespace cares_wrap {
 using v8::Array;
 using v8::Context;
 using v8::EscapableHandleScope;
-using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
@@ -46,6 +46,38 @@ using v8::Object;
 using v8::String;
 using v8::Value;
 
+
+inline const char* ToErrorCodeString(int status) {
+  switch (status) {
+#define V(code) case ARES_##code: return #code;
+    V(EADDRGETNETWORKPARAMS)
+    V(EBADFAMILY)
+    V(EBADFLAGS)
+    V(EBADHINTS)
+    V(EBADNAME)
+    V(EBADQUERY)
+    V(EBADRESP)
+    V(EBADSTR)
+    V(ECANCELLED)
+    V(ECONNREFUSED)
+    V(EDESTRUCTION)
+    V(EFILE)
+    V(EFORMERR)
+    V(ELOADIPHLPAPI)
+    V(ENODATA)
+    V(ENOMEM)
+    V(ENONAME)
+    V(ENOTFOUND)
+    V(ENOTIMP)
+    V(ENOTINITIALIZED)
+    V(EOF)
+    V(EREFUSED)
+    V(ESERVFAIL)
+    V(ETIMEOUT)
+#undef V
+  }
+  return "UNKNOWN_ARES_ERROR";
+}
 
 class GetAddrInfoReqWrap : public ReqWrap<uv_getaddrinfo_t> {
  public:
@@ -90,7 +122,7 @@ static void NewQueryReqWrap(const FunctionCallbackInfo<Value>& args) {
 }
 
 
-static int cmp_ares_tasks(const ares_task_t* a, const ares_task_t* b) {
+static int cmp_ares_tasks(const node_ares_task* a, const node_ares_task* b) {
   if (a->sock < b->sock)
     return -1;
   if (a->sock > b->sock)
@@ -99,7 +131,7 @@ static int cmp_ares_tasks(const ares_task_t* a, const ares_task_t* b) {
 }
 
 
-RB_GENERATE_STATIC(ares_task_list, ares_task_t, node, cmp_ares_tasks)
+RB_GENERATE_STATIC(node_ares_task_list, node_ares_task, node, cmp_ares_tasks)
 
 
 
@@ -113,7 +145,7 @@ static void ares_timeout(uv_timer_t* handle) {
 
 
 static void ares_poll_cb(uv_poll_t* watcher, int status, int events) {
-  ares_task_t* task = ContainerOf(&ares_task_t::poll_watcher, watcher);
+  node_ares_task* task = ContainerOf(&node_ares_task::poll_watcher, watcher);
   Environment* env = task->env;
 
   /* Reset the idle timer */
@@ -134,15 +166,16 @@ static void ares_poll_cb(uv_poll_t* watcher, int status, int events) {
 
 
 static void ares_poll_close_cb(uv_handle_t* watcher) {
-  ares_task_t* task = ContainerOf(&ares_task_t::poll_watcher,
+  node_ares_task* task = ContainerOf(&node_ares_task::poll_watcher,
                                   reinterpret_cast<uv_poll_t*>(watcher));
   free(task);
 }
 
 
-/* Allocates and returns a new ares_task_t */
-static ares_task_t* ares_task_create(Environment* env, ares_socket_t sock) {
-  ares_task_t* task = static_cast<ares_task_t*>(malloc(sizeof(*task)));
+/* Allocates and returns a new node_ares_task */
+static node_ares_task* ares_task_create(Environment* env, ares_socket_t sock) {
+  node_ares_task* task =
+    static_cast<node_ares_task*>(node::Malloc(sizeof(*task)));
 
   if (task == nullptr) {
     /* Out of memory. */
@@ -168,11 +201,11 @@ static void ares_sockstate_cb(void* data,
                               int read,
                               int write) {
   Environment* env = static_cast<Environment*>(data);
-  ares_task_t* task;
+  node_ares_task* task;
 
-  ares_task_t lookup_task;
+  node_ares_task lookup_task;
   lookup_task.sock = sock;
-  task = RB_FIND(ares_task_list, env->cares_task_list(), &lookup_task);
+  task = RB_FIND(node_ares_task_list, env->cares_task_list(), &lookup_task);
 
   if (read || write) {
     if (!task) {
@@ -193,7 +226,7 @@ static void ares_sockstate_cb(void* data,
         return;
       }
 
-      RB_INSERT(ares_task_list, env->cares_task_list(), task);
+      RB_INSERT(node_ares_task_list, env->cares_task_list(), task);
     }
 
     /* This should never fail. If it fails anyway, the query will eventually */
@@ -209,7 +242,7 @@ static void ares_sockstate_cb(void* data,
     CHECK(task &&
           "When an ares socket is closed we should have a handle for it");
 
-    RB_REMOVE(ares_task_list, env->cares_task_list(), task);
+    RB_REMOVE(node_ares_task_list, env->cares_task_list(), task);
     uv_close(reinterpret_cast<uv_handle_t*>(&task->poll_watcher),
              ares_poll_close_cb);
 
@@ -256,8 +289,9 @@ class QueryWrap : public AsyncWrap {
       req_wrap_obj->Set(env->domain_string(), env->domain_array()->Get(0));
   }
 
-  virtual ~QueryWrap() override {
+  ~QueryWrap() override {
     CHECK_EQ(false, persistent().IsEmpty());
+    ClearWrap(object());
     persistent().Reset();
   }
 
@@ -328,52 +362,19 @@ class QueryWrap : public AsyncWrap {
     CHECK_NE(status, ARES_SUCCESS);
     HandleScope handle_scope(env()->isolate());
     Context::Scope context_scope(env()->context());
-    Local<Value> arg;
-    switch (status) {
-#define V(code)                                                               \
-      case ARES_ ## code:                                                     \
-        arg = FIXED_ONE_BYTE_STRING(env()->isolate(), #code);                 \
-        break;
-      V(ENODATA)
-      V(EFORMERR)
-      V(ESERVFAIL)
-      V(ENOTFOUND)
-      V(ENOTIMP)
-      V(EREFUSED)
-      V(EBADQUERY)
-      V(EBADNAME)
-      V(EBADFAMILY)
-      V(EBADRESP)
-      V(ECONNREFUSED)
-      V(ETIMEOUT)
-      V(EOF)
-      V(EFILE)
-      V(ENOMEM)
-      V(EDESTRUCTION)
-      V(EBADSTR)
-      V(EBADFLAGS)
-      V(ENONAME)
-      V(EBADHINTS)
-      V(ENOTINITIALIZED)
-      V(ELOADIPHLPAPI)
-      V(EADDRGETNETWORKPARAMS)
-      V(ECANCELLED)
-#undef V
-      default:
-        arg = FIXED_ONE_BYTE_STRING(env()->isolate(), "UNKNOWN_ARES_ERROR");
-        break;
-    }
+    const char* code = ToErrorCodeString(status);
+    Local<Value> arg = OneByteString(env()->isolate(), code);
     MakeCallback(env()->oncomplete_string(), 1, &arg);
   }
 
   // Subclasses should implement the appropriate Parse method.
   virtual void Parse(unsigned char* buf, int len) {
     UNREACHABLE();
-  };
+  }
 
   virtual void Parse(struct hostent* host) {
     UNREACHABLE();
-  };
+  }
 };
 
 
@@ -1133,7 +1134,6 @@ static void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
     break;
   default:
     CHECK(0 && "bad address family");
-    ABORT();
   }
 
   GetAddrInfoReqWrap* req_wrap = new GetAddrInfoReqWrap(env, req_wrap_obj);
@@ -1145,7 +1145,7 @@ static void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
   hints.ai_flags = flags;
 
   int err = uv_getaddrinfo(env->event_loop(),
-                           &req_wrap->req_,
+                           req_wrap->req(),
                            AfterGetAddrInfo,
                            *hostname,
                            nullptr,
@@ -1175,7 +1175,7 @@ static void GetNameInfo(const FunctionCallbackInfo<Value>& args) {
   GetNameInfoReqWrap* req_wrap = new GetNameInfoReqWrap(env, req_wrap_obj);
 
   int err = uv_getnameinfo(env->event_loop(),
-                           &req_wrap->req_,
+                           req_wrap->req(),
                            AfterGetNameInfo,
                            (struct sockaddr*)&addr,
                            NI_NAMEREQD);
@@ -1259,7 +1259,6 @@ static void SetServers(const FunctionCallbackInfo<Value>& args) {
         break;
       default:
         CHECK(0 && "Bad address family.");
-        ABORT();
     }
 
     if (err)
@@ -1311,7 +1310,8 @@ static void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
 
   int r = ares_library_init(ARES_LIB_INIT_ALL);
-  CHECK_EQ(r, ARES_SUCCESS);
+  if (r != ARES_SUCCESS)
+    return env->ThrowError(ToErrorCodeString(r));
 
   struct ares_options options;
   memset(&options, 0, sizeof(options));
@@ -1323,7 +1323,10 @@ static void Initialize(Local<Object> target,
   r = ares_init_options(env->cares_channel_ptr(),
                         &options,
                         ARES_OPT_FLAGS | ARES_OPT_SOCK_STATE_CB);
-  CHECK_EQ(r, ARES_SUCCESS);
+  if (r != ARES_SUCCESS) {
+    ares_library_cleanup();
+    return env->ThrowError(ToErrorCodeString(r));
+  }
 
   /* Initialize the timeout timer. The timer won't be started until the */
   /* first socket is opened. */

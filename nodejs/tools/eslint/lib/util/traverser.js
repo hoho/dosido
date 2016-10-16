@@ -1,8 +1,6 @@
 /**
  * @fileoverview Wrapper around estraverse
  * @author Nicholas C. Zakas
- * @copyright 2016 Nicholas C. Zakas. All rights reserved.
- * See LICENSE in root directory for full license.
  */
 "use strict";
 
@@ -10,13 +8,13 @@
 // Requirements
 //------------------------------------------------------------------------------
 
-var estraverse = require("estraverse");
+const estraverse = require("estraverse");
 
 //------------------------------------------------------------------------------
 // Helpers
 //------------------------------------------------------------------------------
 
-var KEY_BLACKLIST = [
+const KEY_BLACKLIST = [
     "parent",
     "leadingComments",
     "trailingComments"
@@ -29,7 +27,7 @@ var KEY_BLACKLIST = [
  */
 function Traverser() {
 
-    var controller = Object.create(new estraverse.Controller()),
+    const controller = Object.create(new estraverse.Controller()),
         originalTraverse = controller.traverse;
 
     // intercept call to traverse() and add the fallback key to the visitor
@@ -54,3 +52,5 @@ Traverser.getKeys = function(node) {
 };
 
 module.exports = Traverser;
+
+

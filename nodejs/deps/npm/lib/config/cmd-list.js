@@ -16,7 +16,8 @@ var shorthands = {
   'tst': 'test',
   't': 'test',
   'ddp': 'dedupe',
-  'v': 'view'
+  'v': 'view',
+  'run': 'run-script'
 }
 
 var affordances = {
@@ -65,6 +66,7 @@ var cmdList = [
   'stars',
   'tag',
   'adduser',
+  'login', // This is an alias for `adduser` but it can be confusing
   'logout',
   'unpublish',
   'owner',

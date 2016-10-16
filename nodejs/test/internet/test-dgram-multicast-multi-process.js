@@ -17,7 +17,7 @@ const listeners = 3;
 
 // Skip test in FreeBSD jails.
 if (common.inFreeBSDJail) {
-  console.log('1..0 # Skipped: In a FreeBSD jail');
+  common.skip('In a FreeBSD jail');
   return;
 }
 
@@ -91,7 +91,7 @@ function launchChildProcess(index) {
                         worker.pid, count);
 
           assert.strictEqual(count, messages.length,
-                       'A worker received an invalid multicast message');
+                             'A worker received an invalid multicast message');
         });
 
         clearTimeout(timer);

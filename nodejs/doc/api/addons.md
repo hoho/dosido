@@ -102,7 +102,7 @@ top-level of the project describing the build configuration of your module
 using a JSON-like format. This file is used by [node-gyp][] -- a tool written
 specifically to compile Node.js Addons.
 
-```
+```json
 {
   "targets": [
     {
@@ -222,7 +222,7 @@ templates, etc.
 
 Each of these examples using the following `binding.gyp` file:
 
-```
+```json
 {
   "targets": [
     {
@@ -236,14 +236,14 @@ Each of these examples using the following `binding.gyp` file:
 In cases where there is more than one `.cc` file, simply add the additional
 filename to the `sources` array. For example:
 
-```
+```json
 "sources": ["addon.cc", "myexample.cc"]
 ```
 
 Once the `binding.gyp` file is ready, the example Addons can be configured and
 built using `node-gyp`:
 
-```
+```console
 $ node-gyp configure build
 ```
 
@@ -423,7 +423,7 @@ const addon = require('./build/Release/addon');
 
 var obj1 = addon('hello');
 var obj2 = addon('world');
-console.log(obj1.msg + ' ' + obj2.msg); // 'hello world'
+console.log(obj1.msg, obj2.msg); // 'hello world'
 ```
 
 
@@ -549,6 +549,7 @@ prototype:
 
 namespace demo {
 
+using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -597,8 +598,11 @@ void MyObject::New(const FunctionCallbackInfo<Value>& args) {
     // Invoked as plain function `MyObject(...)`, turn into construct call.
     const int argc = 1;
     Local<Value> argv[argc] = { args[0] };
+    Local<Context> context = isolate->GetCurrentContext();
     Local<Function> cons = Local<Function>::New(isolate, constructor);
-    args.GetReturnValue().Set(cons->NewInstance(argc, argv));
+    Local<Object> result =
+        cons->NewInstance(context, argc, argv).ToLocalChecked();
+    args.GetReturnValue().Set(result);
   }
 }
 
@@ -617,7 +621,7 @@ void MyObject::PlusOne(const FunctionCallbackInfo<Value>& args) {
 To build this example, the `myobject.cc` file must be added to the
 `binding.gyp`:
 
-```
+```json
 {
   "targets": [
     {
@@ -728,6 +732,7 @@ The implementation in `myobject.cc` is similar to the previous example:
 
 namespace demo {
 
+using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -773,7 +778,10 @@ void MyObject::New(const FunctionCallbackInfo<Value>& args) {
     const int argc = 1;
     Local<Value> argv[argc] = { args[0] };
     Local<Function> cons = Local<Function>::New(isolate, constructor);
-    args.GetReturnValue().Set(cons->NewInstance(argc, argv));
+    Local<Context> context = isolate->GetCurrentContext();
+    Local<Object> instance =
+        cons->NewInstance(context, argc, argv).ToLocalChecked();
+    args.GetReturnValue().Set(instance);
   }
 }
 
@@ -783,7 +791,9 @@ void MyObject::NewInstance(const FunctionCallbackInfo<Value>& args) {
   const unsigned argc = 1;
   Local<Value> argv[argc] = { args[0] };
   Local<Function> cons = Local<Function>::New(isolate, constructor);
-  Local<Object> instance = cons->NewInstance(argc, argv);
+  Local<Context> context = isolate->GetCurrentContext();
+  Local<Object> instance =
+      cons->NewInstance(context, argc, argv).ToLocalChecked();
 
   args.GetReturnValue().Set(instance);
 }
@@ -803,7 +813,7 @@ void MyObject::PlusOne(const FunctionCallbackInfo<Value>& args) {
 Once again, to build this example, the `myobject.cc` file must be added to the
 `binding.gyp`:
 
-```
+```json
 {
   "targets": [
     {
@@ -928,6 +938,7 @@ The implementation of `myobject.cc` is similar to before:
 
 namespace demo {
 
+using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -968,8 +979,11 @@ void MyObject::New(const FunctionCallbackInfo<Value>& args) {
     // Invoked as plain function `MyObject(...)`, turn into construct call.
     const int argc = 1;
     Local<Value> argv[argc] = { args[0] };
+    Local<Context> context = isolate->GetCurrentContext();
     Local<Function> cons = Local<Function>::New(isolate, constructor);
-    args.GetReturnValue().Set(cons->NewInstance(argc, argv));
+    Local<Object> instance =
+        cons->NewInstance(context, argc, argv).ToLocalChecked();
+    args.GetReturnValue().Set(instance);
   }
 }
 
@@ -979,7 +993,9 @@ void MyObject::NewInstance(const FunctionCallbackInfo<Value>& args) {
   const unsigned argc = 1;
   Local<Value> argv[argc] = { args[0] };
   Local<Function> cons = Local<Function>::New(isolate, constructor);
-  Local<Object> instance = cons->NewInstance(argc, argv);
+  Local<Context> context = isolate->GetCurrentContext();
+  Local<Object> instance =
+      cons->NewInstance(context, argc, argv).ToLocalChecked();
 
   args.GetReturnValue().Set(instance);
 }
@@ -1003,7 +1019,7 @@ console.log(result); // 30
 ### AtExit hooks
 
 An "AtExit" hook is a function that is invoked after the Node.js event loop
-has ended by before the JavaScript VM is terminated and Node.js shuts down.
+has ended but before the JavaScript VM is terminated and Node.js shuts down.
 "AtExit" hooks are registered using the `node::AtExit` API.
 
 #### void AtExit(callback, args)

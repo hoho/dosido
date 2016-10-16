@@ -2,7 +2,5 @@
 
 rules:
   ## common module is mandatory in tests
-  required-modules: [2, "common"]
-
-globals:
-  gc: false
+  required-modules: [2, common]
+  prefer-assert-methods: 2

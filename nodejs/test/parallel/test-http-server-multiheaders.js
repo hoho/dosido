@@ -3,7 +3,7 @@
 // of the same header as per RFC2616: joining the handful of fields by ', '
 // that support it, and dropping duplicates for other fields.
 
-var common = require('../common');
+require('../common');
 var assert = require('assert');
 var http = require('http');
 
@@ -18,16 +18,16 @@ var srv = http.createServer(function(req, res) {
   assert.equal(req.headers['sec-websocket-extensions'], 'foo; 1, bar; 2, baz');
   assert.equal(req.headers['constructor'], 'foo, bar, baz');
 
-  res.writeHead(200, {'Content-Type' : 'text/plain'});
+  res.writeHead(200, {'Content-Type': 'text/plain'});
   res.end('EOF');
 
   srv.close();
 });
 
-srv.listen(common.PORT, function() {
+srv.listen(0, function() {
   http.get({
     host: 'localhost',
-    port: common.PORT,
+    port: this.address().port,
     path: '/',
     headers: [
       ['accept', 'abc'],

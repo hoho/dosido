@@ -109,8 +109,8 @@ const tests = [
       const server = net.createServer(function(conn) {
         conn.pipe(conn);
       });
-      server.listen(common.PORT, common.localhostIPv4, function() {
-        const conn = net.connect(common.PORT, common.localhostIPv4);
+      server.listen(0, common.localhostIPv4, function() {
+        const conn = net.connect(this.address().port, common.localhostIPv4);
         conn.once('data', function() {
           throw new Error('ok');
         });
@@ -233,13 +233,13 @@ if (process.argv[2] === 'child') {
 
   tests.forEach(function(test, testIndex) {
     var testCmd = '';
-    if (process.platform !== 'win32') {
+    if (!common.isWindows) {
       // Do not create core files, as it can take a lot of disk space on
       // continuous testing and developers' machines
       testCmd += 'ulimit -c 0 && ';
     }
 
-    testCmd +=  process.argv[0];
+    testCmd += process.argv[0];
     testCmd += ' ' + '--abort-on-uncaught-exception';
     testCmd += ' ' + process.argv[1];
     testCmd += ' ' + 'child';

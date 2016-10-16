@@ -6,24 +6,19 @@ const cluster = require('cluster');
 const http = require('http');
 
 if (common.isWindows) {
-  console.log('1..0 # Skipped: It is not possible to send pipe handles over ' +
+  common.skip('It is not possible to send pipe handles over ' +
               'the IPC pipe on Windows');
   return;
 }
 
 if (cluster.isMaster) {
   common.refreshTmpDir();
-  var ok = false;
   var worker = cluster.fork();
-  worker.on('message', function(msg) {
+  worker.on('message', common.mustCall(function(msg) {
     assert.equal(msg, 'DONE');
-    ok = true;
-  });
+  }));
   worker.on('exit', function() {
     process.exit();
-  });
-  process.on('exit', function() {
-    assert(ok);
   });
   return;
 }

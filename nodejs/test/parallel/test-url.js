@@ -157,6 +157,17 @@ var parseTests = {
     path: '/Y'
   },
 
+  // whitespace in the front
+  ' http://www.example.com/': {
+    href: 'http://www.example.com/',
+    protocol: 'http:',
+    slashes: true,
+    host: 'www.example.com',
+    hostname: 'www.example.com',
+    pathname: '/',
+    path: '/'
+  },
+
   // + not an invalid host character
   // per https://url.spec.whatwg.org/#host-parsing
   'http://x.y.com+a/b/c': {
@@ -822,7 +833,7 @@ var parseTests = {
     query: '@c'
   },
 
-  'http://a\r" \t\n<\'b:b@c\r\nd/e?f':{
+  'http://a\r" \t\n<\'b:b@c\r\nd/e?f': {
     protocol: 'http:',
     slashes: true,
     auth: 'a\r" \t\n<\'b:b',
@@ -1129,7 +1140,7 @@ var formatTests = {
 
   // `#`,`?` in path
   '/path/to/%%23%3F+=&.txt?foo=theA1#bar': {
-    href : '/path/to/%%23%3F+=&.txt?foo=theA1#bar',
+    href: '/path/to/%%23%3F+=&.txt?foo=theA1#bar',
     pathname: '/path/to/%#?+=&.txt',
     query: {
       foo: 'theA1'
@@ -1139,7 +1150,7 @@ var formatTests = {
 
   // `#`,`?` in path + `#` in query
   '/path/to/%%23%3F+=&.txt?foo=the%231#bar': {
-    href : '/path/to/%%23%3F+=&.txt?foo=the%231#bar',
+    href: '/path/to/%%23%3F+=&.txt?foo=the%231#bar',
     pathname: '/path/to/%#?+=&.txt',
     query: {
       foo: 'the#1'
@@ -1165,6 +1176,30 @@ var formatTests = {
     hash: '#frag',
     search: '?abc=the#1?&foo=bar',
     pathname: '/fooA100%mBr',
+  },
+
+  // multiple `#` in search
+  'http://example.com/?foo=bar%231%232%233&abc=%234%23%235#frag': {
+    href: 'http://example.com/?foo=bar%231%232%233&abc=%234%23%235#frag',
+    protocol: 'http:',
+    slashes: true,
+    host: 'example.com',
+    hostname: 'example.com',
+    hash: '#frag',
+    search: '?foo=bar#1#2#3&abc=#4##5',
+    query: {},
+    pathname: '/'
+  },
+
+  // more than 255 characters in hostname which exceeds the limit
+  [`http://${'a'.repeat(255)}.com/node`]: {
+    href: 'http:///node',
+    protocol: 'http:',
+    slashes: true,
+    host: '',
+    hostname: '',
+    pathname: '/node',
+    path: '/node'
   }
 };
 for (const u in formatTests) {
@@ -1540,6 +1575,11 @@ var relativeTests2 = [
    'http://asdf:qwer@www.example.com',
    'http://diff:auth@www.example.com/'],
 
+  // changing port
+  ['https://example.com:81/',
+   'https://example.com:82/',
+   'https://example.com:81/'],
+
   // https://github.com/nodejs/node/issues/1435
   ['https://another.host.com/',
    'https://user:password@example.org/',
@@ -1553,6 +1593,9 @@ var relativeTests2 = [
   ['mailto:another.host.com',
    'mailto:user@example.org',
    'mailto:another.host.com'],
+  ['https://example.com/foo',
+   'https://user:password@example.com',
+   'https://user:password@example.com/foo'],
 ];
 relativeTests2.forEach(function(relativeTest) {
   const a = url.resolve(relativeTest[1], relativeTest[0]);
@@ -1621,5 +1664,5 @@ var throws = [
 for (let i = 0; i < throws.length; i++) {
   assert.throws(function() { url.format(throws[i]); }, TypeError);
 }
-assert(url.format('') === '');
-assert(url.format({}) === '');
+assert.strictEqual(url.format(''), '');
+assert.strictEqual(url.format({}), '');

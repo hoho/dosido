@@ -1,8 +1,6 @@
 /**
  * @fileoverview Restrict usage of duplicate imports.
  * @author Simen Bekkhus
- * @copyright 2016 Simen Bekkhus. All rights reserved.
- * See LICENSE file in root directory for full license.
  */
 "use strict";
 
@@ -38,9 +36,12 @@ function getValue(node) {
 function checkAndReport(context, node, value, array, message) {
     if (array.indexOf(value) !== -1) {
         context.report({
-            node: node,
-            message: "'{{module}}' " + message,
-            data: {module: value}
+            node,
+            message: "'{{module}}' {{message}}",
+            data: {
+                module: value,
+                message
+            }
         });
     }
 }
@@ -62,7 +63,7 @@ function checkAndReport(context, node, value, array, message) {
  */
 function handleImports(context, includeExports, importsInFile, exportsInFile) {
     return function(node) {
-        var value = getValue(node);
+        const value = getValue(node);
 
         if (value) {
             checkAndReport(context, node, value, importsInFile, "import is duplicated.");
@@ -87,7 +88,7 @@ function handleImports(context, includeExports, importsInFile, exportsInFile) {
  */
 function handleExports(context, importsInFile, exportsInFile) {
     return function(node) {
-        var value = getValue(node);
+        const value = getValue(node);
 
         if (value) {
             checkAndReport(context, node, value, exportsInFile, "export is duplicated.");
@@ -98,29 +99,39 @@ function handleExports(context, importsInFile, exportsInFile) {
     };
 }
 
-module.exports = function(context) {
-    var includeExports = (context.options[0] || {}).includeExports,
-        importsInFile = [],
-        exportsInFile = [];
+module.exports = {
+    meta: {
+        docs: {
+            description: "disallow duplicate module imports",
+            category: "ECMAScript 6",
+            recommended: false
+        },
 
-    var handlers = {
-        "ImportDeclaration": handleImports(context, includeExports, importsInFile, exportsInFile)
-    };
-
-    if (includeExports) {
-        handlers.ExportNamedDeclaration = handleExports(context, importsInFile, exportsInFile);
-        handlers.ExportAllDeclaration = handleExports(context, importsInFile, exportsInFile);
-    }
-
-    return handlers;
-};
-
-module.exports.schema = [{
-    "type": "object",
-    "properties": {
-        "includeExports": {
-            "type": "boolean"
-        }
+        schema: [{
+            type: "object",
+            properties: {
+                includeExports: {
+                    type: "boolean"
+                }
+            },
+            additionalProperties: false
+        }]
     },
-    "additionalProperties": false
-}];
+
+    create(context) {
+        const includeExports = (context.options[0] || {}).includeExports,
+            importsInFile = [],
+            exportsInFile = [];
+
+        const handlers = {
+            ImportDeclaration: handleImports(context, includeExports, importsInFile, exportsInFile)
+        };
+
+        if (includeExports) {
+            handlers.ExportNamedDeclaration = handleExports(context, importsInFile, exportsInFile);
+            handlers.ExportAllDeclaration = handleExports(context, importsInFile, exportsInFile);
+        }
+
+        return handlers;
+    }
+};

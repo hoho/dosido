@@ -73,6 +73,27 @@ testBufs('a\u0234b\u0235c\u0236', 4, 1, 'binary');
 testBufs('a\u0234b\u0235c\u0236', 12, 1, 'binary');
 
 
+// LATIN1
+testBufs('abc', 'latin1');
+testBufs('\u0222aa', 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 'latin1');
+testBufs('abc', 4, 'latin1');
+testBufs('abc', 5, 'latin1');
+testBufs('abc', SIZE, 'latin1');
+testBufs('\u0222aa', 2, 'latin1');
+testBufs('\u0222aa', 8, 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 4, 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 12, 'latin1');
+testBufs('abc', 4, -1, 'latin1');
+testBufs('abc', 4, 1, 'latin1');
+testBufs('abc', 5, 1, 'latin1');
+testBufs('\u0222aa', 2, -1, 'latin1');
+testBufs('\u0222aa', 8, 1, 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 4, -1, 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 4, 1, 'latin1');
+testBufs('a\u0234b\u0235c\u0236', 12, 1, 'latin1');
+
+
 // UCS2
 testBufs('abc', 'ucs2');
 testBufs('\u0222aa', 'ucs2');
@@ -245,4 +266,51 @@ function testBufs(string, offset, length, encoding) {
   // Swap bytes on BE archs for ucs2 encoding.
   assert.deepStrictEqual(buf1.fill.apply(buf1, arguments),
                          writeToFill.apply(null, arguments));
+}
+
+// Make sure these throw.
+assert.throws(() => Buffer.allocUnsafe(8).fill('a', -1));
+assert.throws(() => Buffer.allocUnsafe(8).fill('a', 0, 9));
+
+// Make sure this doesn't hang indefinitely.
+Buffer.allocUnsafe(8).fill('');
+Buffer.alloc(8, '');
+
+{
+  const buf = Buffer.alloc(64, 10);
+  for (let i = 0; i < buf.length; i++)
+    assert.strictEqual(buf[i], 10);
+
+  buf.fill(11, 0, buf.length >> 1);
+  for (let i = 0; i < buf.length >> 1; i++)
+    assert.strictEqual(buf[i], 11);
+  for (let i = (buf.length >> 1) + 1; i < buf.length; i++)
+    assert.strictEqual(buf[i], 10);
+
+  buf.fill('h');
+  for (let i = 0; i < buf.length; i++)
+    assert.strictEqual('h'.charCodeAt(0), buf[i]);
+
+  buf.fill(0);
+  for (let i = 0; i < buf.length; i++)
+    assert.strictEqual(0, buf[i]);
+
+  buf.fill(null);
+  for (let i = 0; i < buf.length; i++)
+    assert.strictEqual(0, buf[i]);
+
+  buf.fill(1, 16, 32);
+  for (let i = 0; i < 16; i++)
+    assert.strictEqual(0, buf[i]);
+  for (let i = 16; i < 32; i++)
+    assert.strictEqual(1, buf[i]);
+  for (let i = 32; i < buf.length; i++)
+    assert.strictEqual(0, buf[i]);
+}
+
+{
+  const buf = Buffer.alloc(10, 'abc');
+  assert.strictEqual(buf.toString(), 'abcabcabca');
+  buf.fill('է');
+  assert.strictEqual(buf.toString(), 'էէէէէ');
 }

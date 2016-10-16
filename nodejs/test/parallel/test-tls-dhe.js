@@ -3,14 +3,14 @@ var common = require('../common');
 var assert = require('assert');
 
 if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
+  common.skip('missing crypto');
   return;
 }
 var tls = require('tls');
 
 var spawn = require('child_process').spawn;
 var fs = require('fs');
-var key =  fs.readFileSync(common.fixturesDir + '/keys/agent2-key.pem');
+var key = fs.readFileSync(common.fixturesDir + '/keys/agent2-key.pem');
 var cert = fs.readFileSync(common.fixturesDir + '/keys/agent2-cert.pem');
 var nsuccess = 0;
 var ntests = 0;
@@ -40,8 +40,8 @@ function test(keylen, expectedCipher, cb) {
     if (cb) cb();
   });
 
-  server.listen(common.PORT, '127.0.0.1', function() {
-    var args = ['s_client', '-connect', '127.0.0.1:' + common.PORT,
+  server.listen(0, '127.0.0.1', function() {
+    var args = ['s_client', '-connect', `127.0.0.1:${this.address().port}`,
                 '-cipher', ciphers];
 
     // for the performance and stability issue in s_client on Windows
