@@ -225,7 +225,7 @@ ngx_create_hashed_filename(ngx_path_t *path, u_char *file, size_t len)
 
     file[path->name.len + path->len]  = '/';
 
-    for (n = 0; n < 3; n++) {
+    for (n = 0; n < NGX_MAX_PATH_LEVEL; n++) {
         level = path->level[n];
 
         if (level == 0) {
@@ -249,7 +249,7 @@ ngx_create_path(ngx_file_t *file, ngx_path_t *path)
 
     pos = path->name.len;
 
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < NGX_MAX_PATH_LEVEL; i++) {
         if (path->level[i] == 0) {
             break;
         }
@@ -399,6 +399,8 @@ char *
 ngx_conf_merge_path_value(ngx_conf_t *cf, ngx_path_t **path, ngx_path_t *prev,
     ngx_path_init_t *init)
 {
+    ngx_uint_t  i;
+
     if (*path) {
         return NGX_CONF_OK;
     }
@@ -419,13 +421,10 @@ ngx_conf_merge_path_value(ngx_conf_t *cf, ngx_path_t **path, ngx_path_t *prev,
         return NGX_CONF_ERROR;
     }
 
-    (*path)->level[0] = init->level[0];
-    (*path)->level[1] = init->level[1];
-    (*path)->level[2] = init->level[2];
-
-    (*path)->len = init->level[0] + (init->level[0] ? 1 : 0)
-                   + init->level[1] + (init->level[1] ? 1 : 0)
-                   + init->level[2] + (init->level[2] ? 1 : 0);
+    for (i = 0; i < NGX_MAX_PATH_LEVEL; i++) {
+        (*path)->level[i] = init->level[i];
+        (*path)->len += init->level[i] + (init->level[i] ? 1 : 0);
+    }
 
     if (ngx_add_path(cf, path) != NGX_OK) {
         return NGX_CONF_ERROR;
@@ -442,7 +441,7 @@ ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     u_char      *p;
     ngx_str_t   *value;
-    ngx_uint_t   i, right, shift, *access;
+    ngx_uint_t   i, right, shift, *access, user;
 
     access = (ngx_uint_t *) (confp + cmd->offset);
 
@@ -452,7 +451,8 @@ ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    *access = 0600;
+    *access = 0;
+    user = 0600;
 
     for (i = 1; i < cf->args->nelts; i++) {
 
@@ -461,6 +461,7 @@ ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         if (ngx_strncmp(p, "user:", sizeof("user:") - 1) == 0) {
             shift = 6;
             p += sizeof("user:") - 1;
+            user = 0;
 
         } else if (ngx_strncmp(p, "group:", sizeof("group:") - 1) == 0) {
             shift = 3;
@@ -486,6 +487,8 @@ ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
         *access |= right << shift;
     }
+
+    *access |= user;
 
     return NGX_CONF_OK;
 
@@ -518,7 +521,7 @@ ngx_add_path(ngx_conf_t *cf, ngx_path_t **slot)
                 return NGX_ERROR;
             }
 
-            for (n = 0; n < 3; n++) {
+            for (n = 0; n < NGX_MAX_PATH_LEVEL; n++) {
                 if (p[i]->level[n] != path->level[n]) {
                     if (path->conf_file == NULL) {
                         if (p[i]->conf_file == NULL) {

@@ -101,7 +101,7 @@ ngx_http_file_cache_init(ngx_shm_zone_t *shm_zone, void *data)
             return NGX_ERROR;
         }
 
-        for (n = 0; n < 3; n++) {
+        for (n = 0; n < NGX_MAX_PATH_LEVEL; n++) {
             if (cache->path->level[n] != ocache->path->level[n]) {
                 ngx_log_error(NGX_LOG_EMERG, shm_zone->shm.log, 0,
                               "cache \"%V\" had previously different levels",
@@ -1403,6 +1403,7 @@ ngx_http_file_cache_update(ngx_http_request_t *r, ngx_temp_file_t *tf)
     ngx_shmtx_lock(&cache->shpool->mutex);
 
     c->node->count--;
+    c->node->error = 0;
     c->node->uniq = uniq;
     c->node->body_start = c->body_start;
 
@@ -1758,6 +1759,7 @@ ngx_http_file_cache_expire(ngx_http_file_cache_t *cache)
     size_t                       len;
     time_t                       now, wait;
     ngx_path_t                  *path;
+    ngx_msec_t                   elapsed;
     ngx_queue_t                 *q;
     ngx_http_file_cache_node_t  *fcn;
     u_char                       key[2 * NGX_HTTP_CACHE_KEY_LEN];
@@ -1809,7 +1811,7 @@ ngx_http_file_cache_expire(ngx_http_file_cache_t *cache)
 
         if (fcn->count == 0) {
             ngx_http_file_cache_delete(cache, q, name);
-            continue;
+            goto next;
         }
 
         if (fcn->deleting) {
@@ -1835,6 +1837,22 @@ ngx_http_file_cache_expire(ngx_http_file_cache_t *cache)
         ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,
                       "ignore long locked inactive cache entry %*s, count:%d",
                       (size_t) 2 * NGX_HTTP_CACHE_KEY_LEN, key, fcn->count);
+
+next:
+
+        if (++cache->files >= cache->manager_files) {
+            wait = 0;
+            break;
+        }
+
+        ngx_time_update();
+
+        elapsed = ngx_abs((ngx_msec_int_t) (ngx_current_msec - cache->last));
+
+        if (elapsed >= cache->manager_threshold) {
+            wait = 0;
+            break;
+        }
     }
 
     ngx_shmtx_unlock(&cache->shpool->mutex);
@@ -1896,19 +1914,24 @@ ngx_http_file_cache_delete(ngx_http_file_cache_t *cache, ngx_queue_t *q,
 }
 
 
-static time_t
+static ngx_msec_t
 ngx_http_file_cache_manager(void *data)
 {
     ngx_http_file_cache_t  *cache = data;
 
     off_t       size;
     time_t      next, wait;
+    ngx_msec_t  elapsed;
     ngx_uint_t  count, watermark;
-
-    next = ngx_http_file_cache_expire(cache);
 
     cache->last = ngx_current_msec;
     cache->files = 0;
+
+    next = ngx_http_file_cache_expire(cache);
+
+    if (next == 0) {
+        return cache->manager_sleep;
+    }
 
     for ( ;; ) {
         ngx_shmtx_lock(&cache->shpool->mutex);
@@ -1924,17 +1947,29 @@ ngx_http_file_cache_manager(void *data)
                        size, count, (ngx_int_t) watermark);
 
         if (size < cache->max_size && count < watermark) {
-            return next;
+            return (ngx_msec_t) next * 1000;
         }
 
         wait = ngx_http_file_cache_forced_expire(cache);
 
         if (wait > 0) {
-            return wait;
+            return (ngx_msec_t) wait * 1000;
         }
 
         if (ngx_quit || ngx_terminate) {
-            return next;
+            return (ngx_msec_t) next * 1000;
+        }
+
+        if (++cache->files >= cache->manager_files) {
+            return cache->manager_sleep;
+        }
+
+        ngx_time_update();
+
+        elapsed = ngx_abs((ngx_msec_int_t) (ngx_current_msec - cache->last));
+
+        if (elapsed >= cache->manager_threshold) {
+            return cache->manager_sleep;
         }
     }
 }
@@ -2210,8 +2245,9 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     size_t                  len;
     ssize_t                 size;
     ngx_str_t               s, name, *value;
-    ngx_int_t               loader_files;
-    ngx_msec_t              loader_sleep, loader_threshold;
+    ngx_int_t               loader_files, manager_files;
+    ngx_msec_t              loader_sleep, manager_sleep, loader_threshold,
+                            manager_threshold;
     ngx_uint_t              i, n, use_temp_path;
     ngx_array_t            *caches;
     ngx_http_file_cache_t  *cache, **ce;
@@ -2229,9 +2265,14 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     use_temp_path = 1;
 
     inactive = 600;
+
     loader_files = 100;
     loader_sleep = 50;
     loader_threshold = 200;
+
+    manager_files = 100;
+    manager_sleep = 50;
+    manager_threshold = 200;
 
     name.len = 0;
     size = 0;
@@ -2256,7 +2297,7 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             p = value[i].data + 7;
             last = value[i].data + value[i].len;
 
-            for (n = 0; n < 3 && p < last; n++) {
+            for (n = 0; n < NGX_MAX_PATH_LEVEL && p < last; n++) {
 
                 if (*p > '0' && *p < '3') {
 
@@ -2267,7 +2308,7 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                         break;
                     }
 
-                    if (*p++ == ':' && n < 2 && p != last) {
+                    if (*p++ == ':' && n < NGX_MAX_PATH_LEVEL - 1 && p < last) {
                         continue;
                     }
 
@@ -2277,7 +2318,7 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                 goto invalid_levels;
             }
 
-            if (cache->path->len < 10 + 3) {
+            if (cache->path->len < 10 + NGX_MAX_PATH_LEVEL) {
                 continue;
             }
 
@@ -2404,6 +2445,48 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             continue;
         }
 
+        if (ngx_strncmp(value[i].data, "manager_files=", 14) == 0) {
+
+            manager_files = ngx_atoi(value[i].data + 14, value[i].len - 14);
+            if (manager_files == NGX_ERROR) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid manager_files value \"%V\"", &value[i]);
+                return NGX_CONF_ERROR;
+            }
+
+            continue;
+        }
+
+        if (ngx_strncmp(value[i].data, "manager_sleep=", 14) == 0) {
+
+            s.len = value[i].len - 14;
+            s.data = value[i].data + 14;
+
+            manager_sleep = ngx_parse_time(&s, 0);
+            if (manager_sleep == (ngx_msec_t) NGX_ERROR) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid manager_sleep value \"%V\"", &value[i]);
+                return NGX_CONF_ERROR;
+            }
+
+            continue;
+        }
+
+        if (ngx_strncmp(value[i].data, "manager_threshold=", 18) == 0) {
+
+            s.len = value[i].len - 18;
+            s.data = value[i].data + 18;
+
+            manager_threshold = ngx_parse_time(&s, 0);
+            if (manager_threshold == (ngx_msec_t) NGX_ERROR) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid manager_threshold value \"%V\"", &value[i]);
+                return NGX_CONF_ERROR;
+            }
+
+            continue;
+        }
+
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid parameter \"%V\"", &value[i]);
         return NGX_CONF_ERROR;
@@ -2424,6 +2507,9 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     cache->loader_files = loader_files;
     cache->loader_sleep = loader_sleep;
     cache->loader_threshold = loader_threshold;
+    cache->manager_files = manager_files;
+    cache->manager_sleep = manager_sleep;
+    cache->manager_threshold = manager_threshold;
 
     if (ngx_add_path(cf, &cache->path) != NGX_OK) {
         return NGX_CONF_ERROR;
@@ -2449,7 +2535,7 @@ ngx_http_file_cache_set_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ngx_memcpy(p, "/temp", sizeof("/temp"));
 
         ngx_memcpy(&cache->temp_path->level, &cache->path->level,
-                   3 * sizeof(size_t));
+                   NGX_MAX_PATH_LEVEL * sizeof(size_t));
 
         cache->temp_path->len = cache->path->len;
         cache->temp_path->conf_file = cf->conf_file->file.name.data;
