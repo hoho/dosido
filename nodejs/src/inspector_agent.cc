@@ -4,6 +4,7 @@
 #include "env.h"
 #include "env-inl.h"
 #include "node.h"
+#include "node_crypto.h"
 #include "node_mutex.h"
 #include "node_version.h"
 #include "v8-platform.h"
@@ -19,18 +20,12 @@
 
 #include "libplatform/libplatform.h"
 
+#include <map>
+#include <sstream>
 #include <string.h>
 #include <utility>
 #include <vector>
 
-// We need pid to use as ID with Chrome
-#if defined(_MSC_VER)
-#include <direct.h>
-#include <io.h>
-#define getpid GetCurrentProcessId
-#else
-#include <unistd.h>  // setuid, getuid
-#endif
 
 namespace node {
 namespace inspector {
@@ -39,27 +34,40 @@ namespace {
 const char TAG_CONNECT[] = "#connect";
 const char TAG_DISCONNECT[] = "#disconnect";
 
-const char DEVTOOLS_PATH[] = "/node";
-const char DEVTOOLS_HASH[] = V8_INSPECTOR_REVISION;
-
 static const uint8_t PROTOCOL_JSON[] = {
 #include "v8_inspector_protocol_json.h"  // NOLINT(build/include_order)
 };
 
-void PrintDebuggerReadyMessage(int port) {
+std::string GetWsUrl(int port, const std::string& id) {
+  char buf[1024];
+  snprintf(buf, sizeof(buf), "localhost:%d/%s", port, id.c_str());
+  return buf;
+}
+
+void PrintDebuggerReadyMessage(int port, const std::string& id) {
   fprintf(stderr, "Debugger listening on port %d.\n"
     "Warning: This is an experimental feature and could change at any time.\n"
     "To start debugging, open the following URL in Chrome:\n"
     "    chrome-devtools://devtools/remote/serve_file/"
-    "@%s/inspector.html?"
-    "experiments=true&v8only=true&ws=localhost:%d/node\n",
-      port, DEVTOOLS_HASH, port);
+    "@" V8_INSPECTOR_REVISION "/inspector.html?"
+    "experiments=true&v8only=true&ws=%s\n",
+      port, GetWsUrl(port, id).c_str());
   fflush(stderr);
 }
 
-bool AcceptsConnection(InspectorSocket* socket, const std::string& path) {
-  return StringEqualNoCaseN(path.c_str(), DEVTOOLS_PATH,
-                            sizeof(DEVTOOLS_PATH) - 1);
+std::string MapToString(const std::map<std::string, std::string> object) {
+  std::ostringstream json;
+  json << "[ {\n";
+  bool first = true;
+  for (const auto& name_value : object) {
+    if (!first)
+      json << ",\n";
+    json << "  \"" << name_value.first << "\": \"";
+    json << name_value.second << "\"";
+    first = false;
+  }
+  json << "\n} ]";
+  return json.str();
 }
 
 void Escape(std::string* string) {
@@ -83,33 +91,23 @@ void OnBufferAlloc(uv_handle_t* handle, size_t len, uv_buf_t* buf) {
   buf->len = len;
 }
 
-void SendHttpResponse(InspectorSocket* socket, const char* response,
-                      size_t len) {
+void SendHttpResponse(InspectorSocket* socket, const std::string& response) {
   const char HEADERS[] = "HTTP/1.0 200 OK\r\n"
                          "Content-Type: application/json; charset=UTF-8\r\n"
                          "Cache-Control: no-cache\r\n"
                          "Content-Length: %zu\r\n"
                          "\r\n";
   char header[sizeof(HEADERS) + 20];
-  int header_len = snprintf(header, sizeof(header), HEADERS, len);
+  int header_len = snprintf(header, sizeof(header), HEADERS, response.size());
   inspector_write(socket, header, header_len);
-  inspector_write(socket, response, len);
+  inspector_write(socket, response.data(), response.size());
 }
 
 void SendVersionResponse(InspectorSocket* socket) {
-  const char VERSION_RESPONSE_TEMPLATE[] =
-      "[ {"
-      "  \"Browser\": \"node.js/%s\","
-      "  \"Protocol-Version\": \"1.1\","
-      "  \"User-Agent\": \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-            "(KHTML, like Gecko) Chrome/45.0.2446.0 Safari/537.36\","
-      "  \"WebKit-Version\": \"537.36 (@198122)\""
-      "} ]";
-  char buffer[sizeof(VERSION_RESPONSE_TEMPLATE) + 128];
-  size_t len = snprintf(buffer, sizeof(buffer), VERSION_RESPONSE_TEMPLATE,
-                        NODE_VERSION);
-  ASSERT_LT(len, sizeof(buffer));
-  SendHttpResponse(socket, buffer, len);
+  std::map<std::string, std::string> response;
+  response["Browser"] = "node.js/" NODE_VERSION;
+  response["Protocol-Version"] = "1.1";
+  SendHttpResponse(socket, MapToString(response));
 }
 
 std::string GetProcessTitle() {
@@ -123,49 +121,6 @@ std::string GetProcessTitle() {
   }
 }
 
-void SendTargentsListResponse(InspectorSocket* socket,
-                              const std::string& script_name_,
-                              const std::string& script_path_,
-                              int port) {
-  const char LIST_RESPONSE_TEMPLATE[] =
-      "[ {"
-      "  \"description\": \"node.js instance\","
-      "  \"devtoolsFrontendUrl\": "
-            "\"https://chrome-devtools-frontend.appspot.com/serve_file/"
-            "@%s/inspector.html?experiments=true&v8only=true"
-            "&ws=localhost:%d%s\","
-      "  \"faviconUrl\": \"https://nodejs.org/static/favicon.ico\","
-      "  \"id\": \"%d\","
-      "  \"title\": \"%s\","
-      "  \"type\": \"node\","
-      "  \"url\": \"%s\","
-      "  \"webSocketDebuggerUrl\": \"ws://localhost:%d%s\""
-      "} ]";
-  std::string title = script_name_.empty() ? GetProcessTitle() : script_name_;
-
-  // This attribute value is a "best effort" URL that is passed as a JSON
-  // string. It is not guaranteed to resolve to a valid resource.
-  std::string url = "file://" + script_path_;
-
-  Escape(&title);
-  Escape(&url);
-
-  const int NUMERIC_FIELDS_LENGTH = 5 * 2 + 20;  // 2 x port + 1 x pid (64 bit)
-
-  int buf_len = sizeof(LIST_RESPONSE_TEMPLATE) + sizeof(DEVTOOLS_HASH) +
-                sizeof(DEVTOOLS_PATH) * 2 + title.length() +
-                url.length() + NUMERIC_FIELDS_LENGTH;
-  std::string buffer(buf_len, '\0');
-
-  int len = snprintf(&buffer[0], buf_len, LIST_RESPONSE_TEMPLATE,
-                     DEVTOOLS_HASH, port, DEVTOOLS_PATH, getpid(),
-                     title.c_str(), url.c_str(),
-                     port, DEVTOOLS_PATH);
-  buffer.resize(len);
-  ASSERT_LT(len, buf_len);  // Buffer should be big enough!
-  SendHttpResponse(socket, buffer.data(), len);
-}
-
 void SendProtocolJson(InspectorSocket* socket) {
   z_stream strm;
   strm.zalloc = Z_NULL;
@@ -176,15 +131,15 @@ void SendProtocolJson(InspectorSocket* socket) {
       PROTOCOL_JSON[0] * 0x10000u +
       PROTOCOL_JSON[1] * 0x100u +
       PROTOCOL_JSON[2];
-  strm.next_in = PROTOCOL_JSON + 3;
+  strm.next_in = const_cast<uint8_t*>(PROTOCOL_JSON + 3);
   strm.avail_in = sizeof(PROTOCOL_JSON) - 3;
-  std::vector<char> data(kDecompressedSize);
+  std::string data(kDecompressedSize, '\0');
   strm.next_out = reinterpret_cast<Byte*>(&data[0]);
   strm.avail_out = data.size();
   CHECK_EQ(Z_STREAM_END, inflate(&strm, Z_FINISH));
   CHECK_EQ(0, strm.avail_out);
   CHECK_EQ(Z_OK, inflateEnd(&strm));
-  SendHttpResponse(socket, &data[0], data.size());
+  SendHttpResponse(socket, data);
 }
 
 const char* match_path_segment(const char* path, const char* expected) {
@@ -196,29 +151,32 @@ const char* match_path_segment(const char* path, const char* expected) {
   return nullptr;
 }
 
-bool RespondToGet(InspectorSocket* socket, const std::string& script_name_,
-                  const std::string& script_path_, const std::string& path,
-                  int port) {
-  const char* command = match_path_segment(path.c_str(), "/json");
-  if (command == nullptr)
-    return false;
+// UUID RFC: https://www.ietf.org/rfc/rfc4122.txt
+// Used ver 4 - with numbers
+std::string GenerateID() {
+  uint16_t buffer[8];
+  CHECK(crypto::EntropySource(reinterpret_cast<unsigned char*>(buffer),
+                              sizeof(buffer)));
 
-  if (match_path_segment(command, "list") || command[0] == '\0') {
-    SendTargentsListResponse(socket, script_name_, script_path_, port);
-  } else if (match_path_segment(command, "protocol")) {
-    SendProtocolJson(socket);
-  } else if (match_path_segment(command, "version")) {
-    SendVersionResponse(socket);
-  } else {
-    const char* pid = match_path_segment(command, "activate");
-    if (pid == nullptr || atoi(pid) != getpid())
-      return false;
-    const char TARGET_ACTIVATED[] = "Target activated";
-    SendHttpResponse(socket, TARGET_ACTIVATED, sizeof(TARGET_ACTIVATED) - 1);
-  }
-  return true;
+  char uuid[256];
+  snprintf(uuid, sizeof(uuid), "%04x%04x-%04x-%04x-%04x-%04x%04x%04x",
+           buffer[0],  // time_low
+           buffer[1],  // time_mid
+           buffer[2],  // time_low
+           (buffer[3] & 0x0fff) | 0x4000,  // time_hi_and_version
+           (buffer[4] & 0x3fff) | 0x8000,  // clk_seq_hi clk_seq_low
+           buffer[5],  // node
+           buffer[6],
+           buffer[7]);
+  return uuid;
 }
 
+// std::to_string is not available on Smart OS and ARM flavours
+const std::string to_string(uint64_t number) {
+  std::ostringstream result;
+  result << number;
+  return result.str();
+}
 }  // namespace
 
 
@@ -268,6 +226,8 @@ class AgentImpl {
   void WaitForFrontendMessage();
   void NotifyMessageReceived();
   State ToState(State state);
+  void SendTargentsListResponse(InspectorSocket* socket);
+  bool RespondToGet(InspectorSocket* socket, const std::string& path);
 
   uv_sem_t start_sem_;
   ConditionVariable incoming_message_cond_;
@@ -294,6 +254,7 @@ class AgentImpl {
 
   std::string script_name_;
   std::string script_path_;
+  const std::string id_;
 
   friend class ChannelImpl;
   friend class DispatchOnInspectorBackendTask;
@@ -431,7 +392,8 @@ AgentImpl::AgentImpl(Environment* env) : port_(0),
                                          platform_(nullptr),
                                          dispatching_messages_(false),
                                          frontend_session_id_(0),
-                                         backend_session_id_(0) {
+                                         backend_session_id_(0),
+                                         id_(GenerateID()) {
   CHECK_EQ(0, uv_sem_init(&start_sem_, 0));
   memset(&io_thread_req_, 0, sizeof(io_thread_req_));
   CHECK_EQ(0, uv_async_init(env->event_loop(), data_written_, nullptr));
@@ -639,10 +601,10 @@ bool AgentImpl::OnInspectorHandshakeIO(InspectorSocket* socket,
   AgentImpl* agent = static_cast<AgentImpl*>(socket->data);
   switch (state) {
   case kInspectorHandshakeHttpGet:
-    return RespondToGet(socket, agent->script_name_, agent->script_path_, path,
-                        agent->port_);
+    return agent->RespondToGet(socket, path);
   case kInspectorHandshakeUpgrading:
-    return AcceptsConnection(socket, path);
+    return path.length() == agent->id_.length() + 1 &&
+           path.find(agent->id_) == 1;
   case kInspectorHandshakeUpgraded:
     agent->OnInspectorConnectionIO(socket);
     return true;
@@ -682,6 +644,54 @@ void AgentImpl::OnRemoteDataIO(InspectorSocket* socket,
   if (buf) {
     delete[] buf->base;
   }
+}
+
+void AgentImpl::SendTargentsListResponse(InspectorSocket* socket) {
+  std::map<std::string, std::string> response;
+  response["description"] = "node.js instance";
+  response["faviconUrl"] = "https://nodejs.org/static/favicon.ico";
+  response["id"] = id_;
+  response["title"] = script_name_.empty() ? GetProcessTitle() : script_name_;
+  Escape(&response["title"]);
+  response["type"] = "node";
+  // This attribute value is a "best effort" URL that is passed as a JSON
+  // string. It is not guaranteed to resolve to a valid resource.
+  response["url"] = "file://" + script_path_;
+  Escape(&response["url"]);
+
+  if (!client_socket_) {
+    std::string address = GetWsUrl(port_, id_);
+
+    std::ostringstream frontend_url;
+    frontend_url << "https://chrome-devtools-frontend.appspot.com/serve_file/@";
+    frontend_url << V8_INSPECTOR_REVISION;
+    frontend_url << "/inspector.html?experiments=true&v8only=true&ws=";
+    frontend_url << address;
+
+    response["devtoolsFrontendUrl"] += frontend_url.str();
+    response["webSocketDebuggerUrl"] = "ws://" + address;
+  }
+  SendHttpResponse(socket, MapToString(response));
+}
+
+bool AgentImpl::RespondToGet(InspectorSocket* socket, const std::string& path) {
+  const char* command = match_path_segment(path.c_str(), "/json");
+  if (command == nullptr)
+    return false;
+
+  if (match_path_segment(command, "list") || command[0] == '\0') {
+    SendTargentsListResponse(socket);
+  } else if (match_path_segment(command, "protocol")) {
+    SendProtocolJson(socket);
+  } else if (match_path_segment(command, "version")) {
+    SendVersionResponse(socket);
+  } else {
+    const char* pid = match_path_segment(command, "activate");
+    if (pid != id_)
+      return false;
+    SendHttpResponse(socket, "Target activated");
+  }
+  return true;
 }
 
 // static
@@ -732,7 +742,7 @@ void AgentImpl::WorkerRunIO() {
     uv_sem_post(&start_sem_);
     return;
   }
-  PrintDebuggerReadyMessage(port_);
+  PrintDebuggerReadyMessage(port_, id_);
   if (!wait_) {
     uv_sem_post(&start_sem_);
   }
@@ -816,7 +826,7 @@ void AgentImpl::DispatchMessages() {
         if (shutting_down_) {
           state_ = State::kDone;
         } else {
-          PrintDebuggerReadyMessage(port_);
+          PrintDebuggerReadyMessage(port_, id_);
           state_ = State::kAccepting;
         }
         inspector_->quitMessageLoopOnPause();

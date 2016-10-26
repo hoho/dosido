@@ -259,7 +259,7 @@ function _addListener(target, type, listener, prepend) {
         const w = new Error('Possible EventEmitter memory leak detected. ' +
                             `${existing.length} ${type} listeners added. ` +
                             'Use emitter.setMaxListeners() to increase limit');
-        w.name = 'Warning';
+        w.name = 'MaxListenersExceededWarning';
         w.emitter = target;
         w.type = type;
         w.count = existing.length;
@@ -430,9 +430,9 @@ EventEmitter.prototype.listeners = function listeners(type) {
     if (!evlistener)
       ret = [];
     else if (typeof evlistener === 'function')
-      ret = [evlistener];
+      ret = [evlistener.listener || evlistener];
     else
-      ret = arrayClone(evlistener, evlistener.length);
+      ret = unwrapListeners(evlistener);
   }
 
   return ret;
@@ -479,4 +479,12 @@ function arrayClone(arr, i) {
   while (i--)
     copy[i] = arr[i];
   return copy;
+}
+
+function unwrapListeners(arr) {
+  const ret = new Array(arr.length);
+  for (var i = 0; i < ret.length; ++i) {
+    ret[i] = arr[i].listener || arr[i];
+  }
+  return ret;
 }

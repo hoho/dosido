@@ -14,6 +14,10 @@ const Stream = require('stream').Stream;
 const EventEmitter = require('events');
 const FSReqWrap = binding.FSReqWrap;
 const FSEvent = process.binding('fs_event_wrap').FSEvent;
+const internalFS = require('internal/fs');
+const assertEncoding = internalFS.assertEncoding;
+const stringToFlags = internalFS.stringToFlags;
+const SyncWriteStream = internalFS.SyncWriteStream;
 
 Object.defineProperty(exports, 'constants', {
   configurable: false,
@@ -27,62 +31,46 @@ const Writable = Stream.Writable;
 const kMinPoolSpace = 128;
 const kMaxLength = require('buffer').kMaxLength;
 
-const O_APPEND = constants.O_APPEND || 0;
-const O_CREAT = constants.O_CREAT || 0;
-const O_EXCL = constants.O_EXCL || 0;
-const O_RDONLY = constants.O_RDONLY || 0;
-const O_RDWR = constants.O_RDWR || 0;
-const O_SYNC = constants.O_SYNC || 0;
-const O_TRUNC = constants.O_TRUNC || 0;
-const O_WRONLY = constants.O_WRONLY || 0;
-
 const isWindows = process.platform === 'win32';
 
 const DEBUG = process.env.NODE_DEBUG && /fs/.test(process.env.NODE_DEBUG);
 const errnoException = util._errnoException;
 
-var printDeprecation;
-try {
-  printDeprecation = require('internal/util').printDeprecationMessage;
-} catch (e) {
-  if (e.code !== 'MODULE_NOT_FOUND') throw e;
+function getOptions(options, defaultOptions) {
+  if (options === null || options === undefined ||
+      typeof options === 'function') {
+    return defaultOptions;
+  }
 
-  // TODO(ChALkeR): remove this in master after 6.x
-  // This code was based upon internal/util and is required to give users
-  // a grace period before actually breaking modules that re-evaluate fs
-  // sources from context where internal modules are not allowed, e.g.
-  // older versions of graceful-fs module.
+  if (typeof options === 'string') {
+    defaultOptions = util._extend({}, defaultOptions);
+    defaultOptions.encoding = options;
+    options = defaultOptions;
+  } else if (typeof options !== 'object') {
+    throw new TypeError('"options" must be a string or an object, got ' +
+                        typeof options + ' instead.');
+  }
 
-  const prefix = `(${process.release.name}:${process.pid}) `;
-
-  printDeprecation = function(msg, warned) {
-    if (process.noDeprecation)
-      return true;
-
-    if (warned)
-      return warned;
-
-    if (process.throwDeprecation)
-      throw new Error(`${prefix}${msg}`);
-    else if (process.traceDeprecation)
-      console.trace(msg);
-    else
-      console.error(`${prefix}${msg}`);
-
-    return true;
-  };
-  printDeprecation('fs: re-evaluating native module sources is not ' +
-                   'supported. If you are using the graceful-fs module, ' +
-                   'please update it to a more recent version.',
-                    false);
+  if (options.encoding !== 'buffer')
+    assertEncoding(options.encoding);
+  return options;
 }
 
-function throwOptionsError(options) {
-  throw new TypeError('Expected options to be either an object or a string, ' +
-    'but got ' + typeof options + ' instead');
+function copyObject(source, target) {
+  target = arguments.length >= 2 ? target : {};
+  for (const key in source)
+    target[key] = source[key];
+  return target;
 }
 
 function rethrow() {
+  // TODO(thefourtheye) Throw error instead of warning in major version > 7
+  process.emitWarning(
+    'Calling an asynchronous function without callback is deprecated.',
+    'DeprecationWarning',
+    rethrow
+  );
+
   // Only enable in debug mode. A backtrace uses ~1000 bytes of heap space and
   // is fairly slow to generate.
   if (DEBUG) {
@@ -122,12 +110,6 @@ function makeCallback(cb) {
   return function() {
     return cb.apply(null, arguments);
   };
-}
-
-function assertEncoding(encoding) {
-  if (encoding && !Buffer.isEncoding(encoding)) {
-    throw new Error('Unknown encoding: ' + encoding);
-  }
 }
 
 function nullCheck(path, callback) {
@@ -268,26 +250,14 @@ fs.existsSync = function(path) {
   }
 };
 
-fs.readFile = function(path, options, callback_) {
-  var callback = maybeCallback(arguments[arguments.length - 1]);
-
-  if (!options || typeof options === 'function') {
-    options = { encoding: null, flag: 'r' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, flag: 'r' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
-
-  var encoding = options.encoding;
-  assertEncoding(encoding);
-
-  var flag = options.flag || 'r';
+fs.readFile = function(path, options, callback) {
+  callback = maybeCallback(arguments[arguments.length - 1]);
+  options = getOptions(options, { flag: 'r' });
 
   if (!nullCheck(path, callback))
     return;
 
-  var context = new ReadFileContext(callback, encoding);
+  var context = new ReadFileContext(callback, options.encoding);
   context.isUserFd = isFd(path); // file descriptor ownership
   var req = new FSReqWrap();
   req.context = context;
@@ -301,7 +271,7 @@ fs.readFile = function(path, options, callback_) {
   }
 
   binding.open(pathModule._makeLong(path),
-               stringToFlags(flag),
+               stringToFlags(options.flag || 'r'),
                0o666,
                req);
 };
@@ -492,20 +462,9 @@ function tryReadSync(fd, isUserFd, buffer, pos, len) {
 }
 
 fs.readFileSync = function(path, options) {
-  if (!options) {
-    options = { encoding: null, flag: 'r' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, flag: 'r' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
-
-  var encoding = options.encoding;
-  assertEncoding(encoding);
-
-  var flag = options.flag || 'r';
+  options = getOptions(options, { flag: 'r' });
   var isUserFd = isFd(path); // file descriptor ownership
-  var fd = isUserFd ? path : fs.openSync(path, flag, 0o666);
+  var fd = isUserFd ? path : fs.openSync(path, options.flag || 'r', 0o666);
 
   var st = tryStatSync(fd, isUserFd);
   var size = st.isFile() ? st.size : 0;
@@ -549,51 +508,9 @@ fs.readFileSync = function(path, options) {
     buffer = buffer.slice(0, pos);
   }
 
-  if (encoding) buffer = buffer.toString(encoding);
+  if (options.encoding) buffer = buffer.toString(options.encoding);
   return buffer;
 };
-
-
-// Used by binding.open and friends
-function stringToFlags(flag) {
-  // Return early if it's a number
-  if (typeof flag === 'number') {
-    return flag;
-  }
-
-  switch (flag) {
-    case 'r' : return O_RDONLY;
-    case 'rs' : // fall through
-    case 'sr' : return O_RDONLY | O_SYNC;
-    case 'r+' : return O_RDWR;
-    case 'rs+' : // fall through
-    case 'sr+' : return O_RDWR | O_SYNC;
-
-    case 'w' : return O_TRUNC | O_CREAT | O_WRONLY;
-    case 'wx' : // fall through
-    case 'xw' : return O_TRUNC | O_CREAT | O_WRONLY | O_EXCL;
-
-    case 'w+' : return O_TRUNC | O_CREAT | O_RDWR;
-    case 'wx+': // fall through
-    case 'xw+': return O_TRUNC | O_CREAT | O_RDWR | O_EXCL;
-
-    case 'a' : return O_APPEND | O_CREAT | O_WRONLY;
-    case 'ax' : // fall through
-    case 'xa' : return O_APPEND | O_CREAT | O_WRONLY | O_EXCL;
-
-    case 'a+' : return O_APPEND | O_CREAT | O_RDWR;
-    case 'ax+': // fall through
-    case 'xa+': return O_APPEND | O_CREAT | O_RDWR | O_EXCL;
-  }
-
-  throw new Error('Unknown file open flag: ' + flag);
-}
-
-// exported but hidden, only used by test/simple/test-fs-open-flags.js
-Object.defineProperty(exports, '_stringToFlags', {
-  enumerable: false,
-  value: stringToFlags
-});
 
 
 // Yes, the follow could be easily DRYed up but I provide the explicit
@@ -644,10 +561,14 @@ var readWarned = false;
 fs.read = function(fd, buffer, offset, length, position, callback) {
   if (!(buffer instanceof Buffer)) {
     // legacy string interface (fd, length, position, encoding, callback)
-    readWarned = printDeprecation('fs.read\'s legacy String interface ' +
-                                  'is deprecated. Use the Buffer API as ' +
-                                  'mentioned in the documentation instead.',
-                                  readWarned);
+    if (!readWarned) {
+      readWarned = true;
+      process.emitWarning(
+        'fs.read\'s legacy String interface is deprecated. Use the Buffer ' +
+        'API as mentioned in the documentation instead.',
+        'DeprecationWarning');
+    }
+
     const cb = arguments[4];
     const encoding = arguments[3];
 
@@ -704,10 +625,13 @@ fs.readSync = function(fd, buffer, offset, length, position) {
 
   if (!(buffer instanceof Buffer)) {
     // legacy string interface (fd, length, position, encoding, callback)
-    readSyncWarned = printDeprecation('fs.readSync\'s legacy String interface' +
-                                      'is deprecated. Use the Buffer API as ' +
-                                      'mentioned in the documentation instead.',
-                                      readSyncWarned);
+    if (!readSyncWarned) {
+      readSyncWarned = true;
+      process.emitWarning(
+        'fs.readSync\'s legacy String interface is deprecated. Use the ' +
+        'Buffer API as mentioned in the documentation instead.',
+        'DeprecationWarning');
+    }
     legacy = true;
     encoding = arguments[3];
 
@@ -825,7 +749,7 @@ fs.truncate = function(path, len, callback) {
   fs.open(path, 'r+', function(er, fd) {
     if (er) return callback(er);
     var req = new FSReqWrap();
-    req.oncomplete = function ftruncateCb(er) {
+    req.oncomplete = function oncomplete(er) {
       fs.close(fd, function(er2) {
         callback(er || er2);
       });
@@ -924,17 +848,8 @@ fs.mkdirSync = function(path, mode) {
 };
 
 fs.readdir = function(path, options, callback) {
-  options = options || {};
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
-  }
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
-
-  callback = makeCallback(callback);
+  callback = makeCallback(typeof options === 'function' ? options : callback);
+  options = getOptions(options, {});
   if (!nullCheck(path, callback)) return;
   var req = new FSReqWrap();
   req.oncomplete = callback;
@@ -942,11 +857,7 @@ fs.readdir = function(path, options, callback) {
 };
 
 fs.readdirSync = function(path, options) {
-  options = options || {};
-  if (typeof options === 'string')
-    options = {encoding: options};
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
+  options = getOptions(options, {});
   nullCheck(path);
   return binding.readdir(pathModule._makeLong(path), options.encoding);
 };
@@ -988,16 +899,8 @@ fs.statSync = function(path) {
 };
 
 fs.readlink = function(path, options, callback) {
-  options = options || {};
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
-  }
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
-  callback = makeCallback(callback);
+  callback = makeCallback(typeof options === 'function' ? options : callback);
+  options = getOptions(options, {});
   if (!nullCheck(path, callback)) return;
   var req = new FSReqWrap();
   req.oncomplete = callback;
@@ -1005,11 +908,7 @@ fs.readlink = function(path, options, callback) {
 };
 
 fs.readlinkSync = function(path, options) {
-  options = options || {};
-  if (typeof options === 'string')
-    options = {encoding: options};
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
+  options = getOptions(options, {});
   nullCheck(path);
   return binding.readlink(pathModule._makeLong(path), options.encoding);
 };
@@ -1056,24 +955,24 @@ fs.symlinkSync = function(target, path, type) {
                          type);
 };
 
-fs.link = function(srcpath, dstpath, callback) {
+fs.link = function(existingPath, newPath, callback) {
   callback = makeCallback(callback);
-  if (!nullCheck(srcpath, callback)) return;
-  if (!nullCheck(dstpath, callback)) return;
+  if (!nullCheck(existingPath, callback)) return;
+  if (!nullCheck(newPath, callback)) return;
 
   var req = new FSReqWrap();
   req.oncomplete = callback;
 
-  binding.link(pathModule._makeLong(srcpath),
-               pathModule._makeLong(dstpath),
+  binding.link(pathModule._makeLong(existingPath),
+               pathModule._makeLong(newPath),
                req);
 };
 
-fs.linkSync = function(srcpath, dstpath) {
-  nullCheck(srcpath);
-  nullCheck(dstpath);
-  return binding.link(pathModule._makeLong(srcpath),
-                      pathModule._makeLong(dstpath));
+fs.linkSync = function(existingPath, newPath) {
+  nullCheck(existingPath);
+  nullCheck(newPath);
+  return binding.link(pathModule._makeLong(existingPath),
+                      pathModule._makeLong(newPath));
 };
 
 fs.unlink = function(path, callback) {
@@ -1280,20 +1179,10 @@ function writeAll(fd, isUserFd, buffer, offset, length, position, callback_) {
   });
 }
 
-fs.writeFile = function(path, data, options, callback_) {
-  var callback = maybeCallback(arguments[arguments.length - 1]);
-
-  if (!options || typeof options === 'function') {
-    options = { encoding: 'utf8', mode: 0o666, flag: 'w' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, mode: 0o666, flag: 'w' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
-
-  assertEncoding(options.encoding);
-
-  var flag = options.flag || 'w';
+fs.writeFile = function(path, data, options, callback) {
+  callback = maybeCallback(arguments[arguments.length - 1]);
+  options = getOptions(options, { encoding: 'utf8', mode: 0o666, flag: 'w' });
+  const flag = options.flag || 'w';
 
   if (isFd(path)) {
     writeFd(path, true);
@@ -1318,17 +1207,9 @@ fs.writeFile = function(path, data, options, callback_) {
 };
 
 fs.writeFileSync = function(path, data, options) {
-  if (!options) {
-    options = { encoding: 'utf8', mode: 0o666, flag: 'w' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, mode: 0o666, flag: 'w' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
+  options = getOptions(options, { encoding: 'utf8', mode: 0o666, flag: 'w' });
+  const flag = options.flag || 'w';
 
-  assertEncoding(options.encoding);
-
-  var flag = options.flag || 'w';
   var isUserFd = isFd(path); // file descriptor ownership
   var fd = isUserFd ? path : fs.openSync(path, flag, options.mode);
 
@@ -1352,41 +1233,28 @@ fs.writeFileSync = function(path, data, options) {
   }
 };
 
-fs.appendFile = function(path, data, options, callback_) {
-  var callback = maybeCallback(arguments[arguments.length - 1]);
+fs.appendFile = function(path, data, options, callback) {
+  callback = maybeCallback(arguments[arguments.length - 1]);
+  options = getOptions(options, { encoding: 'utf8', mode: 0o666, flag: 'a' });
 
-  if (!options || typeof options === 'function') {
-    options = { encoding: 'utf8', mode: 0o666, flag: 'a' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, mode: 0o666, flag: 'a' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
-
-  if (!options.flag)
-    options = util._extend({ flag: 'a' }, options);
+  // Don't make changes directly on options object
+  options = copyObject(options);
 
   // force append behavior when using a supplied file descriptor
-  if (isFd(path))
+  if (!options.flag || isFd(path))
     options.flag = 'a';
 
   fs.writeFile(path, data, options, callback);
 };
 
 fs.appendFileSync = function(path, data, options) {
-  if (!options) {
-    options = { encoding: 'utf8', mode: 0o666, flag: 'a' };
-  } else if (typeof options === 'string') {
-    options = { encoding: options, mode: 0o666, flag: 'a' };
-  } else if (typeof options !== 'object') {
-    throwOptionsError(options);
-  }
+  options = getOptions(options, { encoding: 'utf8', mode: 0o666, flag: 'a' });
 
-  if (!options.flag)
-    options = util._extend({ flag: 'a' }, options);
+  // Don't make changes directly on options object
+  options = copyObject(options);
 
   // force append behavior when using a supplied file descriptor
-  if (isFd(path))
+  if (!options.flag || isFd(path))
     options.flag = 'a';
 
   fs.writeFileSync(path, data, options);
@@ -1439,15 +1307,13 @@ FSWatcher.prototype.close = function() {
 fs.watch = function(filename, options, listener) {
   nullCheck(filename);
 
-  options = options || {};
   if (typeof options === 'function') {
     listener = options;
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
   }
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
+  options = getOptions(options, {});
+
+  // Don't make changes directly on options object
+  options = copyObject(options);
 
   if (options.persistent === undefined) options.persistent = true;
   if (options.recursive === undefined) options.recursive = false;
@@ -1467,6 +1333,10 @@ fs.watch = function(filename, options, listener) {
 
 
 // Stat Change Watchers
+
+function emitStop(self) {
+  self.emit('stop');
+}
 
 function StatWatcher() {
   EventEmitter.call(this);
@@ -1488,7 +1358,7 @@ function StatWatcher() {
   };
 
   this._handle.onstop = function() {
-    self.emit('stop');
+    process.nextTick(emitStop, self);
   };
 }
 util.inherits(StatWatcher, EventEmitter);
@@ -1590,12 +1460,7 @@ function encodeRealpathResult(result, options, err) {
 const realpathCacheKey = fs.realpathCacheKey = Symbol('realpathCacheKey');
 
 fs.realpathSync = function realpathSync(p, options) {
-  if (!options)
-    options = {};
-  else if (typeof options === 'string')
-    options = {encoding: options};
-  else if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
+  options = getOptions(options, {});
   nullCheck(p);
 
   p = p.toString('utf8');
@@ -1696,20 +1561,8 @@ fs.realpathSync = function realpathSync(p, options) {
 
 
 fs.realpath = function realpath(p, options, callback) {
-  if (typeof callback !== 'function') {
-    callback = maybeCallback(options);
-    options = {};
-  }
-
-  if (!options) {
-    options = {};
-  } else if (typeof options === 'function') {
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
-  } else if (typeof options !== 'object') {
-    throw new TypeError('"options" must be a string or an object');
-  }
+  callback = maybeCallback(typeof options === 'function' ? options : callback);
+  options = getOptions(options, {});
   if (!nullCheck(p, callback))
     return;
 
@@ -1818,20 +1671,10 @@ fs.realpath = function realpath(p, options, callback) {
 };
 
 fs.mkdtemp = function(prefix, options, callback) {
+  callback = makeCallback(typeof options === 'function' ? options : callback);
+  options = getOptions(options, {});
   if (!prefix || typeof prefix !== 'string')
     throw new TypeError('filename prefix is required');
-
-  options = options || {};
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  } else if (typeof options === 'string') {
-    options = {encoding: options};
-  }
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
-
-  callback = makeCallback(callback);
   if (!nullCheck(prefix, callback)) {
     return;
   }
@@ -1846,14 +1689,8 @@ fs.mkdtemp = function(prefix, options, callback) {
 fs.mkdtempSync = function(prefix, options) {
   if (!prefix || typeof prefix !== 'string')
     throw new TypeError('filename prefix is required');
-
-  options = options || {};
-  if (typeof options === 'string')
-    options = {encoding: options};
-  if (typeof options !== 'object')
-    throw new TypeError('"options" must be a string or an object');
+  options = getOptions(options, {});
   nullCheck(prefix);
-
   return binding.mkdtemp(prefix + 'XXXXXX', options.encoding);
 };
 
@@ -1877,15 +1714,8 @@ function ReadStream(path, options) {
   if (!(this instanceof ReadStream))
     return new ReadStream(path, options);
 
-  if (options === undefined)
-    options = {};
-  else if (typeof options === 'string')
-    options = { encoding: options };
-  else if (options === null || typeof options !== 'object')
-    throw new TypeError('"options" argument must be a string or an object');
-
   // a little bit bigger buffer and water marks by default
-  options = Object.create(options);
+  options = copyObject(getOptions(options, {}));
   if (options.highWaterMark === undefined)
     options.highWaterMark = 64 * 1024;
 
@@ -2051,14 +1881,7 @@ function WriteStream(path, options) {
   if (!(this instanceof WriteStream))
     return new WriteStream(path, options);
 
-  if (options === undefined)
-    options = {};
-  else if (typeof options === 'string')
-    options = { encoding: options };
-  else if (options === null || typeof options !== 'object')
-    throw new TypeError('"options" argument must be a string or an object');
-
-  options = Object.create(options);
+  options = copyObject(getOptions(options, {}));
 
   Writable.call(this, options);
 
@@ -2192,51 +2015,12 @@ WriteStream.prototype.close = ReadStream.prototype.close;
 // There is no shutdown() for files.
 WriteStream.prototype.destroySoon = WriteStream.prototype.end;
 
-
 // SyncWriteStream is internal. DO NOT USE.
-// Temporary hack for process.stdout and process.stderr when piped to files.
-function SyncWriteStream(fd, options) {
-  Writable.call(this);
-
-  options = options || {};
-
-  this.fd = fd;
-  this.readable = false;
-  this.autoClose = options.autoClose === undefined ? true : options.autoClose;
-
-  this.on('end', () => this._destroy());
-}
-
-util.inherits(SyncWriteStream, Writable);
-
-
-// Export
+// todo(jasnell): "Docs-only" deprecation for now. This was never documented
+// so there's no documentation to modify. In the future, add a runtime
+// deprecation.
 Object.defineProperty(fs, 'SyncWriteStream', {
   configurable: true,
   writable: true,
   value: SyncWriteStream
 });
-
-SyncWriteStream.prototype._write = function(chunk, encoding, cb) {
-  fs.writeSync(this.fd, chunk, 0, chunk.length);
-  cb();
-  return true;
-};
-
-SyncWriteStream.prototype._destroy = function() {
-  if (this.fd === null) // already destroy()ed
-    return;
-
-  if (this.autoClose)
-    fs.closeSync(this.fd);
-
-  this.fd = null;
-  return true;
-};
-
-SyncWriteStream.prototype.destroySoon =
-SyncWriteStream.prototype.destroy = function() {
-  this._destroy();
-  this.emit('close');
-  return true;
-};

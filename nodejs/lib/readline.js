@@ -12,7 +12,6 @@ const kMaxcrlfDelay = 2000;
 
 const util = require('util');
 const debug = util.debuglog('readline');
-const internalUtil = require('internal/util');
 const inherits = util.inherits;
 const Buffer = require('buffer').Buffer;
 const EventEmitter = require('events');
@@ -45,6 +44,7 @@ function Interface(input, output, completer, terminal) {
   this._sawReturnAt = 0;
   this.isCompletionEnabled = true;
   this._sawKeyPress = false;
+  this._previousKey = null;
 
   EventEmitter.call(this);
   var historySize;
@@ -403,7 +403,7 @@ Interface.prototype._insertString = function(c) {
   }
 };
 
-Interface.prototype._tabComplete = function() {
+Interface.prototype._tabComplete = function(lastKeypressWasTab) {
   var self = this;
 
   self.pause();
@@ -419,9 +419,7 @@ Interface.prototype._tabComplete = function() {
     const completeOn = rv[1];  // the text that was completed
     if (completions && completions.length) {
       // Apply/show completions.
-      if (completions.length === 1) {
-        self._insertString(completions[0].slice(completeOn.length));
-      } else {
+      if (lastKeypressWasTab) {
         self._writeToOutput('\r\n');
         var width = completions.reduce(function(a, b) {
           return a.length > b.length ? a : b;
@@ -441,16 +439,15 @@ Interface.prototype._tabComplete = function() {
           }
         }
         handleGroup(self, group, width, maxColumns);
-
-        // If there is a common prefix to all matches, then apply that
-        // portion.
-        var f = completions.filter(function(e) { if (e) return e; });
-        var prefix = commonPrefix(f);
-        if (prefix.length > completeOn.length) {
-          self._insertString(prefix.slice(completeOn.length));
-        }
-
       }
+
+      // If there is a common prefix to all matches, then apply that portion.
+      const f = completions.filter(function(e) { if (e) return e; });
+      const prefix = commonPrefix(f);
+      if (prefix.length > completeOn.length) {
+        self._insertString(prefix.slice(completeOn.length));
+      }
+
       self._refreshLine();
     }
   });
@@ -486,6 +483,7 @@ function commonPrefix(strings) {
   if (!strings || strings.length == 0) {
     return '';
   }
+  if (strings.length === 1) return strings[0];
   var sorted = strings.slice().sort();
   var min = sorted[0];
   var max = sorted[sorted.length - 1];
@@ -700,7 +698,9 @@ Interface.prototype._moveCursor = function(dx) {
 
 // handle a write from the tty
 Interface.prototype._ttyWrite = function(s, key) {
+  const previousKey = this._previousKey;
   key = key || {};
+  this._previousKey = key;
 
   // Ignore escape key - Fixes #2876
   if (key.name == 'escape') return;
@@ -906,7 +906,8 @@ Interface.prototype._ttyWrite = function(s, key) {
       case 'tab':
         // If tab completion enabled, do that...
         if (typeof this.completer === 'function' && this.isCompletionEnabled) {
-          this._tabComplete();
+          const lastKeypressWasTab = previousKey && previousKey.name === 'tab';
+          this._tabComplete(lastKeypressWasTab);
           break;
         }
         // falls through
@@ -1092,38 +1093,3 @@ function clearScreenDown(stream) {
   stream.write('\x1b[0J');
 }
 exports.clearScreenDown = clearScreenDown;
-
-
-/**
- * Returns the Unicode code point for the character at the
- * given index in the given string. Similar to String.charCodeAt(),
- * but this function handles surrogates (code point >= 0x10000).
- */
-
-function codePointAt(str, index) {
-  var code = str.charCodeAt(index);
-  var low;
-  if (0xd800 <= code && code <= 0xdbff) { // High surrogate
-    low = str.charCodeAt(index + 1);
-    if (!isNaN(low)) {
-      code = 0x10000 + (code - 0xd800) * 0x400 + (low - 0xdc00);
-    }
-  }
-  return code;
-}
-exports.codePointAt = internalUtil.deprecate(codePointAt,
-    'readline.codePointAt is deprecated. ' +
-    'Use String.prototype.codePointAt instead.');
-
-
-exports.getStringWidth = internalUtil.deprecate(getStringWidth,
-    'getStringWidth is deprecated and will be removed.');
-
-
-exports.isFullWidthCodePoint = internalUtil.deprecate(isFullWidthCodePoint,
-    'isFullWidthCodePoint is deprecated and will be removed.');
-
-
-exports.stripVTControlCharacters = internalUtil.deprecate(
-    stripVTControlCharacters,
-    'stripVTControlCharacters is deprecated and will be removed.');

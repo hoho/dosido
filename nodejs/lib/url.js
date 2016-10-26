@@ -10,10 +10,14 @@ function importPunycode() {
 
 const { toASCII } = importPunycode();
 
+const internalUrl = require('internal/url');
+const encodeAuth = internalUrl.encodeAuth;
 exports.parse = urlParse;
 exports.resolve = urlResolve;
 exports.resolveObject = urlResolveObject;
 exports.format = urlFormat;
+exports.URL = internalUrl.URL;
+
 
 exports.Url = Url;
 
@@ -561,7 +565,7 @@ Url.prototype.format = function() {
   var protocol = this.protocol || '';
   var pathname = this.pathname || '';
   var hash = this.hash || '';
-  var host = false;
+  var host = '';
   var query = '';
 
   if (this.host) {
@@ -610,13 +614,18 @@ Url.prototype.format = function() {
 
   // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
   // unless they had them to begin with.
-  if (this.slashes ||
-      (!protocol || slashedProtocol[protocol]) && host !== false) {
-    host = '//' + (host || '');
-    if (pathname && pathname.charCodeAt(0) !== 47/*/*/)
-      pathname = '/' + pathname;
-  } else if (!host) {
-    host = '';
+  if (this.slashes || slashedProtocol[protocol]) {
+    if (this.slashes || host) {
+      if (pathname && pathname.charCodeAt(0) !== 47/*/*/)
+        pathname = '/' + pathname;
+      host = '//' + host;
+    } else if (protocol.length >= 4 &&
+               protocol.charCodeAt(0) === 102/*f*/ &&
+               protocol.charCodeAt(1) === 105/*i*/ &&
+               protocol.charCodeAt(2) === 108/*l*/ &&
+               protocol.charCodeAt(3) === 101/*e*/) {
+      host = '//';
+    }
   }
 
   search = search.replace(/#/g, '%23');
@@ -936,70 +945,4 @@ function spliceOne(list, index) {
   for (var i = index, k = i + 1, n = list.length; k < n; i += 1, k += 1)
     list[i] = list[k];
   list.pop();
-}
-
-var hexTable = new Array(256);
-for (var i = 0; i < 256; ++i)
-  hexTable[i] = '%' + ((i < 16 ? '0' : '') + i.toString(16)).toUpperCase();
-function encodeAuth(str) {
-  // faster encodeURIComponent alternative for encoding auth uri components
-  var out = '';
-  var lastPos = 0;
-  for (var i = 0; i < str.length; ++i) {
-    var c = str.charCodeAt(i);
-
-    // These characters do not need escaping:
-    // ! - . _ ~
-    // ' ( ) * :
-    // digits
-    // alpha (uppercase)
-    // alpha (lowercase)
-    if (c === 0x21 || c === 0x2D || c === 0x2E || c === 0x5F || c === 0x7E ||
-        (c >= 0x27 && c <= 0x2A) ||
-        (c >= 0x30 && c <= 0x3A) ||
-        (c >= 0x41 && c <= 0x5A) ||
-        (c >= 0x61 && c <= 0x7A)) {
-      continue;
-    }
-
-    if (i - lastPos > 0)
-      out += str.slice(lastPos, i);
-
-    lastPos = i + 1;
-
-    // Other ASCII characters
-    if (c < 0x80) {
-      out += hexTable[c];
-      continue;
-    }
-
-    // Multi-byte characters ...
-    if (c < 0x800) {
-      out += hexTable[0xC0 | (c >> 6)] + hexTable[0x80 | (c & 0x3F)];
-      continue;
-    }
-    if (c < 0xD800 || c >= 0xE000) {
-      out += hexTable[0xE0 | (c >> 12)] +
-             hexTable[0x80 | ((c >> 6) & 0x3F)] +
-             hexTable[0x80 | (c & 0x3F)];
-      continue;
-    }
-    // Surrogate pair
-    ++i;
-    var c2;
-    if (i < str.length)
-      c2 = str.charCodeAt(i) & 0x3FF;
-    else
-      c2 = 0;
-    c = 0x10000 + (((c & 0x3FF) << 10) | c2);
-    out += hexTable[0xF0 | (c >> 18)] +
-           hexTable[0x80 | ((c >> 12) & 0x3F)] +
-           hexTable[0x80 | ((c >> 6) & 0x3F)] +
-           hexTable[0x80 | (c & 0x3F)];
-  }
-  if (lastPos === 0)
-    return str;
-  if (lastPos < str.length)
-    return out + str.slice(lastPos);
-  return out;
 }

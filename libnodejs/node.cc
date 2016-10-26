@@ -137,7 +137,6 @@ using v8::Exception;
 using v8::Float64Array;
 using v8::Function;
 using v8::FunctionCallbackInfo;
-using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::HeapStatistics;
 using v8::Integer;
@@ -179,10 +178,10 @@ static const bool use_inspector = false;
 #endif
 static bool use_debug_agent = false;
 static bool debug_wait_connect = false;
-static std::string debug_host;  // NOLINT(runtime/string)
-static int debug_port = 5858;
-static std::string inspector_host;  // NOLINT(runtime/string)
-static int inspector_port = 9229;
+static std::string* debug_host;  // coverity[leaked_storage]
+static const int default_debugger_port = 5858;
+static const int default_inspector_port = 9229;
+static int debug_port = -1;
 static const int v8_default_thread_pool_size = 4;
 static int v8_thread_pool_size = v8_default_thread_pool_size;
 static bool prof_process = false;
@@ -201,11 +200,14 @@ static const char* icu_data_dir = nullptr;
 // used by C++ modules as well
 bool no_deprecation = false;
 
-#if HAVE_OPENSSL && NODE_FIPS_MODE
+#if HAVE_OPENSSL
+# if NODE_FIPS_MODE
 // used by crypto module
 bool enable_fips_crypto = false;
 bool force_fips_crypto = false;
-#endif
+# endif  // NODE_FIPS_MODE
+const char* openssl_config = nullptr;
+#endif  // HAVE_OPENSSL
 
 // true if process warnings should be suppressed
 bool no_process_warnings = false;
@@ -215,6 +217,8 @@ bool trace_warnings = false;
 // Used in node_config.cc to set a constant on process.binding('config')
 // that is used by lib/module.js
 bool config_preserve_symlinks = false;
+
+bool v8_initialized = false;
 
 // process-relative uptime base, initialized at start-up
 static double prog_start_time;
@@ -804,47 +808,6 @@ const char *signo_string(int signo) {
 }
 
 
-// Convenience methods
-
-
-void ThrowError(v8::Isolate* isolate, const char* errmsg) {
-  Environment::GetCurrent(isolate)->ThrowError(errmsg);
-}
-
-
-void ThrowTypeError(v8::Isolate* isolate, const char* errmsg) {
-  Environment::GetCurrent(isolate)->ThrowTypeError(errmsg);
-}
-
-
-void ThrowRangeError(v8::Isolate* isolate, const char* errmsg) {
-  Environment::GetCurrent(isolate)->ThrowRangeError(errmsg);
-}
-
-
-void ThrowErrnoException(v8::Isolate* isolate,
-                         int errorno,
-                         const char* syscall,
-                         const char* message,
-                         const char* path) {
-  Environment::GetCurrent(isolate)->ThrowErrnoException(errorno,
-                                                        syscall,
-                                                        message,
-                                                        path);
-}
-
-
-void ThrowUVException(v8::Isolate* isolate,
-                      int errorno,
-                      const char* syscall,
-                      const char* message,
-                      const char* path,
-                      const char* dest) {
-  Environment::GetCurrent(isolate)
-      ->ThrowUVException(errorno, syscall, message, path, dest);
-}
-
-
 Local<Value> ErrnoException(Isolate* isolate,
                             int errorno,
                             const char *syscall,
@@ -1052,12 +1015,10 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
 
 
 void* ArrayBufferAllocator::Allocate(size_t size) {
-  if (env_ == nullptr ||
-      !env_->array_buffer_allocator_info()->no_zero_fill() ||
-      zero_fill_all_buffers)
-    return node::Calloc(size, 1);
-  env_->array_buffer_allocator_info()->reset_fill_flag();
-  return node::Malloc(size);
+  if (zero_fill_field_ || zero_fill_all_buffers)
+    return node::UncheckedCalloc(size);
+  else
+    return node::UncheckedMalloc(size);
 }
 
 static bool DomainHasErrorHandler(const Environment* env,
@@ -1350,18 +1311,6 @@ Local<Value> MakeCallback(Environment* env,
   }
 
   return ret;
-}
-
-
-// Internal only.
-Local<Value> MakeCallback(Environment* env,
-                           Local<Object> recv,
-                           uint32_t index,
-                           int argc,
-                           Local<Value> argv[]) {
-  Local<Value> cb_v = recv->Get(index);
-  CHECK(cb_v->IsFunction());
-  return MakeCallback(env, recv.As<Value>(), cb_v.As<Function>(), argc, argv);
 }
 
 
@@ -2492,8 +2441,13 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
     char errmsg[1024];
     snprintf(errmsg,
              sizeof(errmsg),
-             "Module version mismatch. Expected %d, got %d.",
-             NODE_MODULE_VERSION, mp->nm_version);
+             "The module '%s'"
+             "\nwas compiled against a different Node.js version using"
+             "\nNODE_MODULE_VERSION %d. This version of Node.js requires"
+             "\nNODE_MODULE_VERSION %d. Please try re-compiling or "
+             "re-installing\nthe module (for instance, using `npm rebuild` or"
+             "`npm install`).",
+             *filename, mp->nm_version, NODE_MODULE_VERSION);
 
     // NOTE: `mp` is allocated inside of the shared library's memory, calling
     // `uv_dlclose` will deallocate it
@@ -2792,7 +2746,7 @@ static void EnvSetter(Local<String> property,
     SetEnvironmentVariableW(key_ptr, reinterpret_cast<WCHAR*>(*val));
   }
 #endif
-  // Whether it worked or not, always return rval.
+  // Whether it worked or not, always return value.
   info.GetReturnValue().Set(value);
 }
 
@@ -2964,7 +2918,10 @@ static Local<Object> GetFeatures(Environment* env) {
 
 static void DebugPortGetter(Local<Name> property,
                             const PropertyCallbackInfo<Value>& info) {
-  info.GetReturnValue().Set(debug_port);
+  int port = debug_port;
+  if (port < 0)
+    port = use_inspector ? default_inspector_port : default_debugger_port;
+  info.GetReturnValue().Set(port);
 }
 
 
@@ -3016,39 +2973,15 @@ static void NeedImmediateCallbackSetter(
 }
 
 
-void SetIdle(uv_prepare_t* handle) {
-  Environment* env = Environment::from_idle_prepare_handle(handle);
-  env->isolate()->GetCpuProfiler()->SetIdle(true);
-}
-
-
-void ClearIdle(uv_check_t* handle) {
-  Environment* env = Environment::from_idle_check_handle(handle);
-  env->isolate()->GetCpuProfiler()->SetIdle(false);
-}
-
-
-void StartProfilerIdleNotifier(Environment* env) {
-  uv_prepare_start(env->idle_prepare_handle(), SetIdle);
-  uv_check_start(env->idle_check_handle(), ClearIdle);
-}
-
-
-void StopProfilerIdleNotifier(Environment* env) {
-  uv_prepare_stop(env->idle_prepare_handle());
-  uv_check_stop(env->idle_check_handle());
-}
-
-
 void StartProfilerIdleNotifier(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  StartProfilerIdleNotifier(env);
+  env->StartProfilerIdleNotifier();
 }
 
 
 void StopProfilerIdleNotifier(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  StopProfilerIdleNotifier(env);
+  env->StopProfilerIdleNotifier();
 }
 
 
@@ -3541,12 +3474,6 @@ void LoadEnvironment(Environment* env) {
 }
 
 
-void FreeEnvironment(Environment* env) {
-  CHECK_NE(env, nullptr);
-  env->Dispose();
-}
-
-
 static void PrintHelp();
 
 static bool ParseDebugOpt(const char* arg) {
@@ -3591,15 +3518,12 @@ static bool ParseDebugOpt(const char* arg) {
     return true;
   }
 
-  std::string* const the_host = use_inspector ? &inspector_host : &debug_host;
-  int* const the_port = use_inspector ? &inspector_port : &debug_port;
-
   // FIXME(bnoordhuis) Move IPv6 address parsing logic to lib/net.js.
   // It seems reasonable to support [address]:port notation
   // in net.Server#listen() and net.Socket#connect().
   const size_t port_len = strlen(port);
   if (port[0] == '[' && port[port_len - 1] == ']') {
-    the_host->assign(port + 1, port_len - 2);
+    debug_host = new std::string(port + 1, port_len - 2);
     return true;
   }
 
@@ -3609,13 +3533,13 @@ static bool ParseDebugOpt(const char* arg) {
     // if it's not all decimal digits, it's a host name.
     for (size_t n = 0; port[n] != '\0'; n += 1) {
       if (port[n] < '0' || port[n] > '9') {
-        *the_host = port;
+        debug_host = new std::string(port);
         return true;
       }
     }
   } else {
     const bool skip = (colon > port && port[0] == '[' && colon[-1] == ']');
-    the_host->assign(port + skip, colon - skip);
+    debug_host = new std::string(port + skip, colon - skip);
   }
 
   char* endptr;
@@ -3628,7 +3552,7 @@ static bool ParseDebugOpt(const char* arg) {
     exit(12);
   }
 
-  *the_port = static_cast<int>(result);
+  debug_port = static_cast<int>(result);
 
   return true;
 }
@@ -3669,6 +3593,8 @@ static void PrintHelp() {
          "  --enable-fips         enable FIPS crypto at startup\n"
          "  --force-fips          force FIPS crypto (cannot be disabled)\n"
 #endif  /* NODE_FIPS_MODE */
+         "  --openssl-config=path load OpenSSL configuration file from the\n"
+         "                        specified path\n"
 #endif /* HAVE_OPENSSL */
 #if defined(NODE_HAVE_I18N_SUPPORT)
          "  --icu-data-dir=dir    set ICU data load path to dir\n"
@@ -3829,6 +3755,8 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--force-fips") == 0) {
       force_fips_crypto = true;
 #endif /* NODE_FIPS_MODE */
+    } else if (strncmp(arg, "--openssl-config=", 17) == 0) {
+      openssl_config = arg + 17;
 #endif /* HAVE_OPENSSL */
 #if defined(NODE_HAVE_I18N_SUPPORT)
     } else if (strncmp(arg, "--icu-data-dir=", 15) == 0) {
@@ -3888,16 +3816,17 @@ static void DispatchMessagesDebugAgentCallback(Environment* env) {
 static void StartDebug(Environment* env, const char* path, bool wait) {
   CHECK(!debugger_running);
   if (use_inspector) {
-    debugger_running = v8_platform.StartInspector(env, path, inspector_port,
-                                                  wait);
+    debugger_running = v8_platform.StartInspector(env, path,
+        debug_port >= 0 ? debug_port : default_inspector_port, wait);
   } else {
     env->debugger_agent()->set_dispatch_handler(
           DispatchMessagesDebugAgentCallback);
+    const char* host = debug_host ? debug_host->c_str() : "127.0.0.1";
+    int port = debug_port >= 0 ? debug_port : default_debugger_port;
     debugger_running =
-        env->debugger_agent()->Start(debug_host, debug_port, wait);
+        env->debugger_agent()->Start(host, port, wait);
     if (debugger_running == false) {
-      fprintf(stderr, "Starting debugger on %s:%d failed\n",
-              debug_host.c_str(), debug_port);
+      fprintf(stderr, "Starting debugger on %s:%d failed\n", host, port);
       fflush(stderr);
       return;
     }
@@ -4442,123 +4371,33 @@ int EmitExit(Environment* env) {
 }
 
 
-// Just a convenience method
-Environment* CreateEnvironment(Isolate* isolate,
+IsolateData* CreateIsolateData(Isolate* isolate, uv_loop_t* loop) {
+  return new IsolateData(isolate, loop);
+}
+
+
+void FreeIsolateData(IsolateData* isolate_data) {
+  delete isolate_data;
+}
+
+
+Environment* CreateEnvironment(IsolateData* isolate_data,
                                Local<Context> context,
                                int argc,
                                const char* const* argv,
                                int exec_argc,
                                const char* const* exec_argv) {
-  Environment* env;
-  Context::Scope context_scope(context);
-
-  env = CreateEnvironment(isolate,
-                          uv_default_loop(),
-                          context,
-                          argc,
-                          argv,
-                          exec_argc,
-                          exec_argv);
-
-  LoadEnvironment(env);
-
-  return env;
-}
-
-static Environment* CreateEnvironment(Isolate* isolate,
-                                      Local<Context> context,
-                                      NodeInstanceData* instance_data) {
-  return CreateEnvironment(isolate,
-                           instance_data->event_loop(),
-                           context,
-                           instance_data->argc(),
-                           instance_data->argv(),
-                           instance_data->exec_argc(),
-                           instance_data->exec_argv());
-}
-
-
-static void HandleCloseCb(uv_handle_t* handle) {
-  Environment* env = reinterpret_cast<Environment*>(handle->data);
-  env->FinishHandleCleanup(handle);
-}
-
-
-static void HandleCleanup(Environment* env,
-                          uv_handle_t* handle,
-                          void* arg) {
-  handle->data = env;
-  uv_close(handle, HandleCloseCb);
-}
-
-
-Environment* CreateEnvironment(Isolate* isolate,
-                               uv_loop_t* loop,
-                               Local<Context> context,
-                               int argc,
-                               const char* const* argv,
-                               int exec_argc,
-                               const char* const* exec_argv) {
+  Isolate* isolate = context->GetIsolate();
   HandleScope handle_scope(isolate);
-
   Context::Scope context_scope(context);
-  Environment* env = Environment::New(context, loop);
-
-  isolate->SetAutorunMicrotasks(false);
-
-  uv_check_init(env->event_loop(), env->immediate_check_handle());
-  uv_unref(
-      reinterpret_cast<uv_handle_t*>(env->immediate_check_handle()));
-
-  uv_idle_init(env->event_loop(), env->immediate_idle_handle());
-
-  // Inform V8's CPU profiler when we're idle.  The profiler is sampling-based
-  // but not all samples are created equal; mark the wall clock time spent in
-  // epoll_wait() and friends so profiling tools can filter it out.  The samples
-  // still end up in v8.log but with state=IDLE rather than state=EXTERNAL.
-  // TODO(bnoordhuis) Depends on a libuv implementation detail that we should
-  // probably fortify in the API contract, namely that the last started prepare
-  // or check watcher runs first.  It's not 100% foolproof; if an add-on starts
-  // a prepare or check watcher after us, any samples attributed to its callback
-  // will be recorded with state=IDLE.
-  uv_prepare_init(env->event_loop(), env->idle_prepare_handle());
-  uv_check_init(env->event_loop(), env->idle_check_handle());
-  uv_unref(reinterpret_cast<uv_handle_t*>(env->idle_prepare_handle()));
-  uv_unref(reinterpret_cast<uv_handle_t*>(env->idle_check_handle()));
-
-  // Register handle cleanups
-  env->RegisterHandleCleanup(
-      reinterpret_cast<uv_handle_t*>(env->immediate_check_handle()),
-      HandleCleanup,
-      nullptr);
-  env->RegisterHandleCleanup(
-      reinterpret_cast<uv_handle_t*>(env->immediate_idle_handle()),
-      HandleCleanup,
-      nullptr);
-  env->RegisterHandleCleanup(
-      reinterpret_cast<uv_handle_t*>(env->idle_prepare_handle()),
-      HandleCleanup,
-      nullptr);
-  env->RegisterHandleCleanup(
-      reinterpret_cast<uv_handle_t*>(env->idle_check_handle()),
-      HandleCleanup,
-      nullptr);
-
-  if (v8_is_profiling) {
-    StartProfilerIdleNotifier(env);
-  }
-
-  Local<FunctionTemplate> process_template = FunctionTemplate::New(isolate);
-  process_template->SetClassName(FIXED_ONE_BYTE_STRING(isolate, "process"));
-
-  Local<Object> process_object =
-      process_template->GetFunction()->NewInstance(context).ToLocalChecked();
-  env->set_process_object(process_object);
-
-  SetupProcessObject(env, argc, argv, exec_argc, exec_argv);
-  LoadAsyncWrapperInfo(env);
-
+  auto env = new Environment(isolate_data, context);
+  env->Start(argc, argv, exec_argc, exec_argv, v8_is_profiling);
   return env;
+}
+
+
+void FreeEnvironment(Environment* env) {
+  delete env;
 }
 
 
@@ -4567,8 +4406,8 @@ Environment* CreateEnvironment(Isolate* isolate,
 static void StartNodeInstance(void* arg) {
   NodeInstanceData* instance_data = static_cast<NodeInstanceData*>(arg);
   Isolate::CreateParams params;
-  ArrayBufferAllocator* array_buffer_allocator = new ArrayBufferAllocator();
-  params.array_buffer_allocator = array_buffer_allocator;
+  ArrayBufferAllocator array_buffer_allocator;
+  params.array_buffer_allocator = &array_buffer_allocator;
 #ifdef NODE_ENABLE_VTUNE_PROFILING
   params.code_event_handler = vTune::GetVtuneCodeEventHandler();
 #endif
@@ -4590,10 +4429,16 @@ static void StartNodeInstance(void* arg) {
     Locker locker(isolate);
     Isolate::Scope isolate_scope(isolate);
     HandleScope handle_scope(isolate);
+    IsolateData isolate_data(isolate, instance_data->event_loop(),
+                             array_buffer_allocator.zero_fill_field());
     Local<Context> context = Context::New(isolate);
-    Environment* env = CreateEnvironment(isolate, context, instance_data);
-    array_buffer_allocator->set_env(env);
     Context::Scope context_scope(context);
+    Environment env(&isolate_data, context);
+    env.Start(instance_data->argc(),
+              instance_data->argv(),
+              instance_data->exec_argc(),
+              instance_data->exec_argv(),
+              v8_is_profiling);
 
     isolate->SetAbortOnUncaughtExceptionCallback(
         ShouldAbortOnUncaughtException);
@@ -4603,41 +4448,41 @@ static void StartNodeInstance(void* arg) {
       const char* path = instance_data->argc() > 1
                          ? instance_data->argv()[1]
                          : nullptr;
-      StartDebug(env, path, debug_wait_connect);
+      StartDebug(&env, path, debug_wait_connect);
       if (use_inspector && !debugger_running) {
         exit(12);
       }
     }
 
     {
-      Environment::AsyncCallbackScope callback_scope(env);
-      LoadEnvironment(env);
+      Environment::AsyncCallbackScope callback_scope(&env);
+      LoadEnvironment(&env);
     }
 
-    env->set_trace_sync_io(trace_sync_io);
+    env.set_trace_sync_io(trace_sync_io);
 
     if (nodejsLoadScripts(env, ExecuteString, ReportException))
       goto done;
 
     // Enable debugger
     if (instance_data->use_debug_agent())
-      EnableDebug(env);
+      EnableDebug(&env);
 
     {
       SealHandleScope seal(isolate);
       bool more;
       do {
         v8_platform.PumpMessageLoop(isolate);
-        more = uv_run(env->event_loop(), UV_RUN_ONCE);
+        more = uv_run(env.event_loop(), UV_RUN_ONCE);
 
         if (more == false) {
           v8_platform.PumpMessageLoop(isolate);
-          EmitBeforeExit(env);
+          EmitBeforeExit(&env);
 
           // Emit `beforeExit` if the loop became alive either after emitting
           // event, or after running some callbacks.
-          more = uv_loop_alive(env->event_loop());
-          if (uv_run(env->event_loop(), UV_RUN_NOWAIT) != 0)
+          more = uv_loop_alive(env.event_loop());
+          if (uv_run(env.event_loop(), UV_RUN_NOWAIT) != 0)
             more = true;
         }
       } while (more == true);
@@ -4646,21 +4491,17 @@ static void StartNodeInstance(void* arg) {
 done:
     nodejsUnloadScripts();
 
-    env->set_trace_sync_io(false);
+    env.set_trace_sync_io(false);
 
-    int exit_code = EmitExit(env);
+    int exit_code = EmitExit(&env);
     if (instance_data->is_main())
       instance_data->set_exit_code(exit_code);
-    RunAtExit(env);
+    RunAtExit(&env);
 
-    WaitForInspectorDisconnect(env);
+    WaitForInspectorDisconnect(&env);
 #if defined(LEAK_SANITIZER)
     __lsan_do_leak_check();
 #endif
-
-    array_buffer_allocator->set_env(nullptr);
-    env->Dispose();
-    env = nullptr;
   }
 
   {
@@ -4672,7 +4513,6 @@ done:
   CHECK_NE(isolate, nullptr);
   isolate->Dispose();
   isolate = nullptr;
-  delete array_buffer_allocator;
 }
 
 int Start(int argc, char** argv) {
@@ -4702,6 +4542,7 @@ int Start(int argc, char** argv) {
 
   v8_platform.Initialize(v8_thread_pool_size);
   V8::Initialize();
+  v8_initialized = true;
 
   int exit_code = 1;
   {
@@ -4715,6 +4556,7 @@ int Start(int argc, char** argv) {
     StartNodeInstance(&instance_data);
     exit_code = instance_data.exit_code();
   }
+  v8_initialized = false;
   V8::Dispose();
 
   v8_platform.Dispose();

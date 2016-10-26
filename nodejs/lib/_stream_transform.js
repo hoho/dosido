@@ -115,8 +115,8 @@ function Transform(options) {
   // When the writable side finishes, then flush out anything remaining.
   this.once('prefinish', function() {
     if (typeof this._flush === 'function')
-      this._flush(function(er) {
-        done(stream, er);
+      this._flush(function(er, data) {
+        done(stream, er, data);
       });
     else
       done(stream);
@@ -139,7 +139,7 @@ Transform.prototype.push = function(chunk, encoding) {
 // an error, then that'll put the hurt on the whole operation.  If you
 // never call cb(), then you'll never get another chunk.
 Transform.prototype._transform = function(chunk, encoding, cb) {
-  throw new Error('Not implemented');
+  throw new Error('_transform() is not implemented');
 };
 
 Transform.prototype._write = function(chunk, encoding, cb) {
@@ -173,9 +173,12 @@ Transform.prototype._read = function(n) {
 };
 
 
-function done(stream, er) {
+function done(stream, er, data) {
   if (er)
     return stream.emit('error', er);
+
+  if (data !== null && data !== undefined)
+    stream.push(data);
 
   // if there's nothing in the write buffer, then that means
   // that nothing more will ever be provided

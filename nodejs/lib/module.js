@@ -3,7 +3,6 @@
 const NativeModule = require('native_module');
 const util = require('util');
 const internalModule = require('internal/module');
-const internalUtil = require('internal/util');
 const vm = require('vm');
 const assert = require('assert').ok;
 const fs = require('fs');
@@ -210,10 +209,14 @@ Module._findPath = function(request, paths, isMain) {
     if (filename) {
       // Warn once if '.' resolved outside the module dir
       if (request === '.' && i > 0) {
-        warned = internalUtil.printDeprecationMessage(
-          'warning: require(\'.\') resolved outside the package ' +
-          'directory. This functionality is deprecated and will be removed ' +
-          'soon.', warned);
+        if (!warned) {
+          warned = true;
+          process.emitWarning(
+            'warning: require(\'.\') resolved outside the package ' +
+            'directory. This functionality is deprecated and will be removed ' +
+            'soon.',
+            'DeprecationWarning');
+        }
       }
 
       Module._pathCache[cacheKey] = filename;
@@ -635,11 +638,6 @@ Module._initPaths = function() {
   // clone as a shallow copy, for introspection.
   Module.globalPaths = modulePaths.slice(0);
 };
-
-// TODO(bnoordhuis) Unused, remove in the future.
-Module.requireRepl = internalUtil.deprecate(function() {
-  return NativeModule.require('internal/repl');
-}, 'Module.requireRepl is deprecated.');
 
 Module._preloadModules = function(requests) {
   if (!Array.isArray(requests))

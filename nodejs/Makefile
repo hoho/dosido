@@ -71,15 +71,14 @@ $(NODE_G_EXE): config.gypi out/Makefile
 	$(MAKE) -C out BUILDTYPE=Debug V=$(V)
 	ln -fs out/Debug/$(NODE_EXE) $@
 
-out/Makefile: common.gypi deps/uv/uv.gyp deps/http_parser/http_parser.gyp deps/zlib/zlib.gyp deps/v8/build/toolchain.gypi deps/v8/build/features.gypi deps/v8/tools/gyp/v8.gyp node.gyp config.gypi
+out/Makefile: common.gypi deps/uv/uv.gyp deps/http_parser/http_parser.gyp \
+              deps/zlib/zlib.gyp deps/v8/gypfiles/toolchain.gypi \
+              deps/v8/gypfiles/features.gypi deps/v8/src/v8.gyp node.gyp \
+              config.gypi
 	$(PYTHON) tools/gyp_node.py -f make
 
 config.gypi: configure
-	if [ -f $@ ]; then
-		$(error Stale $@, please re-run ./configure)
-	else
-		$(error No $@, please run ./configure first)
-	fi
+	$(error Missing or stale $@, please run ./$<)
 
 install: all
 	$(PYTHON) tools/install.py $@ '$(DESTDIR)' '$(PREFIX)'
@@ -105,7 +104,6 @@ distclean:
 	-rm -rf deps/icu4c*.tgz deps/icu4c*.zip deps/icu-tmp
 	-rm -f $(BINARYTAR).* $(TARBALL).*
 	-rm -rf deps/v8/testing/gmock
-	-rm -rf deps/v8/testing/gtest
 
 check: test
 
@@ -647,63 +645,48 @@ ifeq ($(XZ), 0)
 	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz.done"
 endif
 
-haswrk=$(shell which wrk > /dev/null 2>&1; echo $$?)
-wrk:
-ifneq ($(haswrk), 0)
-	@echo "please install wrk before proceeding. More information can be found in benchmark/README.md." >&2
-	@exit 1
-endif
-
 bench-net: all
-	@$(NODE) benchmark/common.js net
+	@$(NODE) benchmark/run.js net
 
 bench-crypto: all
-	@$(NODE) benchmark/common.js crypto
+	@$(NODE) benchmark/run.js crypto
 
 bench-tls: all
-	@$(NODE) benchmark/common.js tls
+	@$(NODE) benchmark/run.js tls
 
-bench-http: wrk all
-	@$(NODE) benchmark/common.js http
+bench-http: all
+	@$(NODE) benchmark/run.js http
 
 bench-fs: all
-	@$(NODE) benchmark/common.js fs
+	@$(NODE) benchmark/run.js fs
 
 bench-misc: all
 	@$(MAKE) -C benchmark/misc/function_call/
-	@$(NODE) benchmark/common.js misc
+	@$(NODE) benchmark/run.js misc
 
 bench-array: all
-	@$(NODE) benchmark/common.js arrays
+	@$(NODE) benchmark/run.js arrays
 
 bench-buffer: all
-	@$(NODE) benchmark/common.js buffers
+	@$(NODE) benchmark/run.js buffers
 
 bench-url: all
-	@$(NODE) benchmark/common.js url
+	@$(NODE) benchmark/run.js url
 
 bench-events: all
-	@$(NODE) benchmark/common.js events
+	@$(NODE) benchmark/run.js events
 
 bench-util: all
-	@$(NODE) benchmark/common.js util
+	@$(NODE) benchmark/run.js util
 
 bench-dgram: all
-	@$(NODE) benchmark/common.js dgram
+	@$(NODE) benchmark/run.js dgram
 
 bench-all: bench bench-misc bench-array bench-buffer bench-url bench-events bench-dgram bench-util
 
 bench: bench-net bench-http bench-fs bench-tls
 
 bench-ci: bench
-
-bench-http-simple:
-	benchmark/http_simple_bench.sh
-
-bench-idle:
-	$(NODE) benchmark/idle_server.js &
-	sleep 1
-	$(NODE) benchmark/idle_clients.js &
 
 jslint:
 	$(NODE) tools/eslint/bin/eslint.js --cache --rulesdir=tools/eslint-rules \

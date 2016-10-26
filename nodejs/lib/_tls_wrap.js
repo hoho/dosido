@@ -304,7 +304,7 @@ proxiedMethods.forEach(function(name) {
   };
 });
 
-tls_wrap.TLSWrap.prototype.close = function closeProxy(cb) {
+tls_wrap.TLSWrap.prototype.close = function close(cb) {
   if (this.owner)
     this.owner.ssl = null;
 
@@ -340,10 +340,10 @@ TLSSocket.prototype._wrapHandle = function(wrap) {
   res._secureContext = context;
   res.reading = handle.reading;
   Object.defineProperty(handle, 'reading', {
-    get: function readingGetter() {
+    get: function get() {
       return res.reading;
     },
-    set: function readingSetter(value) {
+    set: function set(value) {
       res.reading = value;
     }
   });
@@ -954,7 +954,7 @@ function SNICallback(servername, callback) {
 //
 //
 function normalizeConnectArgs(listArgs) {
-  var args = net._normalizeConnectArgs(listArgs);
+  var args = net._normalizeArgs(listArgs);
   var options = args[0];
   var cb = args[1];
 

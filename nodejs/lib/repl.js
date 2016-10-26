@@ -664,7 +664,7 @@ exports.start = function(prompt,
   return repl;
 };
 
-REPLServer.prototype.close = function replClose() {
+REPLServer.prototype.close = function close() {
   if (this.terminal && this._flushing && !this._closingOnFlush) {
     this._closingOnFlush = true;
     this.once('flushHistory', () =>
@@ -1337,7 +1337,9 @@ function regexpEscape(s) {
  * @param {String} cmd The cmd to convert.
  * @return {String} The converted command.
  */
-REPLServer.prototype.convertToContext = function(cmd) {
+// TODO(princejwesley): Remove it prior to v8.0.0 release
+// Reference: https://github.com/nodejs/node/pull/7829
+REPLServer.prototype.convertToContext = util.deprecate(function(cmd) {
   const scopeVar = /^\s*var\s*([_\w\$]+)(.*)$/m;
   const scopeFunc = /^\s*function\s*([_\w\$]+)/;
   var matches;
@@ -1355,7 +1357,7 @@ REPLServer.prototype.convertToContext = function(cmd) {
   }
 
   return cmd;
-};
+}, 'replServer.convertToContext() is deprecated');
 
 function bailOnIllegalToken(parser) {
   return parser._literal === null &&

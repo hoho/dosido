@@ -29,21 +29,26 @@ var poolSize, poolOffset, allocPool;
 
 binding.setupBufferJS(Buffer.prototype, bindingObj);
 
-const flags = bindingObj.flags;
-const kNoZeroFill = 0;
+// |binding.zeroFill| can be undefined when running inside an isolate where we
+// do not own the ArrayBuffer allocator.  Zero fill is always on in that case.
+const zeroFill = bindingObj.zeroFill || [0];
 
 function createUnsafeBuffer(size) {
-  flags[kNoZeroFill] = 1;
+  return new FastBuffer(createUnsafeArrayBuffer(size));
+}
+
+function createUnsafeArrayBuffer(size) {
+  zeroFill[0] = 0;
   try {
-    return new FastBuffer(size);
+    return new ArrayBuffer(size);
   } finally {
-    flags[kNoZeroFill] = 0;
+    zeroFill[0] = 1;
   }
 }
 
 function createPool() {
   poolSize = Buffer.poolSize;
-  allocPool = createUnsafeBuffer(poolSize);
+  allocPool = createUnsafeArrayBuffer(poolSize);
   poolOffset = 0;
 }
 createPool();
@@ -67,7 +72,17 @@ function alignPool() {
  * much breakage at this time. It's not likely that the Buffer constructors
  * would ever actually be removed.
  **/
+var newBufferWarned = false;
 function Buffer(arg, encodingOrOffset, length) {
+  if (!new.target && !newBufferWarned) {
+    newBufferWarned = true;
+    process.emitWarning(
+      'Using Buffer without `new` will soon stop working. ' +
+      'Use `new Buffer()`, or preferably ' +
+      '`Buffer.from()`, `Buffer.allocUnsafe()` or `Buffer.alloc()` instead.',
+      'DeprecationWarning'
+    );
+  }
   // Common case.
   if (typeof arg === 'number') {
     if (typeof encodingOrOffset === 'string') {
@@ -104,8 +119,14 @@ Buffer.from = function(value, encodingOrOffset, length) {
 Object.setPrototypeOf(Buffer, Uint8Array);
 
 function assertSize(size) {
-  if (typeof size !== 'number') {
-    const err = new TypeError('"size" argument must be a number');
+  let err = null;
+
+  if (typeof size !== 'number')
+    err = new TypeError('"size" argument must be a number');
+  else if (size < 0)
+    err = new RangeError('"size" argument must not be negative');
+
+  if (err) {
     // The following hides the 'assertSize' method from the
     // callstack. This is done simply to hide the internal
     // details of the implementation from bleeding out to users.
@@ -170,14 +191,11 @@ function allocate(size) {
   if (size < (Buffer.poolSize >>> 1)) {
     if (size > (poolSize - poolOffset))
       createPool();
-    var b = allocPool.slice(poolOffset, poolOffset + size);
+    var b = new FastBuffer(allocPool, poolOffset, size);
     poolOffset += size;
     alignPool();
     return b;
   } else {
-    // Even though this is checked above, the conditional is a safety net and
-    // sanity check to prevent any subsequent typed array allocation from not
-    // being zero filled.
     return createUnsafeBuffer(size);
   }
 }
@@ -200,8 +218,12 @@ function fromString(string, encoding) {
 
   if (length > (poolSize - poolOffset))
     createPool();
-  var actual = allocPool.write(string, poolOffset, encoding);
-  var b = allocPool.slice(poolOffset, poolOffset + actual);
+  var b = new FastBuffer(allocPool, poolOffset, length);
+  var actual = b.write(string, encoding);
+  if (actual !== length) {
+    // byteLength() may overestimate. That’s a rare case, though.
+    b = new FastBuffer(allocPool, poolOffset, actual);
+  }
   poolOffset += actual;
   alignPool();
   return b;
@@ -347,7 +369,7 @@ function byteLength(string, encoding) {
       return string.byteLength;
     }
 
-    string = '' + string;
+    throw new TypeError('"string" must be a string, Buffer, or ArrayBuffer');
   }
 
   var len = string.length;
@@ -400,10 +422,6 @@ Object.defineProperty(Buffer.prototype, 'parent', {
   get: function() {
     if (!(this instanceof Buffer))
       return undefined;
-    if (this.byteLength === 0 ||
-        this.byteLength === this.buffer.byteLength) {
-      return undefined;
-    }
     return this.buffer;
   }
 });
@@ -789,11 +807,10 @@ Buffer.prototype.toJSON = function() {
 
 
 function adjustOffset(offset, length) {
-  offset = +offset;
-  if (offset === 0 || Number.isNaN(offset)) {
+  offset |= 0;
+  if (offset === 0) {
     return 0;
-  }
-  if (offset < 0) {
+  } else if (offset < 0) {
     offset += length;
     return offset > 0 ? offset : 0;
   } else {
@@ -1341,3 +1358,5 @@ Buffer.prototype.swap64 = function swap64() {
   }
   return swap64n(this);
 };
+
+Buffer.prototype.toLocaleString = Buffer.prototype.toString;

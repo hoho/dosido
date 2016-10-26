@@ -3,6 +3,9 @@
 const binding = process.binding('util');
 const prefix = `(${process.release.name}:${process.pid}) `;
 
+const kArrowMessagePrivateSymbolIndex = binding['arrow_message_private_symbol'];
+const kDecoratedPrivateSymbolIndex = binding['decorated_private_symbol'];
+
 exports.getHiddenValue = binding.getHiddenValue;
 exports.setHiddenValue = binding.setHiddenValue;
 
@@ -14,16 +17,6 @@ exports.customInspectSymbol = Symbol('util.inspect.custom');
 // prepend the prefix to the actual message.
 exports.deprecate = function(fn, msg) {
   return exports._deprecate(fn, msg);
-};
-
-// All the internal deprecations have to use this function only, as this will
-// prepend the prefix to the actual message.
-exports.printDeprecationMessage = function(msg, warned, ctor) {
-  if (warned || process.noDeprecation)
-    return true;
-  process.emitWarning(msg, 'DeprecationWarning',
-                      ctor || exports.printDeprecationMessage);
-  return true;
 };
 
 exports.error = function(msg) {
@@ -60,7 +53,10 @@ exports._deprecate = function(fn, msg) {
 
   var warned = false;
   function deprecated() {
-    warned = exports.printDeprecationMessage(msg, warned, deprecated);
+    if (!warned) {
+      warned = true;
+      process.emitWarning(msg, 'DeprecationWarning', deprecated);
+    }
     if (new.target) {
       return Reflect.construct(fn, arguments, new.target);
     }
@@ -81,14 +77,14 @@ exports._deprecate = function(fn, msg) {
 
 exports.decorateErrorStack = function decorateErrorStack(err) {
   if (!(exports.isError(err) && err.stack) ||
-      exports.getHiddenValue(err, 'node:decorated') === true)
+      exports.getHiddenValue(err, kDecoratedPrivateSymbolIndex) === true)
     return;
 
-  const arrow = exports.getHiddenValue(err, 'node:arrowMessage');
+  const arrow = exports.getHiddenValue(err, kArrowMessagePrivateSymbolIndex);
 
   if (arrow) {
     err.stack = arrow + err.stack;
-    exports.setHiddenValue(err, 'node:decorated', true);
+    exports.setHiddenValue(err, kDecoratedPrivateSymbolIndex, true);
   }
 };
 
@@ -104,6 +100,35 @@ const noCrypto = !process.versions.openssl;
 exports.assertCrypto = function(exports) {
   if (noCrypto)
     throw new Error('Node.js is not compiled with openssl crypto support');
+};
+
+exports.kIsEncodingSymbol = Symbol('node.isEncoding');
+exports.normalizeEncoding = function normalizeEncoding(enc) {
+  if (!enc) return 'utf8';
+  var low;
+  for (;;) {
+    switch (enc) {
+      case 'utf8':
+      case 'utf-8':
+        return 'utf8';
+      case 'ucs2':
+      case 'utf16le':
+      case 'ucs-2':
+      case 'utf-16le':
+        return 'utf16le';
+      case 'binary':
+        return 'latin1';
+      case 'base64':
+      case 'ascii':
+      case 'latin1':
+      case 'hex':
+        return enc;
+      default:
+        if (low) return; // undefined
+        enc = ('' + enc).toLowerCase();
+        low = true;
+    }
+  }
 };
 
 // Filters duplicate strings. Used to support functions in crypto and tls
@@ -135,33 +160,4 @@ exports.cachedResult = function cachedResult(fn) {
       result = fn();
     return result;
   };
-};
-
-exports.kIsEncodingSymbol = Symbol('node.isEncoding');
-exports.normalizeEncoding = function normalizeEncoding(enc) {
-  if (!enc) return 'utf8';
-  var low;
-  for (;;) {
-    switch (enc) {
-      case 'utf8':
-      case 'utf-8':
-        return 'utf8';
-      case 'ucs2':
-      case 'utf16le':
-      case 'ucs-2':
-      case 'utf-16le':
-        return 'utf16le';
-      case 'binary':
-        return 'latin1';
-      case 'base64':
-      case 'ascii':
-      case 'latin1':
-      case 'hex':
-        return enc;
-      default:
-        if (low) return; // undefined
-        enc = ('' + enc).toLowerCase();
-        low = true;
-    }
-  }
 };

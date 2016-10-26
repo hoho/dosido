@@ -77,6 +77,7 @@
       'lib/internal/child_process.js',
       'lib/internal/cluster.js',
       'lib/internal/freelist.js',
+      'lib/internal/fs.js',
       'lib/internal/linkedlist.js',
       'lib/internal/net.js',
       'lib/internal/module.js',
@@ -88,6 +89,7 @@
       'lib/internal/readline.js',
       'lib/internal/repl.js',
       'lib/internal/socket_list.js',
+      'lib/internal/url.js',
       'lib/internal/util.js',
       'lib/internal/v8_prof_polyfill.js',
       'lib/internal/v8_prof_processor.js',
@@ -163,6 +165,7 @@
         'src/node_main.cc',
         'src/node_os.cc',
         'src/node_revert.cc',
+        'src/node_url.cc',
         'src/node_util.cc',
         'src/node_v8.cc',
         'src/node_stat_watcher.cc',
@@ -264,8 +267,8 @@
         }],
         [ 'node_use_bundled_v8=="true"', {
           'dependencies': [
-            'deps/v8/tools/gyp/v8.gyp:v8',
-            'deps/v8/tools/gyp/v8.gyp:v8_libplatform'
+            'deps/v8/src/v8.gyp:v8',
+            'deps/v8/src/v8.gyp:v8_libplatform'
           ],
         }],
         [ 'node_use_v8_platform=="true"', {
@@ -479,7 +482,7 @@
           'defines': [ 'NODE_NO_BROWSER_GLOBALS' ],
         } ],
         [ 'node_use_bundled_v8=="true" and v8_postmortem_support=="true"', {
-          'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
+          'dependencies': [ 'deps/v8/src/v8.gyp:postmortem-metadata' ],
           'conditions': [
             # -force_load is not applicable for the static library
             [ 'node_target_type!="static_library"', {
@@ -493,8 +496,6 @@
         }],
         [ 'node_shared_zlib=="false"', {
           'dependencies': [ 'deps/zlib/zlib.gyp:zlib' ],
-        }, {
-          'defines': [ 'ZLIB_CONST' ],
         }],
 
         [ 'node_shared_http_parser=="false"', {
@@ -916,13 +917,13 @@
         }],
         [ 'node_use_v8_platform=="true"', {
           'dependencies': [
-            'deps/v8/tools/gyp/v8.gyp:v8_libplatform',
+            'deps/v8/src/v8.gyp:v8_libplatform',
           ],
         }],
         [ 'node_use_bundled_v8=="true"', {
           'dependencies': [
-            'deps/v8/tools/gyp/v8.gyp:v8',
-            'deps/v8/tools/gyp/v8.gyp:v8_libplatform'
+            'deps/v8/src/v8.gyp:v8',
+            'deps/v8/src/v8.gyp:v8_libplatform'
           ],
         }],
       ]

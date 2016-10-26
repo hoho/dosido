@@ -559,9 +559,9 @@ Generates private and public EC Diffie-Hellman key values, and returns
 the public key in the specified `format` and `encoding`. This key should be
 transferred to the other party.
 
-The `format` arguments specifies point encoding and can be `'compressed'`,
-`'uncompressed'`, or `'hybrid'`. If `format` is not specified, the point will
-be returned in `'uncompressed'` format.
+The `format` argument specifies point encoding and can be `'compressed'` or
+`'uncompressed'`. If `format` is not specified, the point will be returned in
+`'uncompressed'` format.
 
 The `encoding` argument can be `'latin1'`, `'hex'`, or `'base64'`. If
 `encoding` is provided a string is returned; otherwise a [`Buffer`][]
@@ -584,9 +584,9 @@ added: v0.11.14
 Returns the EC Diffie-Hellman public key in the specified `encoding` and
 `format`.
 
-The `format` argument specifies point encoding and can be `'compressed'`,
-`'uncompressed'`, or `'hybrid'`. If `format` is not specified the point will be
-returned in `'uncompressed'` format.
+The `format` argument specifies point encoding and can be `'compressed'` or
+`'uncompressed'`. If `format` is not specified the point will be returned in
+`'uncompressed'` format.
 
 The `encoding` argument can be `'latin1'`, `'hex'`, or `'base64'`. If
 `encoding` is specified, a string is returned; otherwise a [`Buffer`][] is
@@ -992,7 +992,7 @@ thrown.
 
 ## `crypto` module methods and properties
 
-## crypto.constants
+### crypto.constants
 <!-- YAML
 added: v6.3.0
 -->
@@ -1241,18 +1241,18 @@ input.on('readable', () => {
 added: v0.1.92
 -->
 
-Creates and returns a `Sign` object that uses the given `algorithm`. On
-recent OpenSSL releases, `openssl list-public-key-algorithms` will
-display the available signing algorithms. One example is `'RSA-SHA256'`.
+Creates and returns a `Sign` object that uses the given `algorithm`.
+Use [`crypto.getHashes()`][] to obtain an array of names of the available
+signing algorithms.
 
 ### crypto.createVerify(algorithm)
 <!-- YAML
 added: v0.1.92
 -->
 
-Creates and returns a `Verify` object that uses the given algorithm. On
-recent OpenSSL releases, `openssl list-public-key-algorithms` will
-display the available signing algorithms. One example is `'RSA-SHA256'`.
+Creates and returns a `Verify` object that uses the given algorithm.
+Use [`crypto.getHashes()`][] to obtain an array of names of the available
+signing algorithms.
 
 ### crypto.getCiphers()
 <!-- YAML
@@ -1320,7 +1320,8 @@ console.log(alice_secret == bob_secret);
 added: v0.9.3
 -->
 
-Returns an array with the names of the supported hash algorithms.
+Returns an array of the names of the supported hash algorithms,
+such as `RSA-SHA256`.
 
 Example:
 

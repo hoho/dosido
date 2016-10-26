@@ -32,10 +32,17 @@ struct sockaddr;
 
 namespace node {
 
+// Set in node.cc by ParseArgs with the value of --openssl-config.
+// Used in node_crypto.cc when initializing OpenSSL.
+extern const char* openssl_config;
+
 // Set in node.cc by ParseArgs when --preserve-symlinks is used.
 // Used in node_config.cc to set a constant on process.binding('config')
 // that is used by lib/module.js
 extern bool config_preserve_symlinks;
+
+// Tells whether it is safe to call v8::Isolate::GetCurrent().
+extern bool v8_initialized;
 
 // Forward declaration
 class Environment;
@@ -52,13 +59,6 @@ inline v8::Local<TypeName> PersistentToLocal(
 v8::Local<v8::Value> MakeCallback(Environment* env,
                                    v8::Local<v8::Object> recv,
                                    const char* method,
-                                   int argc = 0,
-                                   v8::Local<v8::Value>* argv = nullptr);
-
-// Call with valid HandleScope and while inside Context scope.
-v8::Local<v8::Value> MakeCallback(Environment* env,
-                                   v8::Local<v8::Object> recv,
-                                   uint32_t index,
                                    int argc = 0,
                                    v8::Local<v8::Value>* argv = nullptr);
 
@@ -131,6 +131,12 @@ NO_RETURN void FatalError(const char* location, const char* message);
 
 v8::Local<v8::Value> BuildStatsObject(Environment* env, const uv_stat_t* s);
 
+void SetupProcessObject(Environment* env,
+                        int argc,
+                        const char* const* argv,
+                        int exec_argc,
+                        const char* const* exec_argv);
+
 enum Endianness {
   kLittleEndian,  // _Not_ LITTLE_ENDIAN, clashes with endian.h.
   kBigEndian
@@ -155,34 +161,17 @@ inline bool IsBigEndian() {
   return GetEndianness() == kBigEndian;
 }
 
-void ThrowError(v8::Isolate* isolate, const char* errmsg);
-void ThrowTypeError(v8::Isolate* isolate, const char* errmsg);
-void ThrowRangeError(v8::Isolate* isolate, const char* errmsg);
-void ThrowErrnoException(v8::Isolate* isolate,
-                         int errorno,
-                         const char* syscall = nullptr,
-                         const char* message = nullptr,
-                         const char* path = nullptr);
-void ThrowUVException(v8::Isolate* isolate,
-                      int errorno,
-                      const char* syscall = nullptr,
-                      const char* message = nullptr,
-                      const char* path = nullptr,
-                      const char* dest = nullptr);
-
 class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
  public:
-  ArrayBufferAllocator() : env_(nullptr) { }
-
-  inline void set_env(Environment* env) { env_ = env; }
+  inline uint32_t* zero_fill_field() { return &zero_fill_field_; }
 
   virtual void* Allocate(size_t size);  // Defined in src/node.cc
   virtual void* AllocateUninitialized(size_t size)
-    { return node::Malloc(size); }
+    { return node::UncheckedMalloc(size); }
   virtual void Free(void* data, size_t) { free(data); }
 
  private:
-  Environment* env_;
+  uint32_t zero_fill_field_ = 1;  // Boolean but exposed as uint32 to JS land.
 };
 
 // Clear any domain and/or uncaughtException handlers to force the error's

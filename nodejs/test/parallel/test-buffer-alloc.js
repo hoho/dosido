@@ -742,7 +742,6 @@ assert.strictEqual('<Buffer 81 a3 66 6f 6f a3 62 61 72>', x.inspect());
 Buffer.allocUnsafe(3.3).fill().toString();
   // throws bad argument error in commit 43cb4ec
 Buffer.alloc(3.3).fill().toString();
-assert.equal(Buffer.allocUnsafe(-1).length, 0);
 assert.strictEqual(Buffer.allocUnsafe(NaN).length, 0);
 assert.strictEqual(Buffer.allocUnsafe(3.3).length, 3);
 assert.strictEqual(Buffer.from({length: 3.3}).length, 3);
@@ -767,35 +766,6 @@ assert.strictEqual(Buffer.from('13.37').length, 5);
 
 // issue GH-3416
 Buffer.from(Buffer.allocUnsafe(0), 0, 0);
-
-[ 'hex',
-  'utf8',
-  'utf-8',
-  'ascii',
-  'latin1',
-  'binary',
-  'base64',
-  'ucs2',
-  'ucs-2',
-  'utf16le',
-  'utf-16le' ].forEach(function(enc) {
-    assert.equal(Buffer.isEncoding(enc), true);
-  });
-
-[ 'utf9',
-  'utf-7',
-  'Unicode-FTW',
-  'new gnu gun',
-  false,
-  NaN,
-  {},
-  Infinity,
-  [],
-  1,
-  0,
-  -1 ].forEach(function(enc) {
-    assert.equal(Buffer.isEncoding(enc), false);
-  });
 
 // GH-5110
 {
@@ -1053,7 +1023,7 @@ if (common.hasCrypto) {
 
 const ps = Buffer.poolSize;
 Buffer.poolSize = 0;
-assert.strictEqual(Buffer.allocUnsafe(1).parent, undefined);
+assert(Buffer.allocUnsafe(1).parent instanceof ArrayBuffer);
 Buffer.poolSize = ps;
 
 // Test Buffer.copy() segfault
@@ -1112,3 +1082,14 @@ assert.doesNotThrow(() => Buffer.from(new ArrayBuffer()));
 const arrayBuf = vm.runInNewContext('new ArrayBuffer()');
 assert.doesNotThrow(() => Buffer.from(arrayBuf));
 assert.doesNotThrow(() => Buffer.from({ buffer: arrayBuf }));
+
+assert.throws(() => Buffer.alloc({ valueOf: () => 1 }),
+              /"size" argument must be a number/);
+assert.throws(() => Buffer.alloc({ valueOf: () => -1 }),
+              /"size" argument must be a number/);
+
+assert.strictEqual(Buffer.prototype.toLocaleString, Buffer.prototype.toString);
+{
+  const buf = Buffer.from('test');
+  assert.strictEqual(buf.toLocaleString(), buf.toString());
+}

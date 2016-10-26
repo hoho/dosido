@@ -129,7 +129,7 @@ See more details in [`fs.watch()`][].
 
 The `filename` argument may not be provided depending on operating system
 support. If `filename` is provided, it will be provided as a `Buffer` if
-`fs.watch()` is called with it's `encoding` option set to `'buffer'`, otherwise
+`fs.watch()` is called with its `encoding` option set to `'buffer'`, otherwise
 `filename` will be a string.
 
 ```js
@@ -1034,25 +1034,25 @@ deprecated: v0.4.7
 
 Synchronous lchown(2). Returns `undefined`.
 
-## fs.link(srcpath, dstpath, callback)
+## fs.link(existingPath, newPath, callback)
 <!-- YAML
 added: v0.1.31
 -->
 
-* `srcpath` {String | Buffer}
-* `dstpath` {String | Buffer}
+* `existingPath` {String | Buffer}
+* `newPath` {String | Buffer}
 * `callback` {Function}
 
 Asynchronous link(2). No arguments other than a possible exception are given to
 the completion callback.
 
-## fs.linkSync(srcpath, dstpath)
+## fs.linkSync(existingPath, newPath)
 <!-- YAML
 added: v0.1.31
 -->
 
-* `srcpath` {String | Buffer}
-* `dstpath` {String | Buffer}
+* `existingPath` {String | Buffer}
+* `newPath` {String | Buffer}
 
 Synchronous link(2). Returns `undefined`.
 

@@ -19,15 +19,20 @@ const ChildProcess = exports.ChildProcess = child_process.ChildProcess;
 exports.fork = function(modulePath /*, args, options*/) {
 
   // Get options and args arguments.
-  var options, args, execArgv;
-  if (Array.isArray(arguments[1])) {
-    args = arguments[1];
-    options = util._extend({}, arguments[2]);
-  } else if (arguments[1] && typeof arguments[1] !== 'object') {
-    throw new TypeError('Incorrect value of args option');
-  } else {
-    args = [];
-    options = util._extend({}, arguments[1]);
+  var execArgv;
+  var options = {};
+  var args = [];
+  var pos = 1;
+  if (pos < arguments.length && Array.isArray(arguments[pos])) {
+    args = arguments[pos++];
+  }
+
+  if (pos < arguments.length && arguments[pos] != null) {
+    if (typeof arguments[pos] !== 'object') {
+      throw new TypeError('Incorrect value of args option');
+    } else {
+      options = util._extend({}, arguments[pos++]);
+    }
   }
 
   // Prepare arguments for fork:
@@ -45,8 +50,8 @@ exports.fork = function(modulePath /*, args, options*/) {
   args = execArgv.concat([modulePath], args);
 
   if (!Array.isArray(options.stdio)) {
-    // Leave stdin open for the IPC channel. stdout and stderr should be the
-    // same as the parent's if silent isn't set.
+    // Use a separate fd=3 for the IPC channel. Inherit stdin, stdout,
+    // and stderr from the parent if silent isn't set.
     options.stdio = options.silent ? ['pipe', 'pipe', 'pipe', 'ipc'] :
         [0, 1, 2, 'ipc'];
   } else if (options.stdio.indexOf('ipc') === -1) {
@@ -136,7 +141,7 @@ exports.execFile = function(file /*, args, options, callback*/) {
     callback = arguments[pos++];
   }
 
-  if (pos === 1 && arguments.length > 1) {
+  if (!callback && arguments[pos] != null) {
     throw new TypeError('Incorrect value of args option');
   }
 
@@ -333,7 +338,7 @@ function normalizeSpawnArguments(file /*, args, options*/) {
     if (process.platform === 'win32') {
       file = typeof options.shell === 'string' ? options.shell :
               process.env.comspec || 'cmd.exe';
-      args = ['/s', '/c', '"' + command + '"'];
+      args = ['/d', '/s', '/c', '"' + command + '"'];
       options.windowsVerbatimArguments = true;
     } else {
       if (typeof options.shell === 'string')
