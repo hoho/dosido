@@ -53,7 +53,8 @@ else
 		../nodejs/out/Release/libicudata.a \
 		../nodejs/out/Release/libicui18n.a \
 		../nodejs/out/Release/libicustubdata.a \
-		-lstdc++$LIBSTD_VERSION -lm -ldl"
+		../nodejs/out/Release/libv8_libsampler.a \
+		-lc++ -lm -ldl"
 fi
 
 CORE_LIBS="$CORE_LIBS $NODEJS_LIBS"

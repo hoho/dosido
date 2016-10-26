@@ -4461,7 +4461,7 @@ static void StartNodeInstance(void* arg) {
 
     env.set_trace_sync_io(trace_sync_io);
 
-    if (nodejsLoadScripts(env, ExecuteString, ReportException))
+    if (nodejsLoadScripts(&env, ExecuteString, ReportException))
       goto done;
 
     // Enable debugger

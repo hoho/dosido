@@ -886,7 +886,9 @@ nodejsCallLoadedScript(Environment *env, nodejsCallCmd *cmd)
         }
     }
 
-    MakeCallback(env, scripts, cmd->index, 5, args);
+    Local<Value> cb = scripts->Get(cmd->index);
+    CHECK(cb->IsFunction());
+    MakeCallback(env, scripts.As<Value>(), cb.As<Function>(), 5, args);
 }
 
 
