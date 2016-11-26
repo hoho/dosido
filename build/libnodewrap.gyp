@@ -4,7 +4,7 @@
           ['GENERATOR == "ninja" or OS== "mac"', {
             'LIB_NODE': '<(PRODUCT_DIR)/libnode.a',
           }, {
-            'LIB_NODE': '<(PRODUCT_DIR)/obj.target/libnode.a',
+            'LIB_NODE': '<(PRODUCT_DIR)/nodejs/libnode.a',
           }],
         ],
   },
@@ -36,9 +36,8 @@
               'ldflags': [
                 '-Wl,--whole-archive,'
                     '<(LIB_NODE)',
-                    '<(PRODUCT_DIR)/obj.target/deps/openssl/'
-                    '<(OPENSSL_PRODUCT)',
-                    '<(V8_BASE)'
+                    '<(PRODUCT_DIR)/nodejs/deps/openssl/<(OPENSSL_PRODUCT)',
+                    '<(PRODUCT_DIR)/nodejs/deps/v8/src/libv8_base.a',
                 '-Wl,--no-whole-archive',
                 '-lstdc++'
               ],
