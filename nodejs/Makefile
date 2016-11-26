@@ -8,6 +8,7 @@ PREFIX ?= /usr/local
 FLAKY_TESTS ?= run
 TEST_CI_ARGS ?=
 STAGINGSERVER ?= node-www
+LOGLEVEL ?= silent
 OSTYPE := $(shell uname -s | tr '[A-Z]' '[a-z]')
 
 ifdef JOBS
@@ -162,10 +163,12 @@ test/addons/.buildstamp: config.gypi \
 	deps/uv/include/*.h deps/v8/include/*.h \
 	src/node.h src/node_buffer.h src/node_object_wrap.h src/node_version.h \
 	test/addons/.docbuildstamp
-	# Cannot use $(wildcard test/addons/*/) here, it's evaluated before
-	# embedded addons have been generated from the documentation.
-	for dirname in test/addons/*/; do \
-		$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+#	Cannot use $(wildcard test/addons/*/) here, it's evaluated before
+#	embedded addons have been generated from the documentation.
+	@for dirname in test/addons/*/; do \
+		echo "\nBuilding addon $$PWD/$$dirname" ; \
+		env MAKEFLAGS="-j1" $(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp \
+		        --loglevel=$(LOGLEVEL) rebuild \
 			--python="$(PYTHON)" \
 			--directory="$$PWD/$$dirname" \
 			--nodedir="$$PWD" || exit 1 ; \
@@ -195,6 +198,7 @@ CI_NATIVE_SUITES := addons
 CI_JS_SUITES := doctool inspector known_issues message parallel pseudo-tty sequential
 
 # Build and test addons without building anything else
+test-ci-native: LOGLEVEL := info
 test-ci-native: | test/addons/.buildstamp
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
 		--mode=release --flaky-tests=$(FLAKY_TESTS) \
@@ -206,6 +210,7 @@ test-ci-js:
 		--mode=release --flaky-tests=$(FLAKY_TESTS) \
 		$(TEST_CI_ARGS) $(CI_JS_SUITES)
 
+test-ci: LOGLEVEL := info
 test-ci: | build-addons
 	out/Release/cctest --gtest_output=tap:cctest.tap
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
@@ -258,7 +263,7 @@ test-timers-clean:
 
 ifneq ("","$(wildcard deps/v8/tools/run-tests.py)")
 test-v8: v8
-	# note: performs full test unless QUICKCHECK is specified
+#	note: performs full test unless QUICKCHECK is specified
 	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
         --mode=$(BUILDTYPE_LOWER) $(V8_TEST_OPTIONS) $(QUICKCHECK_ARG) \
         --no-presubmit \
@@ -266,7 +271,7 @@ test-v8: v8
 	 $(TAP_V8)
 
 test-v8-intl: v8
-	# note: performs full test unless QUICKCHECK is specified
+#	note: performs full test unless QUICKCHECK is specified
 	deps/v8/tools/run-tests.py --arch=$(V8_ARCH) \
         --mode=$(BUILDTYPE_LOWER) --no-presubmit $(QUICKCHECK_ARG) \
         --shell-dir=deps/v8/out/$(V8_ARCH).$(BUILDTYPE_LOWER) intl \
@@ -279,7 +284,7 @@ test-v8-benchmarks: v8
 	 $(TAP_V8_BENCHMARKS)
 
 test-v8-all: test-v8 test-v8-intl test-v8-benchmarks
-	# runs all v8 tests
+# runs all v8 tests
 else
 test-v8 test-v8-intl test-v8-benchmarks test-v8-all:
 	@echo "Testing v8 is not available through the source tarball."
@@ -311,7 +316,7 @@ out/doc/%: doc/%
 # check if ./node is actually set, else use user pre-installed binary
 gen-json = tools/doc/generate.js --format=json $< > $@
 out/doc/api/%.json: doc/api/%.md
-	[ -e tools/doc/node_modules/js-yaml/package.json ] || \
+	@[ -e tools/doc/node_modules/js-yaml/package.json ] || \
 		[ -e tools/eslint/node_modules/js-yaml/package.json ] || \
 		if [ -x $(NODE) ]; then \
 			cd tools/doc && ../../$(NODE) ../../$(NPM) install; \
@@ -323,7 +328,7 @@ out/doc/api/%.json: doc/api/%.md
 # check if ./node is actually set, else use user pre-installed binary
 gen-html = tools/doc/generate.js --node-version=$(FULLVERSION) --format=html --template=doc/template.html $< > $@
 out/doc/api/%.html: doc/api/%.md
-	[ -e tools/doc/node_modules/js-yaml/package.json ] || \
+	@[ -e tools/doc/node_modules/js-yaml/package.json ] || \
 		[ -e tools/eslint/node_modules/js-yaml/package.json ] || \
 		if [ -x $(NODE) ]; then \
 			cd tools/doc && ../../$(NODE) ../../$(NPM) install; \

@@ -305,7 +305,7 @@ var _deprecatedCustomFds = internalUtil.deprecate(function(options) {
    'Use options.stdio instead.');
 
 function _convertCustomFds(options) {
-  if (options && options.customFds && !options.stdio) {
+  if (options.customFds && !options.stdio) {
     _deprecatedCustomFds(options);
   }
 }
@@ -517,7 +517,7 @@ exports.execFileSync = execFileSync;
 
 function execSync(command /*, options*/) {
   var opts = normalizeExecArgs.apply(null, arguments);
-  var inheritStderr = opts.options ? !opts.options.stdio : true;
+  var inheritStderr = !opts.options.stdio;
 
   var ret = spawnSync(opts.file, opts.options);
   ret.cmd = command;

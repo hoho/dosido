@@ -5,12 +5,24 @@ const helper = require('./inspector-helper.js');
 
 let scopeId;
 
-function checkListResponse(response) {
+function checkListResponse(err, response) {
+  assert.ifError(err);
   assert.strictEqual(1, response.length);
   assert.ok(response[0]['devtoolsFrontendUrl']);
   assert.ok(
     response[0]['webSocketDebuggerUrl']
-      .match(/ws:\/\/localhost:\d+\/[0-9A-Fa-f]{8}-/));
+      .match(/ws:\/\/127.0.0.1:\d+\/[0-9A-Fa-f]{8}-/));
+}
+
+function checkVersion(err, response) {
+  assert.ifError(err);
+  assert.ok(response);
+}
+
+function checkBadPath(err, response) {
+  assert(err instanceof SyntaxError);
+  assert(/Unexpected token/.test(err.message));
+  assert(/WebSockets request was expected/.test(err.response));
 }
 
 function expectMainScriptSource(result) {
@@ -153,11 +165,32 @@ function testInspectScope(session) {
 }
 
 function testNoUrlsWhenConnected(session) {
-  session.testHttpResponse('/json/list', (response) => {
+  session.testHttpResponse('/json/list', (err, response) => {
+    assert.ifError(err);
     assert.strictEqual(1, response.length);
     assert.ok(!response[0].hasOwnProperty('devtoolsFrontendUrl'));
     assert.ok(!response[0].hasOwnProperty('webSocketDebuggerUrl'));
   });
+}
+
+function testI18NCharacters(session) {
+  console.log('[test]', 'Verify sending and receiving UTF8 characters');
+  const chars = 'טֶ字и';
+  session.sendInspectorCommands([
+    {
+      'method': 'Debugger.evaluateOnCallFrame', 'params': {
+        'callFrameId': '{"ordinal":0,"injectedScriptId":1}',
+        'expression': 'console.log("' + chars + '")',
+        'objectGroup': 'console',
+        'includeCommandLineAPI': true,
+        'silent': false,
+        'returnByValue': false,
+        'generatePreview': true
+      }
+    }
+  ]).expectMessages([
+    setupExpectConsoleOutput('log', [chars]),
+  ]);
 }
 
 function testWaitsForFrontendDisconnect(session, harness) {
@@ -171,12 +204,16 @@ function runTests(harness) {
   harness
     .testHttpResponse('/json', checkListResponse)
     .testHttpResponse('/json/list', checkListResponse)
-    .testHttpResponse('/json/version', assert.ok)
+    .testHttpResponse('/json/version', checkVersion)
+    .testHttpResponse('/json/activate', checkBadPath)
+    .testHttpResponse('/json/activate/boom', checkBadPath)
+    .testHttpResponse('/json/badpath', checkBadPath)
     .runFrontendSession([
       testNoUrlsWhenConnected,
       testBreakpointOnStart,
       testSetBreakpointAndResume,
       testInspectScope,
+      testI18NCharacters,
       testWaitsForFrontendDisconnect
     ]).expectShutDown(55);
 }

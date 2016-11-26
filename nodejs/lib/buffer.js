@@ -527,7 +527,7 @@ Buffer.prototype.equals = function equals(b) {
 
 
 // Override how buffers are presented by util.inspect().
-Buffer.prototype[internalUtil.inspectSymbol] = function inspect() {
+Buffer.prototype[internalUtil.customInspectSymbol] = function inspect() {
   var str = '';
   var max = exports.INSPECT_MAX_BYTES;
   if (this.length > 0) {
@@ -537,7 +537,7 @@ Buffer.prototype[internalUtil.inspectSymbol] = function inspect() {
   }
   return '<' + this.constructor.name + ' ' + str + '>';
 };
-Buffer.prototype.inspect = Buffer.prototype[internalUtil.inspectSymbol];
+Buffer.prototype.inspect = Buffer.prototype[internalUtil.customInspectSymbol];
 
 Buffer.prototype.compare = function compare(target,
                                             start,
@@ -807,8 +807,10 @@ Buffer.prototype.toJSON = function() {
 
 
 function adjustOffset(offset, length) {
-  offset |= 0;
-  if (offset === 0) {
+  // Use Math.trunc() to convert offset to an integer value that can be larger
+  // than an Int32. Hence, don't use offset | 0 or similar techniques.
+  offset = Math.trunc(offset);
+  if (offset === 0 || Number.isNaN(offset)) {
     return 0;
   } else if (offset < 0) {
     offset += length;
@@ -1360,3 +1362,7 @@ Buffer.prototype.swap64 = function swap64() {
 };
 
 Buffer.prototype.toLocaleString = Buffer.prototype.toString;
+
+// Put this at the end because internal/buffer has a circular
+// dependency on Buffer.
+exports.transcode = require('internal/buffer').transcode;

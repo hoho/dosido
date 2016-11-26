@@ -867,7 +867,7 @@ added: v0.1.95
 * `callback` {Function}
 
 Asynchronous fstat(2). The callback gets two arguments `(err, stats)` where
-`stats` is a [`fs.Stats`][] object. `fstat()` is identical to [`stat()`][],
+`stats` is an [`fs.Stats`][] object. `fstat()` is identical to [`stat()`][],
 except that the file to be stat-ed is specified by the file descriptor `fd`.
 
 ## fs.fstatSync(fd)
@@ -877,7 +877,7 @@ added: v0.1.95
 
 * `fd` {Integer}
 
-Synchronous fstat(2). Returns an instance of `fs.Stats`.
+Synchronous fstat(2). Returns an instance of [`fs.Stats`][].
 
 ## fs.fsync(fd, callback)
 <!-- YAML
@@ -1076,7 +1076,7 @@ added: v0.1.30
 
 * `path` {String | Buffer}
 
-Synchronous lstat(2). Returns an instance of `fs.Stats`.
+Synchronous lstat(2). Returns an instance of [`fs.Stats`][].
 
 ## fs.mkdir(path[, mode], callback)
 <!-- YAML
@@ -1521,8 +1521,7 @@ added: v0.0.2
 * `callback` {Function}
 
 Asynchronous stat(2). The callback gets two arguments `(err, stats)` where
-`stats` is a [`fs.Stats`][] object.  See the [`fs.Stats`][] section for more
-information.
+`stats` is an [`fs.Stats`][] object.
 
 In case of an error, the `err.code` will be one of [Common System Errors][].
 
@@ -2190,7 +2189,7 @@ The following constants are meant for use with the [`fs.Stats`][] object's
 [`fs.FSWatcher`]: #fs_class_fs_fswatcher
 [`fs.futimes()`]: #fs_fs_futimes_fd_atime_mtime_callback
 [`fs.lstat()`]: #fs_fs_lstat_path_callback
-[`fs.mkdtemp()`]: #fs_fs_mkdtemp_prefix_callback
+[`fs.mkdtemp()`]: #fs_fs_mkdtemp_prefix_options_callback
 [`fs.open()`]: #fs_fs_open_path_flags_mode_callback
 [`fs.read()`]: #fs_fs_read_fd_buffer_offset_length_position_callback
 [`fs.readFile`]: #fs_fs_readfile_file_options_callback

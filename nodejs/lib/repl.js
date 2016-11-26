@@ -40,12 +40,12 @@ const parentModule = module;
 const replMap = new WeakMap();
 
 const GLOBAL_OBJECT_PROPERTIES = ['NaN', 'Infinity', 'undefined',
-    'eval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'decodeURI',
-    'decodeURIComponent', 'encodeURI', 'encodeURIComponent',
-    'Object', 'Function', 'Array', 'String', 'Boolean', 'Number',
-    'Date', 'RegExp', 'Error', 'EvalError', 'RangeError',
-    'ReferenceError', 'SyntaxError', 'TypeError', 'URIError',
-    'Math', 'JSON'];
+  'eval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'decodeURI',
+  'decodeURIComponent', 'encodeURI', 'encodeURIComponent',
+  'Object', 'Function', 'Array', 'String', 'Boolean', 'Number',
+  'Date', 'RegExp', 'Error', 'EvalError', 'RangeError',
+  'ReferenceError', 'SyntaxError', 'TypeError', 'URIError',
+  'Math', 'JSON'];
 const GLOBAL_OBJECT_PROPERTY_MAP = {};
 GLOBAL_OBJECT_PROPERTIES.forEach((p) => GLOBAL_OBJECT_PROPERTY_MAP[p] = p);
 
@@ -354,7 +354,7 @@ function REPLServer(prompt,
 
   self.eval = self._domain.bind(eval_);
 
-  self._domain.on('error', function(e) {
+  self._domain.on('error', function debugDomainError(e) {
     debug('domain error');
     const top = replMap.get(self);
     internalUtil.decorateErrorStack(e);
@@ -436,13 +436,13 @@ function REPLServer(prompt,
     };
   }
 
-  self.on('close', function() {
+  self.on('close', function emitExit() {
     self.emit('exit');
   });
 
   var sawSIGINT = false;
   var sawCtrlD = false;
-  self.on('SIGINT', function() {
+  self.on('SIGINT', function onSigInt() {
     var empty = self.line.length === 0;
     self.clearLine();
     self.turnOffEditorMode();
@@ -465,7 +465,7 @@ function REPLServer(prompt,
     self.displayPrompt();
   });
 
-  self.on('line', function(cmd) {
+  self.on('line', function onLine(cmd) {
     debug('line %j', cmd);
     sawSIGINT = false;
 
@@ -476,7 +476,7 @@ function REPLServer(prompt,
       const matches = self._sawKeyPress ? cmd.match(/^\s+/) : null;
       if (matches) {
         const prefix = matches[0];
-        self.inputStream.write(prefix);
+        self.write(prefix);
         self.line = prefix;
         self.cursor = prefix.length;
       }
@@ -586,7 +586,7 @@ function REPLServer(prompt,
     }
   });
 
-  self.on('SIGCONT', function() {
+  self.on('SIGCONT', function onSigCont() {
     if (self.editorMode) {
       self.outputStream.write(`${self._initialPrompt}.editor\n`);
       self.outputStream.write(
@@ -601,6 +601,7 @@ function REPLServer(prompt,
   // Wrap readline tty to enable editor mode
   const ttyWrite = self._ttyWrite.bind(self);
   self._ttyWrite = (d, key) => {
+    key = key || {};
     if (!self.editorMode || !self.terminal) {
       ttyWrite(d, key);
       return;
@@ -782,7 +783,7 @@ ArrayStream.prototype.writable = true;
 ArrayStream.prototype.resume = function() {};
 ArrayStream.prototype.write = function() {};
 
-const requireRE = /\brequire\s*\(['"](([\w\.\/-]+\/)?([\w\.\/-]*))/;
+const requireRE = /\brequire\s*\(['"](([\w./-]+\/)?([\w./-]*))/;
 const simpleExpressionRE =
     /(([a-zA-Z_$](?:\w|\$)*)\.)*([a-zA-Z_$](?:\w|\$)*)\.?$/;
 
@@ -950,7 +951,7 @@ function complete(line, callback) {
           addStandardGlobals(completionGroups, filter);
           completionGroupsLoaded();
         } else {
-          this.eval('.scope', this.context, 'repl', function(err, globals) {
+          this.eval('.scope', this.context, 'repl', function ev(err, globals) {
             if (err || !Array.isArray(globals)) {
               addStandardGlobals(completionGroups, filter);
             } else if (Array.isArray(globals[0])) {
@@ -967,7 +968,7 @@ function complete(line, callback) {
         }
       } else {
         const evalExpr = `try { ${expr} } catch (e) {}`;
-        this.eval(evalExpr, this.context, 'repl', function(e, obj) {
+        this.eval(evalExpr, this.context, 'repl', function doEval(e, obj) {
           // if (e) console.log(e);
 
           if (obj != null) {
@@ -1035,7 +1036,7 @@ function complete(line, callback) {
       var newCompletionGroups = [];
       for (i = 0; i < completionGroups.length; i++) {
         group = completionGroups[i].filter(function(elem) {
-          return elem.indexOf(filter) == 0;
+          return elem.indexOf(filter) === 0;
         });
         if (group.length) {
           newCompletionGroups.push(group);
@@ -1340,8 +1341,8 @@ function regexpEscape(s) {
 // TODO(princejwesley): Remove it prior to v8.0.0 release
 // Reference: https://github.com/nodejs/node/pull/7829
 REPLServer.prototype.convertToContext = util.deprecate(function(cmd) {
-  const scopeVar = /^\s*var\s*([_\w\$]+)(.*)$/m;
-  const scopeFunc = /^\s*function\s*([_\w\$]+)/;
+  const scopeVar = /^\s*var\s*([\w$]+)(.*)$/m;
+  const scopeFunc = /^\s*function\s*([\w$]+)/;
   var matches;
 
   // Replaces: var foo = "bar";  with: self.context.foo = bar;
