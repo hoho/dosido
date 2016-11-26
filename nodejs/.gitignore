@@ -27,6 +27,7 @@ icu_config.gypi
 Debug/
 !**/node_modules/debug/
 !deps/v8/src/debug/
+!deps/v8/src/base/debug/
 Release/
 !doc/blog/**
 *.sln
