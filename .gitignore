@@ -3,6 +3,7 @@
 /build/Makefile
 /build/gyp-mac-tool
 /build/libnodewrap.target.mk
+/build/libnodewrap.Makefile
 
 /node_modules
 
@@ -39,6 +40,7 @@ nginx/objs
 /deps/pcre/pcre_stringpiece.h
 /deps/pcre/pcrecpparg.h
 /deps/pcre/stamp-h1
+/deps/pcre/autom4te.cache/
 
 /deps/zlib/*.o
 /deps/zlib/configure.log
