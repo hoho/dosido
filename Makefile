@@ -35,7 +35,6 @@ configure:
 		--with-http_secure_link_module \
 		--with-http_stub_status_module \
 		--with-http_ssl_module \
-		--with-ipv6 \
 		--with-openssl=../nodejs/deps/openssl \
 		--with-pcre=../deps/pcre \
 		--with-zlib=../nodejs/deps/zlib \

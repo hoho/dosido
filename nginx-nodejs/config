@@ -1,61 +1,6 @@
 ngx_addon_name=ngx_http_nodejs_module
 
-FLAVOUR=`python -c 'from os import path; import sys; \
-        sys.path.insert(0, path.join("..", "nodejs", "tools", "gyp", "pylib")); \
-        from gyp.common import GetFlavor; \
-        print GetFlavor({})'`
-
-if [ $FLAVOUR = "win" ]; then
-    FORCE_SYMBOLS=`python -c 'import subprocess; import re; \
-                  symbols = subprocess.Popen("dumpbin /all ../nodejs/Release/lib/node.lib", stdout=subprocess.PIPE).stdout.read(); \
-                  print " ".join(map(lambda s: re.sub(r".*?(_+register_[^\s]+).*", r"/include:\1", s), filter(lambda s: s.find("_register_") >= 0, symbols.split("\n"))))'`
-
-    NODEJS_LIBS="/link \
-		psapi.lib \
-		iphlpapi.lib \
-		winmm.lib \
-		userenv.lib \
-		../nodejs/Release/lib/node.lib \
-		../nodejs/Release/lib/libuv.lib \
-		../nodejs/Release/lib/cares.lib \
-		../nodejs/Release/lib/openssl.lib \
-		../nodejs/Release/lib/http_parser.lib \
-		../nodejs/Release/lib/zlib.lib \
-		../nodejs/build/Release/lib/v8_libplatform.lib \
-		../nodejs/build/Release/lib/v8_base*.lib \
-		../nodejs/build/Release/lib/v8_libbase.lib \
-		../nodejs/build/Release/lib/v8_nosnapshot.lib \
-		$FORCE_SYMBOLS"
-else
-    if [ $FLAVOUR = "mac" ]; then
-        FORCE_LOAD_BEGIN="-Wl,-force_load,"
-        FORCE_LOAD_END=""
-        LIBSTD_VERSION=".6.0.9"
-    else
-        FORCE_LOAD_BEGIN="-Wl,--whole-archive "
-        FORCE_LOAD_END="-Wl,--no-whole-archive "
-        LIBSTD_VERSION=""
-    fi
-
-    NODEJS_LIBS="$FORCE_LOAD_BEGIN../nodejs/out/Release/libnode.a $FORCE_LOAD_END\
-		../nodejs/out/Release/libuv.a \
-		../nodejs/out/Release/libcares.a \
-		$FORCE_LOAD_BEGIN../nodejs/out/Release/libopenssl.a $FORCE_LOAD_END\
-		../nodejs/out/Release/libzlib.a \
-		../nodejs/out/Release/libhttp_parser.a \
-		../nodejs/out/Release/libv8_libplatform.a \
-		$FORCE_LOAD_BEGIN../nodejs/out/Release/libv8_base.a $FORCE_LOAD_END\
-		../nodejs/out/Release/libv8_libbase.a \
-		../nodejs/out/Release/libv8_nosnapshot.a \
-		../nodejs/out/Release/libv8_inspector_stl.a \
-		../nodejs/out/Release/libicuucx.a \
-		../nodejs/out/Release/libgtest.a \
-		../nodejs/out/Release/libicudata.a \
-		../nodejs/out/Release/libicui18n.a \
-		../nodejs/out/Release/libicustubdata.a \
-		../nodejs/out/Release/libv8_libsampler.a \
-		-lc++ -lm -ldl"
-fi
+NODEJS_LIBS=`python ../build/getlibs.py`
 
 CORE_LIBS="$CORE_LIBS $NODEJS_LIBS"
 

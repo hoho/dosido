@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+import os
+import sys
+import subprocess
+
+script_dir = os.path.dirname(__file__)
+node_root = os.path.normpath(os.path.join(script_dir, os.pardir, "nodejs"))
+
+sys.path.insert(0, os.path.join(node_root, "tools", "gyp", "pylib"))
+import gyp
+from gyp.common import GetFlavor
+
+
+cwd = os.getcwd()
+node_configure_cmd = ["./configure", "--enable-static"]
+os.chdir(node_root)
+rc = subprocess.call(node_configure_cmd)
+os.chdir(cwd)
+if rc != 0:
+    print "FAILED: %s" % node_configure_cmd
+    sys.exit(rc)
+
+args = sys.argv[1:]
+
+# GYP bug.
+# On msvs it will crash if it gets an absolute path.
+# On Mac/make it will crash if it doesn"t get an absolute path.
+if sys.platform == "win32":
+    args.append(os.path.join(script_dir, "libnodewrap.gyp"))
+    common_fn  = os.path.join(node_root, "common.gypi")
+    options_fn = os.path.join(node_root, "config.gypi")
+    options_fips_fn = os.path.join(node_root, "config_fips.gypi")
+else:
+    args.append(os.path.join(os.path.abspath(script_dir), "libnodewrap.gyp"))
+    common_fn  = os.path.join(os.path.abspath(node_root), "common.gypi")
+    options_fn = os.path.join(os.path.abspath(node_root), "config.gypi")
+    options_fips_fn = os.path.join(os.path.abspath(node_root), "config_fips.gypi")
+
+if os.path.exists(common_fn):
+    args.extend(["-I", common_fn])
+
+if os.path.exists(options_fn):
+    args.extend(["-I", options_fn])
+
+if os.path.exists(options_fips_fn):
+    args.extend(["-I", options_fips_fn])
+
+args.append("--no-parallel")
+args.append("--depth=" + script_dir)
+
+flavor = GetFlavor({})
+if flavor == "win" and sys.platform != "msys":
+    args.extend(["-f", "msvs", "-G", "msvs_version=auto"])
+else:
+    args.extend(["-f", "make-" + flavor])
+
+rc = gyp.main(args)
+if rc != 0:
+    print "Error running GYP"
+    sys.exit(rc)
