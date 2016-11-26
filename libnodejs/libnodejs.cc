@@ -105,7 +105,8 @@ inline int nodejsClose(PIPE_FD_TYPE fd)
 
 
 using node::Environment;
-using node::libnodejs_libnodejs_native;
+using node::libnodejs_libnodejs_name;
+using node::libnodejs_libnodejs_data;
 using node::OneByteString;
 using node::Utf8Value;
 
@@ -963,11 +964,11 @@ nodejsLoadScripts(Environment *env,
     env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
 
     Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(),
-                                                      "libnodejs.js");
+                                                      libnodejs_libnodejs_name);
     Local<Value> f_value = execute(
         env,
-        OneByteString(env->isolate(), libnodejs_libnodejs_native,
-                                      sizeof(libnodejs_libnodejs_native) - 1),
+        OneByteString(env->isolate(), libnodejs_libnodejs_data,
+                                      sizeof(libnodejs_libnodejs_data) - 1),
         script_name
     );
 

@@ -181,9 +181,9 @@ NODE_MODULES_PATHS(START)
 3. let DIRS = []
 4. while I >= 0,
    a. if PARTS[I] = "node_modules" CONTINUE
-   c. DIR = path join(PARTS[0 .. I] + "node_modules")
-   b. DIRS = DIRS + DIR
-   c. let I = I - 1
+   b. DIR = path join(PARTS[0 .. I] + "node_modules")
+   c. DIRS = DIRS + DIR
+   d. let I = I - 1
 5. return DIRS
 ```
 
@@ -601,7 +601,7 @@ added: v0.5.1
 -->
 
 * `id` {String}
-* Return: {Object} `module.exports` from the resolved module
+* Returns: {Object} `module.exports` from the resolved module
 
 The `module.require` method provides a way to load a module as if
 `require()` was called from the original module.

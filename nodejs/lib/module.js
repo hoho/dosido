@@ -6,6 +6,7 @@ const internalModule = require('internal/module');
 const vm = require('vm');
 const assert = require('assert').ok;
 const fs = require('fs');
+const internalFS = require('internal/fs');
 const path = require('path');
 const internalModuleReadFile = process.binding('fs').internalModuleReadFile;
 const internalModuleStat = process.binding('fs').internalModuleStat;
@@ -113,9 +114,6 @@ function tryPackage(requestPath, exts, isMain) {
 // Set to an empty Map to reset.
 const realpathCache = new Map();
 
-const realpathCacheKey = fs.realpathCacheKey;
-delete fs.realpathCacheKey;
-
 // check if the file exists and is not a directory
 // if using --preserve-symlinks and isMain is false,
 // keep symlinks intact, otherwise resolve to the
@@ -130,7 +128,7 @@ function tryFile(requestPath, isMain) {
 
 function toRealPath(requestPath) {
   return fs.realpathSync(requestPath, {
-    [realpathCacheKey]: realpathCache
+    [internalFS.realpathCacheKey]: realpathCache
   });
 }
 
@@ -548,7 +546,7 @@ Module.prototype._compile = function(content, filename) {
     displayErrors: true
   });
 
-  if (process._debugWaitConnect) {
+  if (process._debugWaitConnect && process._eval == null) {
     if (!resolvedArgv) {
       // we enter the repl if we're not given a filename argument.
       if (process.argv[1]) {

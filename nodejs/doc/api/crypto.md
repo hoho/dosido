@@ -15,8 +15,8 @@ const hash = crypto.createHmac('sha256', secret)
                    .update('I love cupcakes')
                    .digest('hex');
 console.log(hash);
-  // Prints:
-  //   c0fa1bc00531bd78ef38c628449c5102aeabd49b5dc3a2a516ea6ea959d6658e
+// Prints:
+//   c0fa1bc00531bd78ef38c628449c5102aeabd49b5dc3a2a516ea6ea959d6658e
 ```
 
 ## Determining if crypto support is unavailable
@@ -73,7 +73,7 @@ const cert = require('crypto').Certificate();
 const spkac = getSpkacSomehow();
 const challenge = cert.exportChallenge(spkac);
 console.log(challenge.toString('utf8'));
-  // Prints the challenge as a UTF8 string
+// Prints: the challenge as a UTF8 string
 ```
 
 ### certificate.exportPublicKey(spkac)
@@ -91,7 +91,7 @@ const cert = require('crypto').Certificate();
 const spkac = getSpkacSomehow();
 const publicKey = cert.exportPublicKey(spkac);
 console.log(publicKey);
-  // Prints the public key as <Buffer ...>
+// Prints: the public key as <Buffer ...>
 ```
 
 ### certificate.verifySpkac(spkac)
@@ -106,7 +106,7 @@ The `spkac` argument must be a Node.js [`Buffer`][].
 const cert = require('crypto').Certificate();
 const spkac = getSpkacSomehow();
 console.log(cert.verifySpkac(Buffer.from(spkac)));
-  // Prints true or false
+// Prints: true or false
 ```
 
 ## Class: Cipher
@@ -169,7 +169,7 @@ const cipher = crypto.createCipher('aes192', 'a password');
 var encrypted = cipher.update('some clear text data', 'utf8', 'hex');
 encrypted += cipher.final('hex');
 console.log(encrypted);
-  // Prints: ca981be48e90867604588e75d04feabb63cc007a8f8ad89b10616ed84d815504
+// Prints: ca981be48e90867604588e75d04feabb63cc007a8f8ad89b10616ed84d815504
 ```
 
 ### cipher.final([output_encoding])
@@ -193,6 +193,8 @@ added: v1.0.0
 When using an authenticated encryption mode (only `GCM` is currently
 supported), the `cipher.setAAD()` method sets the value used for the
 _additional authenticated data_ (AAD) input parameter.
+
+Returns `this` for method chaining.
 
 ### cipher.getAuthTag()
 <!-- YAML
@@ -221,6 +223,8 @@ Disabling automatic padding is useful for non-standard padding, for instance
 using `0x0` instead of PKCS padding.
 
 The `cipher.setAutoPadding()` method must be called before [`cipher.final()`][].
+
+Returns `this` for method chaining.
 
 ### cipher.update(data[, input_encoding][, output_encoding])
 <!-- YAML
@@ -304,7 +308,7 @@ var encrypted = 'ca981be48e90867604588e75d04feabb63cc007a8f8ad89b10616ed84d81550
 var decrypted = decipher.update(encrypted, 'hex', 'utf8');
 decrypted += decipher.final('utf8');
 console.log(decrypted);
-  // Prints: some clear text data
+// Prints: some clear text data
 ```
 
 ### decipher.final([output_encoding])
@@ -329,6 +333,8 @@ When using an authenticated encryption mode (only `GCM` is currently
 supported), the `cipher.setAAD()` method sets the value used for the
 _additional authenticated data_ (AAD) input parameter.
 
+Returns `this` for method chaining.
+
 ### decipher.setAuthTag(buffer)
 <!-- YAML
 added: v1.0.0
@@ -339,6 +345,8 @@ supported), the `decipher.setAuthTag()` method is used to pass in the
 received _authentication tag_. If no tag is provided, or if the cipher text
 has been tampered with, [`decipher.final()`][] with throw, indicating that the
 cipher text should be discarded due to failed authentication.
+
+Returns `this` for method chaining.
 
 ### decipher.setAutoPadding(auto_padding=true)
 <!-- YAML
@@ -354,6 +362,8 @@ multiple of the ciphers block size.
 
 The `decipher.setAutoPadding()` method must be called before
 [`decipher.update()`][].
+
+Returns `this` for method chaining.
 
 ### decipher.update(data[, input_encoding][, output_encoding])
 <!-- YAML
@@ -700,8 +710,8 @@ const hash = crypto.createHash('sha256');
 
 hash.update('some data to hash');
 console.log(hash.digest('hex'));
-  // Prints:
-  //   6a2da20943931e9834fc12cfe5bb47bbd9ae43489a30726962b576f4e3993e50
+// Prints:
+//   6a2da20943931e9834fc12cfe5bb47bbd9ae43489a30726962b576f4e3993e50
 ```
 
 ### hash.digest([encoding])
@@ -783,8 +793,8 @@ const hmac = crypto.createHmac('sha256', 'a secret');
 
 hmac.update('some data to hash');
 console.log(hmac.digest('hex'));
-  // Prints:
-  //   7fd04df92f636fd450bc841c9418e5825c17f33ad9c87c518115a45971f7f77e
+// Prints:
+//   7fd04df92f636fd450bc841c9418e5825c17f33ad9c87c518115a45971f7f77e
 ```
 
 ### hmac.digest([encoding])
@@ -839,7 +849,7 @@ sign.end();
 
 const private_key = getPrivateKeySomehow();
 console.log(sign.sign(private_key, 'hex'));
-  // Prints the calculated signature
+// Prints: the calculated signature
 ```
 
 Example: Using the [`sign.update()`][] and [`sign.sign()`][] methods:
@@ -852,7 +862,7 @@ sign.update('some data to sign');
 
 const private_key = getPrivateKeySomehow();
 console.log(sign.sign(private_key, 'hex'));
-  // Prints the calculated signature
+// Prints: the calculated signature
 ```
 
 A `Sign` instance can also be created by just passing in the digest
@@ -940,7 +950,7 @@ verify.end();
 const public_key = getPublicKeySomehow();
 const signature = getSignatureToVerify();
 console.log(verify.verify(public_key, signature));
-  // Prints true or false
+// Prints: true or false
 ```
 
 Example: Using the [`verify.update()`][] and [`verify.verify()`][] methods:
@@ -954,7 +964,7 @@ verify.update('some data to sign');
 const public_key = getPublicKeySomehow();
 const signature = getSignatureToVerify();
 console.log(verify.verify(public_key, signature));
-  // Prints true or false
+// Prints: true or false
 ```
 
 ### verifier.update(data[, input_encoding])
@@ -1451,7 +1461,6 @@ keys:
 * `padding` : An optional padding value, one of the following:
   * `crypto.constants.RSA_NO_PADDING`
   * `crypto.constants.RSA_PKCS1_PADDING`
-  * `crypto.constants.RSA_PKCS1_OAEP_PADDING`
 
 All paddings are defined in `crypto.constants`.
 
@@ -1620,7 +1629,7 @@ See the reference for other recommendations and details.
 
 ## Crypto Constants
 
-The following constants exported by `crypto.constants` apply to various uses of 
+The following constants exported by `crypto.constants` apply to various uses of
 the `crypto`, `tls`, and `https` modules and are generally specific to OpenSSL.
 
 ### OpenSSL Options
@@ -1639,13 +1648,13 @@ the `crypto`, `tls`, and `https` modules and are generally specific to OpenSSL.
   <tr>
     <td><code>SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION</code></td>
     <td>Allows legacy insecure renegotiation between OpenSSL and unpatched
-    clients or servers. See 
+    clients or servers. See
     https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html.</td>
   </tr>
   <tr>
     <td><code>SSL_OP_CIPHER_SERVER_PREFERENCE</code></td>
     <td>Uses the server's preferences instead of the clients when selecting a
-    cipher. See 
+    cipher. See
     https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html.</td>
   </tr>
   <tr>

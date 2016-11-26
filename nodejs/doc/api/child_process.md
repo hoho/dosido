@@ -144,7 +144,7 @@ added: v0.1.90
   * `error` {Error}
   * `stdout` {String|Buffer}
   * `stderr` {String|Buffer}
-* Return: {ChildProcess}
+* Returns: {ChildProcess}
 
 Spawns a shell then executes the `command` within that shell, buffering any
 generated output.
@@ -217,7 +217,7 @@ added: v0.1.91
   * `error` {Error}
   * `stdout` {String|Buffer}
   * `stderr` {String|Buffer}
-* Return: {ChildProcess}
+* Returns: {ChildProcess}
 
 The `child_process.execFile()` function is similar to [`child_process.exec()`][]
 except that it does not spawn a shell. Rather, the specified executable `file`
@@ -267,7 +267,7 @@ added: v0.5.0
     be thrown. For instance `[0, 1, 2, 'ipc']`.
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
-* Return: {ChildProcess}
+* Returns: {ChildProcess}
 
 The `child_process.fork()` method is a special case of
 [`child_process.spawn()`][] used specifically to spawn new Node.js processes.
@@ -575,7 +575,7 @@ added: v0.11.12
   * `input` {String|Buffer} The value which will be passed as stdin to the
     spawned process
     - supplying this value will override `stdio[0]`
-  * `stdio` {Array} Child's stdio configuration. (Default: `'pipe'`)
+  * `stdio` {String | Array} Child's stdio configuration. (Default: `'pipe'`)
     - `stderr` by default will be output to the parent process' stderr unless
       `stdio` is specified
   * `env` {Object} Environment key-value pairs
@@ -613,7 +613,7 @@ added: v0.11.12
   * `input` {String|Buffer} The value which will be passed as stdin to the
     spawned process
     - supplying this value will override `stdio[0]`
-  * `stdio` {Array} Child's stdio configuration. (Default: `'pipe'`)
+  * `stdio` {String | Array} Child's stdio configuration. (Default: `'pipe'`)
     - `stderr` by default will be output to the parent process' stderr unless
       `stdio` is specified
   * `env` {Object} Environment key-value pairs
@@ -657,7 +657,7 @@ added: v0.11.12
   * `input` {String|Buffer} The value which will be passed as stdin to the
     spawned process
     - supplying this value will override `stdio[0]`
-  * `stdio` {Array} Child's stdio configuration.
+  * `stdio` {String | Array} Child's stdio configuration.
   * `env` {Object} Environment key-value pairs
   * `uid` {Number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {Number} Sets the group identity of the process. (See setgid(2).)
@@ -824,7 +824,7 @@ added: v0.1.90
 * `signal` {String}
 
 The `child.kill()` methods sends a signal to the child process. If no argument
-is given, the process will be sent the `'SIGTERM'` signal. See `signal(7)` for
+is given, the process will be sent the `'SIGTERM'` signal. See signal(7) for
 a list of available signals.
 
 ```js
@@ -901,7 +901,7 @@ added: v0.5.9
 * `sendHandle` {Handle}
 * `options` {Object}
 * `callback` {Function}
-* Return: {Boolean}
+* Returns: {Boolean}
 
 When an IPC channel has been established between the parent and child (
 i.e. when using [`child_process.fork()`][]), the `child.send()` method can be

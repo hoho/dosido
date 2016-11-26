@@ -112,7 +112,7 @@ cctest: all
 	@out/$(BUILDTYPE)/$@
 
 v8:
-	tools/make-v8.sh v8
+	tools/make-v8.sh
 	$(MAKE) -C deps/v8 $(V8_ARCH).$(BUILDTYPE_LOWER) $(V8_BUILD_OPTIONS)
 
 test: all
@@ -241,6 +241,9 @@ test-debugger: all
 test-inspector: all
 	$(PYTHON) tools/test.py inspector
 
+test-tick-processor: all
+	$(PYTHON) tools/test.py tick-processor
+
 test-known-issues: all
 	$(PYTHON) tools/test.py known_issues
 
@@ -293,15 +296,14 @@ test-v8 test-v8-intl test-v8-benchmarks test-v8-all:
 endif
 
 apidoc_sources = $(wildcard doc/api/*.md)
-apidocs = $(addprefix out/,$(apidoc_sources:.md=.html)) \
-		$(addprefix out/,$(apidoc_sources:.md=.json))
+apidocs_html = $(apidoc_dirs) $(apiassets) $(addprefix out/,$(apidoc_sources:.md=.html))
+apidocs_json = $(apidoc_dirs) $(apiassets) $(addprefix out/,$(apidoc_sources:.md=.json))
 
 apidoc_dirs = out/doc out/doc/api/ out/doc/api/assets
 
 apiassets = $(subst api_assets,api/assets,$(addprefix out/,$(wildcard doc/api_assets/*)))
 
-doc-only: $(apidoc_dirs) $(apiassets) $(apidocs) tools/doc/
-
+doc-only: $(apidocs_html) $(apidocs_json)
 doc: $(NODE_EXE) doc-only
 
 $(apidoc_dirs):
@@ -337,8 +339,8 @@ out/doc/api/%.html: doc/api/%.md
 		fi
 	[ -x $(NODE) ] && $(NODE) $(gen-html) || node $(gen-html)
 
-docopen: out/doc/api/all.html
-	-google-chrome out/doc/api/all.html
+docopen: $(apidocs_html)
+	@$(PYTHON) -mwebbrowser file://$(PWD)/out/doc/api/all.html
 
 docclean:
 	-rm -rf out/doc

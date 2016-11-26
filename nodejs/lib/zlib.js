@@ -401,7 +401,7 @@ Zlib.prototype.params = function(level, strategy, callback) {
 
   if (this._level !== level || this._strategy !== strategy) {
     var self = this;
-    this.flush(constants.Z_SYNC_FLUSH, function() {
+    this.flush(constants.Z_SYNC_FLUSH, function flushCallback() {
       assert(self._handle, 'zlib binding closed');
       self._handle.params(level, strategy);
       if (!self._hadError) {
@@ -442,7 +442,8 @@ Zlib.prototype.flush = function(kind, callback) {
       this.once('end', callback);
   } else if (ws.needDrain) {
     if (callback) {
-      this.once('drain', () => this.flush(kind, callback));
+      const drainHandler = () => this.flush(kind, callback);
+      this.once('drain', drainHandler);
     }
   } else {
     this._flushFlag = kind;

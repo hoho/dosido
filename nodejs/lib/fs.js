@@ -662,7 +662,7 @@ fs.readSync = function(fd, buffer, offset, length, position) {
 };
 
 // usage:
-//  fs.write(fd, buffer, offset, length[, position], callback);
+//  fs.write(fd, buffer[, offset[, length[, position]]], callback);
 // OR
 //  fs.write(fd, string[, position[, encoding]], callback);
 fs.write = function(fd, buffer, offset, length, position, callback) {
@@ -675,12 +675,16 @@ fs.write = function(fd, buffer, offset, length, position, callback) {
   req.oncomplete = wrapper;
 
   if (buffer instanceof Buffer) {
-    // if no position is passed then assume null
-    if (typeof position === 'function') {
-      callback = position;
+    callback = maybeCallback(callback || position || length || offset);
+    if (typeof offset !== 'number') {
+      offset = 0;
+    }
+    if (typeof length !== 'number') {
+      length = buffer.length - offset;
+    }
+    if (typeof position !== 'number') {
       position = null;
     }
-    callback = maybeCallback(callback);
     return binding.writeBuffer(fd, buffer, offset, length, position, req);
   }
 
@@ -700,13 +704,17 @@ fs.write = function(fd, buffer, offset, length, position, callback) {
 };
 
 // usage:
-//  fs.writeSync(fd, buffer, offset, length[, position]);
+//  fs.writeSync(fd, buffer[, offset[, length[, position]]]);
 // OR
 //  fs.writeSync(fd, string[, position[, encoding]]);
 fs.writeSync = function(fd, buffer, offset, length, position) {
   if (buffer instanceof Buffer) {
     if (position === undefined)
       position = null;
+    if (typeof offset !== 'number')
+      offset = 0;
+    if (typeof length !== 'number')
+      length = buffer.length - offset;
     return binding.writeBuffer(fd, buffer, offset, length, position);
   }
   if (typeof buffer !== 'string')
@@ -1436,13 +1444,13 @@ fs.unwatchFile = function(filename, listener) {
 // Regexp that finds the next portion of a (partial) path
 // result is [base_with_slash, base], e.g. ['somedir/', 'somedir']
 const nextPartRe = isWindows ?
-  /(.*?)(?:[\/\\]+|$)/g :
-  /(.*?)(?:[\/]+|$)/g;
+  /(.*?)(?:[/\\]+|$)/g :
+  /(.*?)(?:[/]+|$)/g;
 
 // Regex to find the device root, including trailing slash. E.g. 'c:\\'.
 const splitRootRe = isWindows ?
-  /^(?:[a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/][^\\\/]+)?[\\\/]*/ :
-  /^[\/]*/;
+  /^(?:[a-zA-Z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)?[\\/]*/ :
+  /^[/]*/;
 
 function encodeRealpathResult(result, options, err) {
   if (!options || !options.encoding || options.encoding === 'utf8' || err)
@@ -1455,10 +1463,6 @@ function encodeRealpathResult(result, options, err) {
   }
 }
 
-// This is removed from the fs exports in lib/module.js in order to make
-// sure that this stays internal.
-const realpathCacheKey = fs.realpathCacheKey = Symbol('realpathCacheKey');
-
 fs.realpathSync = function realpathSync(p, options) {
   options = getOptions(options, {});
   nullCheck(p);
@@ -1468,7 +1472,7 @@ fs.realpathSync = function realpathSync(p, options) {
 
   const seenLinks = {};
   const knownHard = {};
-  const cache = options[realpathCacheKey];
+  const cache = options[internalFS.realpathCacheKey];
   const original = p;
 
   const maybeCachedResult = cache && cache.get(p);
