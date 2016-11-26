@@ -10,8 +10,8 @@ nodejs:
 
 .PHONY: libnodejs
 libnodejs:
-	cd nodejs && ./configure --enable-static
-	$(MAKE) -C nodejs
+	cd build && ./configure
+	$(MAKE) -C build
 
 
 .PHONY: configure

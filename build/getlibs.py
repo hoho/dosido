@@ -26,7 +26,7 @@ for l in libs[3:]:
         continue
 
     if l == "-stdlib=libc++":
-        l = "-lc++"
+        continue
 
     if l == "-arch":
         skip = True
