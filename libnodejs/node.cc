@@ -4442,7 +4442,7 @@ inline int Start(Isolate* isolate, IsolateData* isolate_data,
   if (use_debug_agent)
     EnableDebug(&env);
 
-  if (nodejsLoadScripts(&env, ExecuteString, ReportException))
+  if (nodejsStartPolling(&env))
     goto done;
 
   {
@@ -4466,7 +4466,7 @@ inline int Start(Isolate* isolate, IsolateData* isolate_data,
   }
 
 done:
-  nodejsUnloadScripts();
+  nodejsStopPolling();
 
   env.set_trace_sync_io(false);
 

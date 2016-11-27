@@ -127,15 +127,12 @@ using v8::Value;
 static PIPE_FD_TYPE                   nodejsIncomingPipeFd[2] = {-1, -1};
 static PIPE_FD_TYPE                   nodejsOutgoingPipeFd[2] = {-1, -1};
 static uv_barrier_t                   nodejsStartBlocker;
+static uv_barrier_t                   nodejsStopBlocker;
 static uv_thread_t                    nodejsThreadId;
 static uv_poll_t                      nodejsCommandPoll;
-
-static nodejsJSArray                  nodejsScripts;
-static int                            nodejsError;
-
-static v8::Persistent<v8::Array>      nodejsLoadedScripts;
-
+static int                            nodejsError = -1;
 static nodejsLogger                   nodejsLoggerFunc = NULL;
+static int                            nodejsScriptsVersion = 0;
 
 // To call from nginx thread.
 static inline void
@@ -283,30 +280,6 @@ nodejsFromJSFree(nodejsFromJS *cmd)
 }
 
 
-static inline int
-nodejsStartPolling(Environment *env, uv_poll_cb cb)
-{
-    int ret;
-
-    ret = uv_poll_init_socket(env->event_loop(),
-                              &nodejsCommandPoll, nodejsIncomingPipeFd[0]);
-    if (ret)
-        return ret;
-
-    nodejsCommandPoll.data = env;
-    ret = uv_poll_start(&nodejsCommandPoll, UV_READABLE, cb);
-
-    return ret;
-}
-
-
-static inline void
-nodejsStopPolling(void)
-{
-    uv_poll_stop(&nodejsCommandPoll);
-}
-
-
 static inline void
 nodejsClosePipes(void)
 {
@@ -353,11 +326,12 @@ nodejsRunnerThread(void *arg)
     node::Start(argc, argv);
     nodejsLoggerFunc(NODEJS_LOG_INFO, "Done nodejs");
     nodejsClosePipes();
+    uv_barrier_wait(&nodejsStopBlocker);
 }
 
 
 int
-nodejsStart(nodejsLogger logger, nodejsJSArray *scripts, int *fd)
+nodejsStart(nodejsLogger logger, int *fd)
 {
     int err;
 
@@ -369,17 +343,13 @@ nodejsStart(nodejsLogger logger, nodejsJSArray *scripts, int *fd)
         goto error;
 
     uv_barrier_init(&nodejsStartBlocker, 2);
-
-    memcpy(&nodejsScripts, scripts, sizeof(nodejsScripts));
+    uv_barrier_init(&nodejsStopBlocker, 2);
 
     nodejsLoggerFunc(NODEJS_LOG_INFO, "Starting nodejs runner thread");
 
     uv_thread_create(&nodejsThreadId, nodejsRunnerThread, NULL);
 
-    if (uv_barrier_wait(&nodejsStartBlocker) > 0)
-        uv_barrier_destroy(&nodejsStartBlocker);
-
-    memset(&nodejsScripts, 0, sizeof(nodejsScripts));
+    uv_barrier_wait(&nodejsStartBlocker);
 
     *fd = nodejsOutgoingPipeFd[0];
 
@@ -388,6 +358,21 @@ nodejsStart(nodejsLogger logger, nodejsJSArray *scripts, int *fd)
 error:
     nodejsClosePipes();
     return err;
+}
+
+
+void
+nodejsStop(void)
+{
+    nodejsStopPolling();
+
+    if (!nodejsError)
+        uv_barrier_wait(&nodejsStartBlocker);
+    else
+        nodejsClosePipes();
+
+    uv_barrier_destroy(&nodejsStartBlocker);
+    uv_barrier_destroy(&nodejsStopBlocker);
 }
 
 
@@ -600,7 +585,7 @@ nodejsHeadersToStringArray(std::vector<std::pair<std::string, std::string>> *h,
 
 
 static void
-nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
+nodejsCallJSModuleCallback(const FunctionCallbackInfo<Value>& args)
 {
     Environment *env = Environment::GetCurrent(args.GetIsolate());
 
@@ -609,22 +594,6 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
     int64_t         _type = args[0]->IntegerValue();
     nodejsContext   *jsCtx =
             static_cast<nodejsContext *>(args[1].As<v8::External>()->Value());
-
-    if (_type == 0) {
-        // Destroy indicator. When JavaScript is finished, this object will be
-        // garbage collected and PayloadWeakCallback() will cleanup the context.
-        Local<Object> tmp = Object::New(env->isolate());
-        Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
-
-        destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback,
-                         v8::WeakCallbackType::kParameter);
-        destroy->MarkIndependent();
-
-        jsCtx->_p = destroy;
-
-        args.GetReturnValue().Set(*destroy);
-        return;
-    }
 
     nodejsByJSCommandType type;
     Local<Value> arg = args[2];
@@ -636,6 +605,25 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
     switch (type) {
         case BY_JS_INIT_DESTRUCTOR:
+            {
+                // Destroy indicator. When JavaScript is finished, this object will be
+                // garbage collected and PayloadWeakCallback() will cleanup the context.
+                Local<Object> tmp = Object::New(env->isolate());
+                Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
+
+                destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback,
+                                v8::WeakCallbackType::kParameter);
+                destroy->MarkIndependent();
+
+                jsCtx->_p = destroy;
+
+                args.GetReturnValue().Set(*destroy);
+            }
+
+            sz = sizeof(nodejsFromJS);
+            break;
+
+        case BY_JS_ERROR:
         case BY_JS_READ_REQUEST_BODY:
         case BY_JS_RESPONSE_HEADERS:
         case BY_JS_BEGIN_SUBREQUEST:
@@ -663,6 +651,10 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
     cmd->jsCtx = jsCtx;
 
     switch (type) {
+        case BY_JS_ERROR:
+            cmd->type = FROM_JS_ERROR;
+            break;
+
         case BY_JS_INIT_DESTRUCTOR:
             CHECK(arg->IsFunction());
             cmd->type = FROM_JS_INIT_CALLBACK;
@@ -673,6 +665,7 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
                 );
                 cmd->jsCallback = f;
             }
+            jsCtx->acceptedByJS = 1;
             break;
 
         case BY_JS_READ_REQUEST_BODY:
@@ -822,35 +815,37 @@ nodejsCallLoadedScriptCallback(const FunctionCallbackInfo<Value>& args)
 
 
 static inline void
-nodejsCallLoadedScript(Environment *env, nodejsCallCmd *cmd)
+nodejsCallJSModule(Environment *env, nodejsCallCmd *cmd)
 {
     nodejsString        **headers = cmd->headers;
     nodejsString        **params = cmd->params;
 
     HandleScope handle_scope(env->isolate());
 
-    Local<Array>          scripts = Local<Array>::New(env->isolate(),
-                                                      nodejsLoadedScripts);
-
     Local<Object>         meta = Object::New(env->isolate());
     Local<Object>         h = Object::New(env->isolate());
     Local<Object>         p = Object::New(env->isolate());
 
     Local<Function>       callback = \
-            env->NewFunctionTemplate(nodejsCallLoadedScriptCallback)->GetFunction();
+            env->NewFunctionTemplate(nodejsCallJSModuleCallback)->GetFunction();
     Local<v8::External>   payload = v8::External::New(env->isolate(), cmd->jsCtx);
 
     Local<Value>          args[5] = {meta, h, p, callback, payload};
 
     meta->Set(0, String::NewFromUtf8(env->isolate(),
+              cmd->jsModulePath.data,
+              String::kNormalString,
+              cmd->jsModulePath.len));
+    meta->Set(1, Integer::New(env->isolate(), nodejsScriptsVersion));
+    meta->Set(2, String::NewFromUtf8(env->isolate(),
               cmd->method.data,
               String::kNormalString,
               cmd->method.len));
-    meta->Set(1, String::NewFromUtf8(env->isolate(),
+    meta->Set(3, String::NewFromUtf8(env->isolate(),
               cmd->uri.data,
               String::kNormalString,
               cmd->uri.len));
-    meta->Set(2, String::NewFromUtf8(env->isolate(),
+    meta->Set(4, String::NewFromUtf8(env->isolate(),
               cmd->httpProtocol.data,
               String::kNormalString,
               cmd->httpProtocol.len));
@@ -887,13 +882,17 @@ nodejsCallLoadedScript(Environment *env, nodejsCallCmd *cmd)
         }
     }
 
-    Local<Value> cb = scripts->Get(cmd->index);
-    CHECK(cb->IsFunction());
-    MakeCallback(env, scripts.As<Value>(), cb.As<Function>(), 5, args);
+    Local<Object>     global = env->context()->Global();
+    Local<String>     callModule_name = FIXED_ONE_BYTE_STRING(env->isolate(),
+                                                              "_handleNginxRequest");
+    Local<Value>      callModule = global->Get(callModule_name);
+    CHECK(callModule->IsFunction());
+
+    MakeCallback(env, global.As<Value>(), callModule.As<Function>(), 5, args);
 }
 
 
-void
+static void
 nodejsRunIncomingTask(uv_poll_t *handle, int status, int events)
 {
     nodejsToJS *cmd;
@@ -905,11 +904,8 @@ nodejsRunIncomingTask(uv_poll_t *handle, int status, int events)
         HandleScope scope(env->isolate());
 
         switch (cmd->type) {
-            case TO_JS_CALL_LOADED_SCRIPT:
-                nodejsCallLoadedScript(
-                        env,
-                        reinterpret_cast<nodejsCallCmd *>(cmd)
-                );
+            case TO_JS_CALL_JS_MODULE:
+                nodejsCallJSModule(env, reinterpret_cast<nodejsCallCmd *>(cmd));
                 break;
 
             case TO_JS_PUSH_CHUNK:
@@ -945,93 +941,6 @@ nodejsRunIncomingTask(uv_poll_t *handle, int status, int events)
 
         nodejsToJSFree(cmd);
     }
-}
-
-
-int
-nodejsLoadScripts(Environment *env,
-                  ExecuteStringFunc execute, ReportExceptionFunc report)
-{
-    int ret = 0;
-
-    HandleScope handle_scope(env->isolate());
-
-    TryCatch try_catch(env->isolate());
-
-    try_catch.SetVerbose(false);
-
-    // Workaround to actually run _third_party_main.js.
-    env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
-
-    Local<String> script_name = FIXED_ONE_BYTE_STRING(env->isolate(),
-                                                      libnodejs_libnodejs_name);
-    Local<Value> f_value = execute(
-        env,
-        OneByteString(env->isolate(), libnodejs_libnodejs_data,
-                                      sizeof(libnodejs_libnodejs_data) - 1),
-        script_name
-    );
-
-    if (try_catch.HasCaught())  {
-        report(env, try_catch);
-        exit(10);
-    }
-
-    CHECK(f_value->IsFunction());
-    Local<Function>   f = f_value.As<Function>();
-
-    Local<String>     require_name = FIXED_ONE_BYTE_STRING(env->isolate(),
-                                                       "_require");
-    Local<Value>      require_value = env->process_object()->Get(require_name);
-    CHECK(require_value->IsFunction());
-    // Remove temporary `process._require` set up by _third_party_main.js.
-    env->process_object()->Delete(require_name);
-    Local<Function>   require = require_value.As<Function>();
-
-    Local<Array>      scripts = Array::New(env->isolate(), nodejsScripts.len);
-
-    size_t            i;
-    nodejsJS         *script;
-
-    for (i = 0; i < nodejsScripts.len; i++) {
-        script = &nodejsScripts.js[i];
-        scripts->Set(script->index,
-                     OneByteString(env->isolate(),
-                                   script->filename, script->len));
-    }
-
-    Local<Value> args[2] = {require, scripts};
-
-    f_value = f->Call(f, 2, args);
-
-    if (try_catch.HasCaught())  {
-        report(env, try_catch);
-        ret = -1;
-        goto done;
-    }
-
-    CHECK(f_value->IsArray());
-    nodejsLoadedScripts.Reset(env->isolate(), Local<Array>::Cast(f_value));
-
-    ret = nodejsStartPolling(env, nodejsRunIncomingTask);
-
-done:
-    nodejsError = ret;
-
-    if (uv_barrier_wait(&nodejsStartBlocker) > 0)
-        uv_barrier_destroy(&nodejsStartBlocker);
-
-    return ret;
-}
-
-
-void
-nodejsUnloadScripts(void)
-{
-    nodejsStopPolling();
-
-    if (!nodejsLoadedScripts.IsEmpty())
-        nodejsLoadedScripts.Reset();
 }
 
 
@@ -1088,7 +997,7 @@ nodejsContextAttemptFree(nodejsContext *jsCtx)
 
 
 int
-nodejsCall(int index, nodejsContext *jsCtx, nodejsString *method,
+nodejsCall(nodejsString *module, nodejsContext *jsCtx, nodejsString *method,
            nodejsString *uri, nodejsString *httpProtocol,
            nodejsString **headers, nodejsString **params)
 {
@@ -1097,16 +1006,20 @@ nodejsCall(int index, nodejsContext *jsCtx, nodejsString *method,
     nodejsCallCmd  *cmd;
 
     cmd = reinterpret_cast<nodejsCallCmd *>(malloc(
-            sizeof(nodejsCallCmd) + method->len + uri->len + httpProtocol->len
+            sizeof(nodejsCallCmd) +
+            module->len + method->len + uri->len + httpProtocol->len
     ));
     NODEJS_CHECK_OUT_OF_MEMORY(cmd);
 
-    cmd->type = TO_JS_CALL_LOADED_SCRIPT;
-    cmd->index = index;
+    cmd->type = TO_JS_CALL_JS_MODULE;
     cmd->jsCtx = jsCtx;
 
+    cmd->jsModulePath.len = module->len;
+    cmd->jsModulePath.data = reinterpret_cast<char *>(&cmd[1]);
+    memcpy(cmd->jsModulePath.data, module->data, module->len);
+
     cmd->method.len = method->len;
-    cmd->method.data = reinterpret_cast<char *>(&cmd[1]);
+    cmd->method.data = cmd->jsModulePath.data + module->len;
     memcpy(cmd->method.data, method->data, method->len);
 
     cmd->uri.len = uri->len;
@@ -1174,4 +1087,44 @@ nodejsSubrequestHeaders(nodejsContext *jsCtx, int status,
     nodejsToJSSend(cmd);
 
     return 0;
+}
+
+
+int
+nodejsStartPolling(Environment *env)
+{
+    HandleScope handle_scope(env->isolate());
+
+    // Workaround to actually run _third_party_main.js.
+    env->tick_callback_function()->Call(env->process_object(), 0, nullptr);
+
+    nodejsError = uv_poll_init_socket(
+            env->event_loop(), &nodejsCommandPoll, nodejsIncomingPipeFd[0]
+    );
+    if (nodejsError)
+        return nodejsError;
+
+    nodejsCommandPoll.data = env;
+
+    nodejsError = uv_poll_start(
+            &nodejsCommandPoll, UV_READABLE, nodejsRunIncomingTask
+    );
+
+    uv_barrier_wait(&nodejsStartBlocker);
+
+    return nodejsError;
+}
+
+
+void
+nodejsStopPolling(void)
+{
+    uv_poll_stop(&nodejsCommandPoll);
+}
+
+
+int
+nodejsNextScriptsVersion(void)
+{
+    return ++nodejsScriptsVersion;
 }

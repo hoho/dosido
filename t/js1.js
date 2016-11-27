@@ -9,7 +9,8 @@ module.exports = function(i, o, sr, params) {
             o.end('\n');
         });
     } else {
-        o.write('hello\n');
+        var hello = require('./js2');
+        o.write(`${hello()}\n`);
         o.end('world\n');
     }
 };

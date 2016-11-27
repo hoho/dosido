@@ -23,7 +23,7 @@ typedef struct {
 
 typedef struct {
     ngx_str_t                  js;
-    int                        js_index;
+    unsigned                   fulljs:1;
     ngx_array_t               *params;       /* ngx_http_nodejs_param_t */
     ngx_str_t                  root;
 } ngx_http_nodejs_loc_conf_t;
@@ -33,7 +33,6 @@ static ngx_log_t                *jsLogger = NULL;
 static ngx_connection_t          jsPipe;
 static ngx_event_t               jsPipeEv;
 static ngx_str_t                 jsArgs = ngx_null_string;
-static ngx_array_t               jsLocations;
 
 
 static ngx_int_t   ngx_http_nodejs_init          (ngx_cycle_t *cycle);
@@ -595,6 +594,10 @@ ngx_http_nodejs_receive(ngx_event_t *ev)
                 (ngx_http_request_t *)js_ctx->r;
 
         switch (cmd->type) {
+            case FROM_JS_ERROR:
+                ngx_http_finalize_request(r, NGX_ERROR);
+                return;
+
             case FROM_JS_INIT_CALLBACK:
                 if (js_ctx == NULL || js_ctx->wait == 0 || js_ctx->jsCallback)
                     break;
@@ -648,7 +651,7 @@ ngx_http_nodejs_receive(ngx_event_t *ev)
                     nodejsString  *s = (nodejsString *)cmd->data;
                     ngx_http_nodejs_send_chunk(r, s->data, s->len, 0);
                 } else {
-                    // Got end of the response mark.
+                    // Got the end of response mark.
                     // This one is for r->main->count++ in ngx_http_nodejs_handler.
                     r->main->count--;
 
@@ -721,58 +724,12 @@ ngx_http_nodejs_init(ngx_cycle_t *cycle)
 {
     dd("start");
 
-    ngx_uint_t                   i;
-    ngx_http_nodejs_loc_conf_t **pxlcf = jsLocations.elts;
-    ngx_http_nodejs_loc_conf_t  *xlcf;
-    ngx_str_t                   *filename;
-    nodejsJS                    *scripts;
-    nodejsJS                    *script;
-    int                       fd = -1;
-    int                       rc;
+    int  rc;
+    int  fd = -1;
 
-    if (jsLocations.nelts <= 0) {
-        dd("no scripts, do not start nodejs");
-        return NGX_OK;
-    }
-
-    scripts = (nodejsJS *)ngx_palloc(cycle->pool,
-                                     sizeof(nodejsJS) * jsLocations.nelts);
-    if (scripts == NULL) {
-        return NGX_ERROR;
-    }
-
-    for (i = 0; i < jsLocations.nelts; i++) {
-        xlcf = pxlcf[i];
-
-        if (xlcf->root.len) {
-            rc = ngx_get_full_name(cycle->pool, &xlcf->root, &xlcf->js);
-        } else {
-            rc = ngx_conf_full_name(cycle, &xlcf->js, 0);
-        }
-
-        if (rc != NGX_OK) {
-            return NGX_ERROR;
-        }
-
-        dd("add script `%s`", (&xlcf->js)->data);
-
-        xlcf->js_index = i;
-
-        script = &scripts[i];
-        filename = &xlcf->js;
-        script->filename = (char *)filename->data;
-        script->len = filename->len;
-        script->index = i;
-    }
-
-    nodejsJSArray s;
-    s.js = scripts;
-    s.len = jsLocations.nelts;
     jsLogger = cycle->log;
-    rc = nodejsStart(ngx_http_nodejs_log, &s, &fd);
 
-    ngx_array_destroy(&jsLocations);
-    ngx_pfree(cycle->pool, scripts);
+    rc = nodejsStart(ngx_http_nodejs_log, &fd);
 
     if (rc) {
         ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
@@ -816,8 +773,8 @@ static ngx_int_t
 ngx_http_nodejs_preconf(ngx_conf_t *cf)
 {
     dd("preconfiguration");
-    return ngx_array_init(&jsLocations, cf->pool, 1,
-                          sizeof(ngx_http_nodejs_loc_conf_t*));
+    nodejsNextScriptsVersion();
+    return NGX_OK;
 }
 
 
@@ -1013,6 +970,18 @@ ngx_http_nodejs_handler(ngx_http_request_t *r) {
         ctx->skip_filter = 0;
     }
 
+    if (!conf->fulljs) {
+        if (conf->root.len) {
+            rc = ngx_get_full_name(r->pool, &conf->root, &conf->js);
+
+            if (rc != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+        }
+
+        conf->fulljs = 1;
+    }
+
     len = conf->params != NULL ? conf->params->nelts : 0;
 
     if (len > 0) {
@@ -1071,7 +1040,7 @@ ngx_http_nodejs_handler(ngx_http_request_t *r) {
     ctx->js_ctx->wait++;
     ctx->js_ctx->rootCtx->wait++;
 
-    rc = nodejsCall(conf->js_index, ctx->js_ctx,
+    rc = nodejsCall((nodejsString *)&conf->js, ctx->js_ctx,
                     (nodejsString *)&r->method_name,
                     (nodejsString *)&r->unparsed_uri,
                     (nodejsString *)&r->http_protocol,
@@ -1090,7 +1059,6 @@ ngx_http_nodejs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     ngx_http_nodejs_loc_conf_t    *xlcf = conf;
     ngx_http_core_loc_conf_t      *clcf;
     ngx_str_t                     *value;
-    ngx_http_nodejs_loc_conf_t   **pxlcf;
 
     value = cf->args->elts;
 
@@ -1108,18 +1076,12 @@ ngx_http_nodejs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
 
     xlcf->js.data = ngx_pstrdup(cf->pool, &value[1]);
     xlcf->js.len = (&value[1])->len;
+    xlcf->fulljs = 0;
 
     if (xlcf->js.data == NULL) {
         return NGX_CONF_ERROR;
     }
 
-    pxlcf = ngx_array_push(&jsLocations);
-    if (pxlcf == NULL) {
-        return NGX_CONF_ERROR;
-    }
-    
-    *pxlcf = xlcf;
-    
     return NGX_CONF_OK;
 }
 
@@ -1196,6 +1158,11 @@ ngx_http_nodejs_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     if (conf->root.len == 0) {
         conf->root.data = prev->root.data;
         conf->root.len = prev->root.len;
+    }
+
+    if (conf->root.len == 0) {
+        conf->root.data = cf->cycle->prefix.data;
+        conf->root.len = cf->cycle->prefix.len;
     }
 
     if (conf->params == NULL) {

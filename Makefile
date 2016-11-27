@@ -85,4 +85,4 @@ test:
 delete-nginx-binary:
 	rm -f nginx/objs/nginx
 .PHONY: relink
-relink: libnodejs delete-nginx-binary nginx
+rebuild: libnodejs delete-nginx-binary nginx

@@ -19,7 +19,7 @@
       ],
 
       'include_dirs': [
-        '../nodejs/src',
+        '../libnodejs',
         '../nodejs/deps/v8/include'
       ],
 

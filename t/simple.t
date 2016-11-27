@@ -1,11 +1,11 @@
 use Test::Nginx::Socket;
- 
+
 plan tests => repeat_each() * 2 * blocks();
 
 run_tests();
- 
+
 __DATA__
- 
+
 === TEST 1: simple1
 --- config
     location /js {

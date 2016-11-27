@@ -15,7 +15,7 @@
 
 
 typedef enum {
-    TO_JS_CALL_LOADED_SCRIPT = 1,
+    TO_JS_CALL_JS_MODULE = 1,
     TO_JS_PUSH_CHUNK,
     TO_JS_REQUEST_ERROR,
     TO_JS_RESPONSE_ERROR,
@@ -25,20 +25,21 @@ typedef enum {
 
 
 typedef enum {
-    BY_JS_INIT_DESTRUCTOR    = 1,
-    BY_JS_READ_REQUEST_BODY  = 2,
-    BY_JS_RESPONSE_HEADERS   = 3,
-    BY_JS_RESPONSE_BODY      = 4,
-    BY_JS_BEGIN_SUBREQUEST   = 5,
-    BY_JS_SUBREQUEST_DONE    = 6
+    BY_JS_ERROR              = 1,
+    BY_JS_INIT_DESTRUCTOR    = 2,
+    BY_JS_READ_REQUEST_BODY  = 3,
+    BY_JS_RESPONSE_HEADERS   = 4,
+    BY_JS_RESPONSE_BODY      = 5,
+    BY_JS_BEGIN_SUBREQUEST   = 6,
+    BY_JS_SUBREQUEST_DONE    = 7
 } nodejsByJSCommandType;
 
 
 typedef enum {
-    TO_JS_CALLBACK_PUSH_CHUNK         = 7,
-    TO_JS_CALLBACK_SUBREQUEST_HEADERS = 8,
-    TO_JS_CALLBACK_REQUEST_ERROR      = 9,
-    TO_JS_CALLBACK_RESPONSE_ERROR     = 10
+    TO_JS_CALLBACK_PUSH_CHUNK         = 101,
+    TO_JS_CALLBACK_SUBREQUEST_HEADERS = 102,
+    TO_JS_CALLBACK_REQUEST_ERROR      = 103,
+    TO_JS_CALLBACK_RESPONSE_ERROR     = 104
 } nodejsToJSCallbackCommandType;
 
 
@@ -51,7 +52,7 @@ typedef enum {
 } nodejsSrArgument;
 
 
-#define NODEJS_CHECK_OUT_OF_MEMORY(ptr)                                        \
+#define NODEJS_CHECK_OUT_OF_MEMORY(ptr)                                      \
     if (ptr == NULL) {                                                       \
         fprintf(stderr, "Out of memory\n");                                  \
         abort();                                                             \
@@ -65,7 +66,7 @@ typedef struct _nodejsToJS {
 
 
 typedef struct _nodejsCallCmd : _nodejsToJS {
-    int             index;
+    nodejsString    jsModulePath;
     nodejsString    method;
     nodejsString    uri;
     nodejsString    httpProtocol;
@@ -93,18 +94,10 @@ typedef struct _nodejsFreeCallbackCmd : _nodejsToJS {
 } nodejsFreeCallbackCmd;
 
 
-typedef v8::Local<v8::Value> (*ExecuteStringFunc)(node::Environment* env,
-                                                  v8::Handle<v8::String> source,
-                                                  v8::Handle<v8::String> filename);
-typedef void (*ReportExceptionFunc)(node::Environment* env,
-                                    const v8::TryCatch& try_catch);
-
-
 int
-        nodejsLoadScripts(node::Environment *env,
-                          ExecuteStringFunc execute, ReportExceptionFunc report);
+        nodejsStartPolling(node::Environment *env);
 void
-        nodejsUnloadScripts(void);
+        nodejsStopPolling(void);
 
 void
         nodejsInitLogger(nodejsLogger logger);
