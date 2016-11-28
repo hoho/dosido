@@ -26,7 +26,7 @@ typedef enum {
 
 typedef enum {
     BY_JS_ERROR              = 1,
-    BY_JS_INIT_DESTRUCTOR    = 2,
+    BY_JS_INIT_CALLBACK      = 2,
     BY_JS_READ_REQUEST_BODY  = 3,
     BY_JS_RESPONSE_HEADERS   = 4,
     BY_JS_RESPONSE_BODY      = 5,

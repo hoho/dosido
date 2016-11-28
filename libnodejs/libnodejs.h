@@ -11,7 +11,6 @@
 
 typedef enum {
     FROM_JS_ERROR = 1,
-    FROM_JS_INIT_CALLBACK,
     FROM_JS_READ_REQUEST_BODY,
     FROM_JS_RESPONSE_HEADERS,
     FROM_JS_RESPONSE_BODY,
@@ -48,7 +47,6 @@ typedef void (*nodejsLogger)(unsigned level, const char *fmt, ...);
 
 typedef struct _nodejsContext nodejsContext;
 struct _nodejsContext {
-    unsigned                  acceptedByJS:1;
     void                     *r;
     unsigned                  refused:1;
     size_t                    wait;
@@ -58,6 +56,7 @@ struct _nodejsContext {
                                   // indicator.
     void                     *jsCallback;
     void                     *jsSubrequestCallback;
+    unsigned                  jsDone:1;
     nodejsContext            *rootCtx;
 };
 

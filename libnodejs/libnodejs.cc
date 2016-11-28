@@ -377,16 +377,9 @@ nodejsStop(void)
 
 
 static void
-nodejsDestroyWeakCallback(const v8::WeakCallbackInfo<nodejsContext>& data)
+nodejsJSCallbackWeakCallback(const v8::WeakCallbackInfo<nodejsContext>& data)
 {
     nodejsContext *jsCtx = data.GetParameter();
-
-    Persistent<Object> *destroy = static_cast<Persistent<Object> *>(jsCtx->_p);
-    destroy->ClearWeak();
-    destroy->Reset();
-    delete destroy;
-    jsCtx->_p = destroy = nullptr;
-
     nodejsContextAttemptFree(jsCtx);
 }
 
@@ -595,6 +588,8 @@ nodejsCallJSModuleCallback(const FunctionCallbackInfo<Value>& args)
     nodejsContext   *jsCtx =
             static_cast<nodejsContext *>(args[1].As<v8::External>()->Value());
 
+    CHECK(jsCtx != NULL);
+
     nodejsByJSCommandType type;
     Local<Value> arg = args[2];
     bool isstr;
@@ -604,24 +599,16 @@ nodejsCallJSModuleCallback(const FunctionCallbackInfo<Value>& args)
     type = static_cast<nodejsByJSCommandType>(_type);
 
     switch (type) {
-        case BY_JS_INIT_DESTRUCTOR:
+        case BY_JS_INIT_CALLBACK:
+            CHECK(arg->IsFunction());
             {
-                // Destroy indicator. When JavaScript is finished, this object will be
-                // garbage collected and PayloadWeakCallback() will cleanup the context.
-                Local<Object> tmp = Object::New(env->isolate());
-                Persistent<Object> *destroy = new Persistent<Object>(env->isolate(), tmp);
-
-                destroy->SetWeak(jsCtx, nodejsDestroyWeakCallback,
-                                v8::WeakCallbackType::kParameter);
-                destroy->MarkIndependent();
-
-                jsCtx->_p = destroy;
-
-                args.GetReturnValue().Set(*destroy);
+                Persistent<Function> *f = new Persistent<Function>(
+                        env->isolate(),
+                        Local<Function>::Cast(arg)
+                );
+                jsCtx->jsCallback = f;
             }
-
-            sz = sizeof(nodejsFromJS);
-            break;
+            return;
 
         case BY_JS_ERROR:
         case BY_JS_READ_REQUEST_BODY:
@@ -651,21 +638,11 @@ nodejsCallJSModuleCallback(const FunctionCallbackInfo<Value>& args)
     cmd->jsCtx = jsCtx;
 
     switch (type) {
-        case BY_JS_ERROR:
-            cmd->type = FROM_JS_ERROR;
+        case BY_JS_INIT_CALLBACK:
             break;
 
-        case BY_JS_INIT_DESTRUCTOR:
-            CHECK(arg->IsFunction());
-            cmd->type = FROM_JS_INIT_CALLBACK;
-            {
-                Persistent<Function> *f = new Persistent<Function>(
-                        env->isolate(),
-                        Local<Function>::Cast(arg)
-                );
-                cmd->jsCallback = f;
-            }
-            jsCtx->acceptedByJS = 1;
+        case BY_JS_ERROR:
+            cmd->type = FROM_JS_ERROR;
             break;
 
         case BY_JS_READ_REQUEST_BODY:
@@ -717,6 +694,18 @@ nodejsCallJSModuleCallback(const FunctionCallbackInfo<Value>& args)
                 memcpy(s->data, *chunk, s->len);
             } else {
                 cmd->data = nullptr;
+
+                if (!jsCtx->jsDone) {
+                    jsCtx->jsDone = 1;
+
+                    if (jsCtx->jsCallback) {
+                        Persistent<Function> *f =
+                            static_cast<Persistent<Function> *>(jsCtx->jsCallback);
+                        f->SetWeak(jsCtx, nodejsJSCallbackWeakCallback,
+                                   v8::WeakCallbackType::kParameter);
+                        f->MarkIndependent();
+                    }
+                }
             }
 
             break;

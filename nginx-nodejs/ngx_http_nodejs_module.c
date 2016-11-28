@@ -598,15 +598,6 @@ ngx_http_nodejs_receive(ngx_event_t *ev)
                 ngx_http_finalize_request(r, NGX_ERROR);
                 return;
 
-            case FROM_JS_INIT_CALLBACK:
-                if (js_ctx == NULL || js_ctx->wait == 0 || js_ctx->jsCallback)
-                    break;
-
-                js_ctx->jsCallback = cmd->jsCallback;
-                cmd->jsCallback = NULL;
-
-                break;
-
             case FROM_JS_READ_REQUEST_BODY:
                 if (js_ctx == NULL || js_ctx->wait == 0)
                     break;

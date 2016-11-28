@@ -9,7 +9,7 @@ const util = require('util');
 
 // Codes to come from this script (should match nodejsByJSCommandType).
 const BY_JS_ERROR = 1;
-const BY_JS_INIT_DESTRUCTOR = 2;
+const BY_JS_INIT_CALLBACK = 2;
 const BY_JS_READ_REQUEST_BODY = 3;
 const BY_JS_RESPONSE_HEADERS = 4;
 const BY_JS_RESPONSE_BODY = 5;
@@ -49,6 +49,7 @@ process.on('SIGINT', function() {
     process.exit();
 });
 
+
 module.exports = function handleNginxRequest(meta, requestHeaders, configParams, callback, payload) {
     var module;
 
@@ -63,9 +64,7 @@ module.exports = function handleNginxRequest(meta, requestHeaders, configParams,
     const i = new Request(meta, requestHeaders, callback, payload);
     const o = new Response(callback, payload);
 
-    // To free nodejsContext when this thing is garbage collected and
-    // to pass a from-nginx-to-js callback.
-    var destroy = callback(BY_JS_INIT_DESTRUCTOR, payload, function(what, arg) {
+    callback(BY_JS_INIT_CALLBACK, payload, function(what, arg) {
         switch (what) {
             case TO_JS_CALLBACK_PUSH_CHUNK:
                 i.push(arg);
@@ -132,6 +131,7 @@ module.exports = function handleNginxRequest(meta, requestHeaders, configParams,
         );
     }, configParams);
 }
+
 
 function loadModule(filename, version) {
     if (modulesVersion !== version) {
