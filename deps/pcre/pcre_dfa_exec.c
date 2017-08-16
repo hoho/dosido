@@ -7,7 +7,7 @@ and semantics are as close as possible to those of the Perl 5 language (but see
 below for why this module is different).
 
                        Written by Philip Hazel
-           Copyright (c) 1997-2014 University of Cambridge
+           Copyright (c) 1997-2017 University of Cambridge
 
 -----------------------------------------------------------------------------
 Redistribution and use in source and binary forms, with or without
@@ -2625,7 +2625,7 @@ for (;;)
           if (isinclass)
             {
             int max = (int)GET2(ecode, 1 + IMM2_SIZE);
-            if (*ecode == OP_CRPOSRANGE)
+            if (*ecode == OP_CRPOSRANGE && count >= (int)GET2(ecode, 1))
               {
               active_count--;           /* Remove non-match possibility */
               next_active_state--;
@@ -2736,9 +2736,10 @@ for (;;)
             condcode == OP_DNRREF)
           return PCRE_ERROR_DFA_UCOND;
 
-        /* The DEFINE condition is always false */
+        /* The DEFINE condition is always false, and the assertion (?!) is
+        converted to OP_FAIL. */
 
-        if (condcode == OP_DEF)
+        if (condcode == OP_DEF || condcode == OP_FAIL)
           { ADD_ACTIVE(state_offset + codelink + LINK_SIZE + 1, 0); }
 
         /* The only supported version of OP_RREF is for the value RREF_ANY,
