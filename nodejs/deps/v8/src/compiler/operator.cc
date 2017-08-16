@@ -14,7 +14,11 @@ namespace {
 
 template <typename N>
 V8_INLINE N CheckRange(size_t val) {
-  CHECK_LE(val, std::numeric_limits<N>::max());
+  // The getters on Operator for input and output counts currently return int.
+  // Thus check that the given value fits in the integer range.
+  // TODO(titzer): Remove this check once the getters return size_t.
+  CHECK_LE(val, std::min(static_cast<size_t>(std::numeric_limits<N>::max()),
+                         static_cast<size_t>(kMaxInt)));
   return static_cast<N>(val);
 }
 
@@ -23,7 +27,6 @@ V8_INLINE N CheckRange(size_t val) {
 
 // static
 STATIC_CONST_MEMBER_DEFINITION const size_t Operator::kMaxControlOutputCount;
-
 
 Operator::Operator(Opcode opcode, Properties properties, const char* mnemonic,
                    size_t value_in, size_t effect_in, size_t control_in,
@@ -36,8 +39,7 @@ Operator::Operator(Opcode opcode, Properties properties, const char* mnemonic,
       control_in_(CheckRange<uint16_t>(control_in)),
       value_out_(CheckRange<uint16_t>(value_out)),
       effect_out_(CheckRange<uint8_t>(effect_out)),
-      control_out_(CheckRange<uint16_t>(control_out)) {}
-
+      control_out_(CheckRange<uint32_t>(control_out)) {}
 
 std::ostream& operator<<(std::ostream& os, const Operator& op) {
   op.PrintTo(os);

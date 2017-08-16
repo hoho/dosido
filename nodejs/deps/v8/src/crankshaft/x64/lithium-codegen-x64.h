@@ -117,12 +117,9 @@ class LCodeGen: public LCodeGenBase {
 
   XMMRegister double_scratch0() const { return kScratchDoubleReg; }
 
-  void EmitClassOfTest(Label* if_true,
-                       Label* if_false,
-                       Handle<String> class_name,
-                       Register input,
-                       Register temporary,
-                       Register scratch);
+  void EmitClassOfTest(Label* if_true, Label* if_false,
+                       Handle<String> class_name, Register input,
+                       Register temporary, Register scratch);
 
   bool HasAllocatedStackSlots() const {
     return chunk()->HasAllocatedStackSlots();
@@ -297,8 +294,6 @@ class LCodeGen: public LCodeGenBase {
 
   template <class T>
   void EmitVectorLoadICRegisters(T* instr);
-  template <class T>
-  void EmitVectorStoreICRegisters(T* instr);
 
 #ifdef _MSC_VER
   // On windows, you may not access the stack more than one page below

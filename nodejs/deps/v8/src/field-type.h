@@ -5,12 +5,16 @@
 #ifndef V8_FIELD_TYPE_H_
 #define V8_FIELD_TYPE_H_
 
-#include "src/handles.h"
+#include "src/ast/ast-types.h"
 #include "src/objects.h"
+#include "src/objects/map.h"
 #include "src/ostreams.h"
 
 namespace v8 {
 namespace internal {
+
+template <typename T>
+class Handle;
 
 class FieldType : public Object {
  public:
@@ -38,7 +42,7 @@ class FieldType : public Object {
   bool NowStable();
   bool NowIs(FieldType* other);
   bool NowIs(Handle<FieldType> other);
-  Type* Convert(Zone* zone);
+  AstType* Convert(Zone* zone);
 
   void PrintTo(std::ostream& os);
 };

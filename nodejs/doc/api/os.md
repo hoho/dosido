@@ -14,7 +14,7 @@ const os = require('os');
 added: v0.7.8
 -->
 
-* {String}
+* {string}
 
 A string constant defining the operating system-specific end-of-line marker:
 
@@ -26,6 +26,8 @@ A string constant defining the operating system-specific end-of-line marker:
 added: v0.5.0
 -->
 
+* Returns: {string}
+
 The `os.arch()` method returns a string identifying the operating system CPU
 architecture *for which the Node.js binary was compiled*.
 
@@ -36,6 +38,9 @@ The current possible values are: `'arm'`, `'arm64'`, `'ia32'`, `'mips'`,
 Equivalent to [`process.arch`][].
 
 ## os.constants
+<!-- YAML
+added: v6.3.0
+-->
 
 * {Object}
 
@@ -55,7 +60,7 @@ each CPU/core installed.
 
 The properties included on each object include:
 
-* `model` {String}
+* `model` {string}
 * `speed` {number} (in MHz)
 * `times` {Object}
   * `user` {number} The number of milliseconds the CPU has spent in user mode.
@@ -66,6 +71,7 @@ The properties included on each object include:
 
 For example:
 
+<!-- eslint-disable semi -->
 ```js
 [
   {
@@ -159,15 +165,15 @@ For example:
 ]
 ```
 
-*Note*: Because `nice` values are UNIX-specific, on Windows the `nice` values of
-all processors are always 0.
+*Note*: Because `nice` values are UNIX-specific, on Windows the `nice` values
+of all processors are always 0.
 
 ## os.endianness()
 <!-- YAML
 added: v0.9.4
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.endianness()` method returns a string identifying the endianness of the
 CPU *for which the Node.js binary was compiled*.
@@ -182,7 +188,7 @@ Possible values are:
 added: v0.3.3
 -->
 
-* Returns: {Integer}
+* Returns: {integer}
 
 The `os.freemem()` method returns the amount of free system memory in bytes as
 an integer.
@@ -192,7 +198,7 @@ an integer.
 added: v2.3.0
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.homedir()` method returns the home directory of the current user as a
 string.
@@ -202,7 +208,7 @@ string.
 added: v0.3.3
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.hostname()` method returns the hostname of the operating system as a
 string.
@@ -239,15 +245,16 @@ value is an array of objects that each describe an assigned network address.
 
 The properties available on the assigned network address object include:
 
-* `address` {String} The assigned IPv4 or IPv6 address
-* `netmask` {String} The IPv4 or IPv6 network mask
-* `family` {String} Either `IPv4` or `IPv6`
-* `mac` {String} The MAC address of the network interface
+* `address` {string} The assigned IPv4 or IPv6 address
+* `netmask` {string} The IPv4 or IPv6 network mask
+* `family` {string} Either `IPv4` or `IPv6`
+* `mac` {string} The MAC address of the network interface
 * `internal` {boolean} `true` if the network interface is a loopback or
   similar interface that is not remotely accessible; otherwise `false`
 * `scopeid` {number} The numeric IPv6 scope ID (only specified when `family`
   is `IPv6`)
 
+<!-- eslint-skip -->
 ```js
 {
   lo: [
@@ -290,7 +297,7 @@ The properties available on the assigned network address object include:
 added: v0.5.0
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.platform()` method returns a string identifying the operating system
 platform as set during compile time of Node.js.
@@ -316,21 +323,26 @@ to be experimental at this time.
 added: v0.3.3
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.release()` method returns a string identifying the operating system
 release.
 
-*Note*: On POSIX systems, the operating system release is determined by calling
-uname(3). On Windows, `GetVersionExW()` is used. Please see
+*Note*: On POSIX systems, the operating system release is determined by
+calling uname(3). On Windows, `GetVersionExW()` is used. Please see
 https://en.wikipedia.org/wiki/Uname#Examples for more information.
 
 ## os.tmpdir()
 <!-- YAML
 added: v0.9.9
+changes:
+  - version: v2.0.0
+    pr-url: https://github.com/nodejs/node/pull/747
+    description: This function is now cross-platform consistent and no longer
+                 returns a path with a trailing slash on any platform
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.tmpdir()` method returns a string specifying the operating system's
 default directory for temporary files.
@@ -340,7 +352,7 @@ default directory for temporary files.
 added: v0.3.3
 -->
 
-* Returns: {Integer}
+* Returns: {integer}
 
 The `os.totalmem()` method returns the total amount of system memory in bytes
 as an integer.
@@ -350,10 +362,10 @@ as an integer.
 added: v0.3.3
 -->
 
-* Returns: {String}
+* Returns: {string}
 
 The `os.type()` method returns a string identifying the operating system name
-as returned by uname(3). For example `'Linux'` on Linux, `'Darwin'` on OS X and
+as returned by uname(3). For example `'Linux'` on Linux, `'Darwin'` on macOS and
 `'Windows_NT'` on Windows.
 
 Please see https://en.wikipedia.org/wiki/Uname#Examples for additional
@@ -364,13 +376,12 @@ information about the output of running uname(3) on various operating systems.
 added: v0.3.3
 -->
 
-* Returns: {Integer}
+* Returns: {integer}
 
 The `os.uptime()` method returns the system uptime in number of seconds.
 
-*Note*: Within Node.js' internals, this number is represented as a `double`.
-However, fractional seconds are not returned and the value can typically be
-treated as an integer.
+*Note*: On Windows the returned value includes fractions of a second.
+Use `Math.floor()` to get whole seconds.
 
 ## os.userInfo([options])
 <!-- YAML
@@ -378,7 +389,7 @@ added: v6.0.0
 -->
 
 * `options` {Object}
-  * `encoding` {String} Character encoding used to interpret resulting strings.
+  * `encoding` {string} Character encoding used to interpret resulting strings.
     If `encoding` is set to `'buffer'`, the `username`, `shell`, and `homedir`
     values will be `Buffer` instances. (Default: 'utf8')
 * Returns: {Object}
@@ -395,10 +406,17 @@ operating system response.
 
 ## OS Constants
 
-The following constants are exported by `os.constants`. **Note:** Not all
-constants will be available on every operating system.
+The following constants are exported by `os.constants`.
+
+*Note*: Not all constants will be available on every operating system.
 
 ### Signal Constants
+<!-- YAML
+changes:
+  - version: v5.11.0
+    pr-url: https://github.com/nodejs/node/pull/6093
+    description: Added support for `SIGINFO`.
+-->
 
 The following signal constants are exported by `os.constants.signals`:
 

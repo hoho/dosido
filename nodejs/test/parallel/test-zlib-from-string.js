@@ -1,3 +1,24 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 'use strict';
 // test compressing and uncompressing a string with zlib
 
@@ -34,8 +55,8 @@ const expectedBase64Gzip = 'H4sIAAAAAAAAA11RS05DMQy8yhzg6d2BPSAkJPZu4laWkjiN4' +
                            'sHnHNzRtagj5AQAA';
 
 zlib.deflate(inputString, function(err, buffer) {
-  assert.equal(buffer.toString('base64'), expectedBase64Deflate,
-               'deflate encoded string should match');
+  assert.strictEqual(buffer.toString('base64'), expectedBase64Deflate,
+                     'deflate encoded string should match');
 });
 
 zlib.gzip(inputString, function(err, buffer) {
@@ -46,19 +67,19 @@ zlib.gzip(inputString, function(err, buffer) {
   // result that we're expecting, and this should match what we get
   // from inflating the known valid deflate data.
   zlib.gunzip(buffer, function(err, gunzipped) {
-    assert.equal(gunzipped.toString(), inputString,
-                 'Should get original string after gzip/gunzip');
+    assert.strictEqual(gunzipped.toString(), inputString,
+                       'Should get original string after gzip/gunzip');
   });
 });
 
-var buffer = Buffer.from(expectedBase64Deflate, 'base64');
+let buffer = Buffer.from(expectedBase64Deflate, 'base64');
 zlib.unzip(buffer, function(err, buffer) {
-  assert.equal(buffer.toString(), inputString,
-               'decoded inflated string should match');
+  assert.strictEqual(buffer.toString(), inputString,
+                     'decoded inflated string should match');
 });
 
 buffer = Buffer.from(expectedBase64Gzip, 'base64');
 zlib.unzip(buffer, function(err, buffer) {
-  assert.equal(buffer.toString(), inputString,
-               'decoded gunzipped string should match');
+  assert.strictEqual(buffer.toString(), inputString,
+                     'decoded gunzipped string should match');
 });

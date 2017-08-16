@@ -4,7 +4,7 @@
 
 
 #include "src/crankshaft/hydrogen-environment-liveness.h"
-
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -222,7 +222,7 @@ void HEnvironmentLivenessAnalysisPhase::Run() {
 #ifdef DEBUG
 bool HEnvironmentLivenessAnalysisPhase::VerifyClosures(
     Handle<JSFunction> a, Handle<JSFunction> b) {
-  Heap::RelocationLock for_heap_access(isolate()->heap());
+  base::LockGuard<base::Mutex> guard(isolate()->heap()->relocation_mutex());
   AllowHandleDereference for_verification;
   return a.is_identical_to(b);
 }

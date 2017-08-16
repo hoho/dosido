@@ -1,3 +1,19 @@
+# Whitelist dotfiles
+.*
+!deps/**/.*
+!test/fixtures/**/.*
+!tools/eslint/**/.*
+!tools/doc/node_modules/**/.*
+!.editorconfig
+!.eslintignore
+!.eslintrc.yaml
+!.gitattributes
+!.github
+!.gitignore
+!.gitkeep
+!.mailmap
+!.remarkrc
+
 core
 vgcore.*
 v8*.log
@@ -16,10 +32,9 @@ node
 node_g
 *.swp
 .benchmark_reports
-/.project
-/.cproject
 icu_config.gypi
 .eslintcache
+node_trace.*.log
 
 /out
 
@@ -27,7 +42,6 @@ icu_config.gypi
 Debug/
 !**/node_modules/debug/
 !deps/v8/src/debug/
-!deps/v8/src/base/debug/
 Release/
 !doc/blog/**
 *.sln
@@ -46,6 +60,8 @@ ipch/
 *.VC.opendb
 .vs/
 .vscode/
+/deps/v8/src/debug/obj
+/*.exe
 
 /config.mk
 /config.gypi
@@ -94,3 +110,8 @@ icu_config.gypi
 # Xcode workspaces and project folders
 *.xcodeproj
 *.xcworkspace
+
+# libuv book and GitHub template
+deps/uv/.github/
+deps/uv/docs/code/
+deps/uv/docs/src/guide/

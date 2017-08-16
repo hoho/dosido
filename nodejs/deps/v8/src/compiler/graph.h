@@ -5,8 +5,10 @@
 #ifndef V8_COMPILER_GRAPH_H_
 #define V8_COMPILER_GRAPH_H_
 
-#include "src/zone.h"
-#include "src/zone-containers.h"
+#include "src/base/compiler-specific.h"
+#include "src/globals.h"
+#include "src/zone/zone-containers.h"
+#include "src/zone/zone.h"
 
 namespace v8 {
 namespace internal {
@@ -28,7 +30,7 @@ typedef uint32_t Mark;
 // out-of-line data associated with each node.
 typedef uint32_t NodeId;
 
-class Graph final : public ZoneObject {
+class V8_EXPORT_PRIVATE Graph final : public NON_EXPORTED_BASE(ZoneObject) {
  public:
   explicit Graph(Zone* zone);
 
@@ -102,6 +104,17 @@ class Graph final : public ZoneObject {
     Node* nodes[] = {n1, n2, n3, n4, n5, n6, n7, n8, n9};
     return NewNode(op, arraysize(nodes), nodes);
   }
+  Node* NewNode(const Operator* op, Node* n1, Node* n2, Node* n3, Node* n4,
+                Node* n5, Node* n6, Node* n7, Node* n8, Node* n9, Node* n10) {
+    Node* nodes[] = {n1, n2, n3, n4, n5, n6, n7, n8, n9, n10};
+    return NewNode(op, arraysize(nodes), nodes);
+  }
+  Node* NewNode(const Operator* op, Node* n1, Node* n2, Node* n3, Node* n4,
+                Node* n5, Node* n6, Node* n7, Node* n8, Node* n9, Node* n10,
+                Node* n11) {
+    Node* nodes[] = {n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11};
+    return NewNode(op, arraysize(nodes), nodes);
+  }
 
   // Clone the {node}, and assign a new node id to the copy.
   Node* CloneNode(const Node* node);
@@ -118,6 +131,9 @@ class Graph final : public ZoneObject {
   void Decorate(Node* node);
   void AddDecorator(GraphDecorator* decorator);
   void RemoveDecorator(GraphDecorator* decorator);
+
+  // Very simple print API usable in a debugger.
+  void Print() const;
 
  private:
   friend class NodeMarkerBase;

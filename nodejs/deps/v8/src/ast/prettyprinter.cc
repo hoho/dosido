@@ -9,18 +9,20 @@
 #include "src/ast/ast-value-factory.h"
 #include "src/ast/scopes.h"
 #include "src/base/platform/platform.h"
+#include "src/globals.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
 
-CallPrinter::CallPrinter(Isolate* isolate, bool is_builtin)
+CallPrinter::CallPrinter(Isolate* isolate, bool is_user_js)
     : builder_(isolate) {
   isolate_ = isolate;
   position_ = 0;
   num_prints_ = 0;
   found_ = false;
   done_ = false;
-  is_builtin_ = is_builtin;
+  is_user_js_ = is_user_js;
   InitializeAstVisitor(isolate);
 }
 
@@ -238,11 +240,11 @@ void CallPrinter::VisitArrayLiteral(ArrayLiteral* node) {
 
 
 void CallPrinter::VisitVariableProxy(VariableProxy* node) {
-  if (is_builtin_) {
-    // Variable names of builtins are meaningless due to minification.
-    Print("(var)");
-  } else {
+  if (is_user_js_) {
     PrintLiteral(node->name(), false);
+  } else {
+    // Variable names of non-user code are meaningless due to minification.
+    Print("(var)");
   }
 }
 
@@ -252,9 +254,7 @@ void CallPrinter::VisitAssignment(Assignment* node) {
   Find(node->value());
 }
 
-
-void CallPrinter::VisitYield(Yield* node) { Find(node->expression()); }
-
+void CallPrinter::VisitSuspend(Suspend* node) { Find(node->expression()); }
 
 void CallPrinter::VisitThrow(Throw* node) { Find(node->exception()); }
 
@@ -278,9 +278,9 @@ void CallPrinter::VisitProperty(Property* node) {
 void CallPrinter::VisitCall(Call* node) {
   bool was_found = !found_ && node->position() == position_;
   if (was_found) {
-    // Bail out if the error is caused by a direct call to a variable in builtin
-    // code. The variable name is meaningless due to minification.
-    if (is_builtin_ && node->expression()->IsVariableProxy()) {
+    // Bail out if the error is caused by a direct call to a variable in
+    // non-user JS code. The variable name is meaningless due to minification.
+    if (!is_user_js_ && node->expression()->IsVariableProxy()) {
       done_ = true;
       return;
     }
@@ -296,9 +296,9 @@ void CallPrinter::VisitCall(Call* node) {
 void CallPrinter::VisitCallNew(CallNew* node) {
   bool was_found = !found_ && node->position() == position_;
   if (was_found) {
-    // Bail out if the error is caused by a direct call to a variable in builtin
-    // code. The variable name is meaningless due to minification.
-    if (is_builtin_ && node->expression()->IsVariableProxy()) {
+    // Bail out if the error is caused by a direct call to a variable in
+    // non-user JS code. The variable name is meaningless due to minification.
+    if (!is_user_js_ && node->expression()->IsVariableProxy()) {
       done_ = true;
       return;
     }
@@ -369,6 +369,26 @@ void CallPrinter::VisitEmptyParentheses(EmptyParentheses* node) {
   UNREACHABLE();
 }
 
+void CallPrinter::VisitGetIterator(GetIterator* node) {
+  // Because CallPrinter is used by RenderCallSite() in runtime-internal.cc,
+  // and the GetIterator node results in a Call, either to a [@@iterator] or
+  // [@@asyncIterator]. It's unknown which call this error refers to, so we
+  // assume it's the first call.
+  bool was_found = !found_ && node->position() == position_;
+  if (was_found) {
+    found_ = true;
+  }
+  Find(node->iterable(), true);
+  Print(node->hint() == IteratorType::kNormal ? "[Symbol.iterator]"
+                                              : "[Symbol.asyncIterator]");
+  if (was_found) done_ = true;
+}
+
+void CallPrinter::VisitImportCallExpression(ImportCallExpression* node) {
+  Print("ImportCall(");
+  Find(node->argument(), true);
+  Print(")");
+}
 
 void CallPrinter::VisitThisFunction(ThisFunction* node) {}
 
@@ -433,9 +453,9 @@ void CallPrinter::PrintLiteral(const AstRawString* value, bool quote) {
 
 #ifdef DEBUG
 
-// A helper for ast nodes that use FeedbackVectorSlots.
+// A helper for ast nodes that use FeedbackSlots.
 static int FormatSlotNode(Vector<char>* buf, Expression* node,
-                          const char* node_name, FeedbackVectorSlot slot) {
+                          const char* node_name, FeedbackSlot slot) {
   int pos = SNPrintF(*buf, "%s", node_name);
   if (!slot.IsInvalid()) {
     pos += SNPrintF(*buf + pos, " Slot(%d)", slot.ToInt());
@@ -528,6 +548,18 @@ void AstPrinter::PrintLiteral(Handle<Object> value, bool quote) {
     }
   } else if (object->IsFixedArray()) {
     Print("FixedArray");
+  } else if (object->IsSymbol()) {
+    // Symbols can only occur as literals if they were inserted by the parser.
+    Symbol* symbol = Symbol::cast(object);
+    if (symbol->name()->IsString()) {
+      int length = 0;
+      String* string = String::cast(symbol->name());
+      std::unique_ptr<char[]> desc = string->ToCString(
+          ALLOW_NULLS, FAST_STRING_TRAVERSAL, 0, string->length(), &length);
+      Print("Symbol(%*s)", length, desc.get());
+    } else {
+      Print("Symbol()");
+    }
   } else {
     Print("<unknown literal %p>", static_cast<void*>(object));
   }
@@ -603,8 +635,9 @@ void AstPrinter::PrintLiteralWithModeIndented(const char* info,
     PrintLiteralIndented(info, value, true);
   } else {
     EmbeddedVector<char, 256> buf;
-    int pos = SNPrintF(buf, "%s (mode = %s", info,
-                       Variable::Mode2String(var->mode()));
+    int pos =
+        SNPrintF(buf, "%s (%p) (mode = %s", info, reinterpret_cast<void*>(var),
+                 VariableMode2String(var->mode()));
     SNPrintF(buf + pos, ")");
     PrintLiteralIndented(buf.start(), value, true);
   }
@@ -630,8 +663,8 @@ const char* AstPrinter::PrintProgram(FunctionLiteral* program) {
   { IndentedScope indent(this, "FUNC", program->position());
     PrintIndented("KIND");
     Print(" %d\n", program->kind());
-    PrintIndented("YIELD COUNT");
-    Print(" %d\n", program->yield_count());
+    PrintIndented("SUSPEND COUNT");
+    Print(" %d\n", program->suspend_count());
     PrintLiteralIndented("NAME", program->name(), true);
     PrintLiteralIndented("INFERRED NAME", program->inferred_name(), true);
     PrintParameters(program->scope());
@@ -649,13 +682,10 @@ void AstPrinter::PrintOut(Isolate* isolate, AstNode* node) {
   PrintF("%s", printer.output_);
 }
 
-
-void AstPrinter::PrintDeclarations(ZoneList<Declaration*>* declarations) {
-  if (declarations->length() > 0) {
+void AstPrinter::PrintDeclarations(Declaration::List* declarations) {
+  if (!declarations->is_empty()) {
     IndentedScope indent(this, "DECLS");
-    for (int i = 0; i < declarations->length(); i++) {
-      Visit(declarations->at(i));
-    }
+    for (Declaration* decl : *declarations) Visit(decl);
   }
 }
 
@@ -785,8 +815,8 @@ void AstPrinter::VisitCaseClause(CaseClause* clause) {
 
 void AstPrinter::VisitDoWhileStatement(DoWhileStatement* node) {
   IndentedScope indent(this, "DO", node->position());
-  PrintIndented("YIELD COUNT");
-  Print(" %d\n", node->yield_count());
+  PrintIndented("SUSPEND COUNT");
+  Print(" %d\n", node->suspend_count());
   PrintLabelsIndented(node->labels());
   PrintIndentedVisit("BODY", node->body());
   PrintIndentedVisit("COND", node->cond());
@@ -795,8 +825,8 @@ void AstPrinter::VisitDoWhileStatement(DoWhileStatement* node) {
 
 void AstPrinter::VisitWhileStatement(WhileStatement* node) {
   IndentedScope indent(this, "WHILE", node->position());
-  PrintIndented("YIELD COUNT");
-  Print(" %d\n", node->yield_count());
+  PrintIndented("SUSPEND COUNT");
+  Print(" %d\n", node->suspend_count());
   PrintLabelsIndented(node->labels());
   PrintIndentedVisit("COND", node->cond());
   PrintIndentedVisit("BODY", node->body());
@@ -805,8 +835,8 @@ void AstPrinter::VisitWhileStatement(WhileStatement* node) {
 
 void AstPrinter::VisitForStatement(ForStatement* node) {
   IndentedScope indent(this, "FOR", node->position());
-  PrintIndented("YIELD COUNT");
-  Print(" %d\n", node->yield_count());
+  PrintIndented("SUSPEND COUNT");
+  Print(" %d\n", node->suspend_count());
   PrintLabelsIndented(node->labels());
   if (node->init()) PrintIndentedVisit("INIT", node->init());
   if (node->cond()) PrintIndentedVisit("COND", node->cond());
@@ -817,8 +847,8 @@ void AstPrinter::VisitForStatement(ForStatement* node) {
 
 void AstPrinter::VisitForInStatement(ForInStatement* node) {
   IndentedScope indent(this, "FOR IN", node->position());
-  PrintIndented("YIELD COUNT");
-  Print(" %d\n", node->yield_count());
+  PrintIndented("SUSPEND COUNT");
+  Print(" %d\n", node->suspend_count());
   PrintIndentedVisit("FOR", node->each());
   PrintIndentedVisit("IN", node->enumerable());
   PrintIndentedVisit("BODY", node->body());
@@ -827,8 +857,8 @@ void AstPrinter::VisitForInStatement(ForInStatement* node) {
 
 void AstPrinter::VisitForOfStatement(ForOfStatement* node) {
   IndentedScope indent(this, "FOR OF", node->position());
-  PrintIndented("YIELD COUNT");
-  Print(" %d\n", node->yield_count());
+  PrintIndented("SUSPEND COUNT");
+  Print(" %d\n", node->suspend_count());
   PrintIndentedVisit("INIT", node->assign_iterator());
   PrintIndentedVisit("NEXT", node->next_result());
   PrintIndentedVisit("DONE", node->result_done());
@@ -840,9 +870,8 @@ void AstPrinter::VisitForOfStatement(ForOfStatement* node) {
 void AstPrinter::VisitTryCatchStatement(TryCatchStatement* node) {
   IndentedScope indent(this, "TRY CATCH", node->position());
   PrintTryStatement(node);
-  PrintLiteralWithModeIndented("CATCHVAR",
-                               node->variable(),
-                               node->variable()->name());
+  PrintLiteralWithModeIndented("CATCHVAR", node->scope()->catch_variable(),
+                               node->scope()->catch_variable()->name());
   PrintIndentedVisit("CATCH", node->catch_block());
 }
 
@@ -864,12 +893,16 @@ void AstPrinter::PrintTryStatement(TryStatement* node) {
     case HandlerTable::CAUGHT:
       prediction = "CAUGHT";
       break;
-    case HandlerTable::PROMISE:
-      prediction = "PROMISE";
-      break;
     case HandlerTable::DESUGARING:
       prediction = "DESUGARING";
       break;
+    case HandlerTable::ASYNC_AWAIT:
+      prediction = "ASYNC_AWAIT";
+      break;
+    case HandlerTable::PROMISE:
+      // Catch prediction resulting in promise rejections aren't
+      // parsed by the parser.
+      UNREACHABLE();
   }
   Print(" %s\n", prediction);
 }
@@ -897,33 +930,26 @@ void AstPrinter::VisitClassLiteral(ClassLiteral* node) {
   if (node->extends() != nullptr) {
     PrintIndentedVisit("EXTENDS", node->extends());
   }
-  PrintProperties(node->properties());
+  PrintClassProperties(node->properties());
 }
 
-
-void AstPrinter::PrintProperties(
-    ZoneList<ObjectLiteral::Property*>* properties) {
+void AstPrinter::PrintClassProperties(
+    ZoneList<ClassLiteral::Property*>* properties) {
   for (int i = 0; i < properties->length(); i++) {
-    ObjectLiteral::Property* property = properties->at(i);
+    ClassLiteral::Property* property = properties->at(i);
     const char* prop_kind = nullptr;
     switch (property->kind()) {
-      case ObjectLiteral::Property::CONSTANT:
-        prop_kind = "CONSTANT";
+      case ClassLiteral::Property::METHOD:
+        prop_kind = "METHOD";
         break;
-      case ObjectLiteral::Property::COMPUTED:
-        prop_kind = "COMPUTED";
-        break;
-      case ObjectLiteral::Property::MATERIALIZED_LITERAL:
-        prop_kind = "MATERIALIZED_LITERAL";
-        break;
-      case ObjectLiteral::Property::PROTOTYPE:
-        prop_kind = "PROTOTYPE";
-        break;
-      case ObjectLiteral::Property::GETTER:
+      case ClassLiteral::Property::GETTER:
         prop_kind = "GETTER";
         break;
-      case ObjectLiteral::Property::SETTER:
+      case ClassLiteral::Property::SETTER:
         prop_kind = "SETTER";
+        break;
+      case ClassLiteral::Property::FIELD:
+        prop_kind = "FIELD";
         break;
     }
     EmbeddedVector<char, 128> buf;
@@ -965,7 +991,7 @@ void AstPrinter::VisitLiteral(Literal* node) {
 void AstPrinter::VisitRegExpLiteral(RegExpLiteral* node) {
   IndentedScope indent(this, "REGEXP LITERAL", node->position());
   EmbeddedVector<char, 128> buf;
-  SNPrintF(buf, "literal_index = %d\n", node->literal_index());
+  SNPrintF(buf, "literal_slot = %d\n", node->literal_slot().ToInt());
   PrintIndented(buf.start());
   PrintLiteralIndented("PATTERN", node->pattern(), false);
   int i = 0;
@@ -984,9 +1010,45 @@ void AstPrinter::VisitRegExpLiteral(RegExpLiteral* node) {
 void AstPrinter::VisitObjectLiteral(ObjectLiteral* node) {
   IndentedScope indent(this, "OBJ LITERAL", node->position());
   EmbeddedVector<char, 128> buf;
-  SNPrintF(buf, "literal_index = %d\n", node->literal_index());
+  SNPrintF(buf, "literal_slot = %d\n", node->literal_slot().ToInt());
   PrintIndented(buf.start());
-  PrintProperties(node->properties());
+  PrintObjectProperties(node->properties());
+}
+
+void AstPrinter::PrintObjectProperties(
+    ZoneList<ObjectLiteral::Property*>* properties) {
+  for (int i = 0; i < properties->length(); i++) {
+    ObjectLiteral::Property* property = properties->at(i);
+    const char* prop_kind = nullptr;
+    switch (property->kind()) {
+      case ObjectLiteral::Property::CONSTANT:
+        prop_kind = "CONSTANT";
+        break;
+      case ObjectLiteral::Property::COMPUTED:
+        prop_kind = "COMPUTED";
+        break;
+      case ObjectLiteral::Property::MATERIALIZED_LITERAL:
+        prop_kind = "MATERIALIZED_LITERAL";
+        break;
+      case ObjectLiteral::Property::PROTOTYPE:
+        prop_kind = "PROTOTYPE";
+        break;
+      case ObjectLiteral::Property::GETTER:
+        prop_kind = "GETTER";
+        break;
+      case ObjectLiteral::Property::SETTER:
+        prop_kind = "SETTER";
+        break;
+      case ObjectLiteral::Property::SPREAD:
+        prop_kind = "SPREAD";
+        break;
+    }
+    EmbeddedVector<char, 128> buf;
+    SNPrintF(buf, "PROPERTY - %s", prop_kind);
+    IndentedScope prop(this, buf.start());
+    PrintIndentedVisit("KEY", properties->at(i)->key());
+    PrintIndentedVisit("VALUE", properties->at(i)->value());
+  }
 }
 
 
@@ -994,7 +1056,7 @@ void AstPrinter::VisitArrayLiteral(ArrayLiteral* node) {
   IndentedScope indent(this, "ARRAY LITERAL", node->position());
 
   EmbeddedVector<char, 128> buf;
-  SNPrintF(buf, "literal_index = %d\n", node->literal_index());
+  SNPrintF(buf, "literal_slot = %d\n", node->literal_slot().ToInt());
   PrintIndented(buf.start());
   if (node->values()->length() > 0) {
     IndentedScope indent(this, "VALUES", node->position());
@@ -1028,9 +1090,6 @@ void AstPrinter::VisitVariableProxy(VariableProxy* node) {
       case VariableLocation::CONTEXT:
         SNPrintF(buf + pos, " context[%d]", var->index());
         break;
-      case VariableLocation::GLOBAL:
-        SNPrintF(buf + pos, " global[%d]", var->index());
-        break;
       case VariableLocation::LOOKUP:
         SNPrintF(buf + pos, " lookup");
         break;
@@ -1049,10 +1108,9 @@ void AstPrinter::VisitAssignment(Assignment* node) {
   Visit(node->value());
 }
 
-
-void AstPrinter::VisitYield(Yield* node) {
+void AstPrinter::VisitSuspend(Suspend* node) {
   EmbeddedVector<char, 128> buf;
-  SNPrintF(buf, "YIELD id %d", node->yield_id());
+  SNPrintF(buf, "SUSPEND id %d", node->suspend_id());
   IndentedScope indent(this, buf.start(), node->position());
   Visit(node->expression());
 }
@@ -1100,7 +1158,8 @@ void AstPrinter::VisitCallNew(CallNew* node) {
 
 void AstPrinter::VisitCallRuntime(CallRuntime* node) {
   EmbeddedVector<char, 128> buf;
-  SNPrintF(buf, "CALL RUNTIME %s", node->debug_name());
+  SNPrintF(buf, "CALL RUNTIME %s%s", node->debug_name(),
+           node->is_jsruntime() ? " (JS function)" : "");
   IndentedScope indent(this, buf.start(), node->position());
   PrintArguments(node->arguments());
 }
@@ -1145,6 +1204,15 @@ void AstPrinter::VisitEmptyParentheses(EmptyParentheses* node) {
   IndentedScope indent(this, "()", node->position());
 }
 
+void AstPrinter::VisitGetIterator(GetIterator* node) {
+  IndentedScope indent(this, "GET-ITERATOR", node->position());
+  Visit(node->iterable());
+}
+
+void AstPrinter::VisitImportCallExpression(ImportCallExpression* node) {
+  IndentedScope indent(this, "IMPORT-CALL", node->position());
+  Visit(node->argument());
+}
 
 void AstPrinter::VisitThisFunction(ThisFunction* node) {
   IndentedScope indent(this, "THIS-FUNCTION", node->position());

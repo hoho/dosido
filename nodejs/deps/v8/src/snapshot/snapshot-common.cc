@@ -9,6 +9,7 @@
 #include "src/api.h"
 #include "src/base/platform/platform.h"
 #include "src/full-codegen/full-codegen.h"
+#include "src/objects-inl.h"
 #include "src/snapshot/deserializer.h"
 #include "src/snapshot/snapshot-source-sink.h"
 #include "src/version.h"
@@ -31,19 +32,6 @@ bool Snapshot::HasContextSnapshot(Isolate* isolate, size_t index) {
   return index < num_contexts;
 }
 
-
-uint32_t Snapshot::SizeOfFirstPage(Isolate* isolate, AllocationSpace space) {
-  DCHECK(space >= FIRST_PAGED_SPACE && space <= LAST_PAGED_SPACE);
-  if (!isolate->snapshot_available()) {
-    return static_cast<uint32_t>(MemoryAllocator::PageAreaSize(space));
-  }
-  uint32_t size;
-  int offset = kFirstPageSizesOffset + (space - FIRST_PAGED_SPACE) * kInt32Size;
-  memcpy(&size, isolate->snapshot_blob()->data + offset, kInt32Size);
-  return size;
-}
-
-
 bool Snapshot::Initialize(Isolate* isolate) {
   if (!isolate->snapshot_available()) return false;
   base::ElapsedTimer timer;
@@ -53,6 +41,7 @@ bool Snapshot::Initialize(Isolate* isolate) {
   Vector<const byte> startup_data = ExtractStartupData(blob);
   SnapshotData snapshot_data(startup_data);
   Deserializer deserializer(&snapshot_data);
+  deserializer.SetRehashability(ExtractRehashability(blob));
   bool success = isolate->Init(&deserializer);
   if (FLAG_profile_deserialization) {
     double ms = timer.Elapsed().InMillisecondsF();
@@ -63,8 +52,8 @@ bool Snapshot::Initialize(Isolate* isolate) {
 }
 
 MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
-    Isolate* isolate, Handle<JSGlobalProxy> global_proxy,
-    size_t context_index) {
+    Isolate* isolate, Handle<JSGlobalProxy> global_proxy, size_t context_index,
+    v8::DeserializeEmbedderFieldsCallback embedder_fields_deserializer) {
   if (!isolate->snapshot_available()) return Handle<Context>();
   base::ElapsedTimer timer;
   if (FLAG_profile_deserialization) timer.Start();
@@ -74,9 +63,10 @@ MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
       ExtractContextData(blob, static_cast<int>(context_index));
   SnapshotData snapshot_data(context_data);
   Deserializer deserializer(&snapshot_data);
+  deserializer.SetRehashability(ExtractRehashability(blob));
 
-  MaybeHandle<Object> maybe_context =
-      deserializer.DeserializePartial(isolate, global_proxy);
+  MaybeHandle<Object> maybe_context = deserializer.DeserializePartial(
+      isolate, global_proxy, embedder_fields_deserializer);
   Handle<Object> result;
   if (!maybe_context.ToHandle(&result)) return MaybeHandle<Context>();
   CHECK(result->IsContext());
@@ -89,25 +79,8 @@ MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
   return Handle<Context>::cast(result);
 }
 
-void UpdateMaxRequirementPerPage(
-    uint32_t* requirements,
-    Vector<const SerializedData::Reservation> reservations) {
-  int space = 0;
-  uint32_t current_requirement = 0;
-  for (const auto& reservation : reservations) {
-    current_requirement += reservation.chunk_size();
-    if (reservation.is_last()) {
-      requirements[space] = std::max(requirements[space], current_requirement);
-      current_requirement = 0;
-      space++;
-    }
-  }
-  DCHECK_EQ(i::Serializer::kNumberOfSpaces, space);
-}
-
-void CalculateFirstPageSizes(const SnapshotData* startup_snapshot,
-                             const List<SnapshotData*>* context_snapshots,
-                             uint32_t* sizes_out) {
+void ProfileDeserialization(const SnapshotData* startup_snapshot,
+                            const List<SnapshotData*>* context_snapshots) {
   if (FLAG_profile_deserialization) {
     int startup_total = 0;
     PrintF("Deserialization will reserve:\n");
@@ -123,41 +96,11 @@ void CalculateFirstPageSizes(const SnapshotData* startup_snapshot,
       PrintF("%10d bytes per context #%d\n", context_total, i);
     }
   }
-
-  uint32_t startup_requirements[i::Serializer::kNumberOfSpaces];
-  uint32_t context_requirements[i::Serializer::kNumberOfSpaces];
-  for (int space = 0; space < i::Serializer::kNumberOfSpaces; space++) {
-    startup_requirements[space] = 0;
-    context_requirements[space] = 0;
-  }
-
-  UpdateMaxRequirementPerPage(startup_requirements,
-                              startup_snapshot->Reservations());
-  for (const auto& context_snapshot : *context_snapshots) {
-    UpdateMaxRequirementPerPage(context_requirements,
-                                context_snapshot->Reservations());
-  }
-
-  for (int space = 0; space < i::Serializer::kNumberOfSpaces; space++) {
-    // If the space requirement for a page is less than a page size, we consider
-    // limiting the size of the first page in order to save memory on startup.
-    uint32_t required = startup_requirements[space] +
-                        2 * context_requirements[space] +
-                        Page::kObjectStartOffset;
-    // Add a small allowance to the code space for small scripts.
-    if (space == CODE_SPACE) required += 32 * KB;
-
-    if (space >= FIRST_PAGED_SPACE && space <= LAST_PAGED_SPACE) {
-      uint32_t max_size =
-          MemoryAllocator::PageAreaSize(static_cast<AllocationSpace>(space));
-      sizes_out[space - FIRST_PAGED_SPACE] = std::min(required, max_size);
-    }
-  }
 }
 
 v8::StartupData Snapshot::CreateSnapshotBlob(
     const SnapshotData* startup_snapshot,
-    const List<SnapshotData*>* context_snapshots) {
+    const List<SnapshotData*>* context_snapshots, bool can_be_rehashed) {
   int num_contexts = context_snapshots->length();
   int startup_snapshot_offset = StartupSnapshotOffset(num_contexts);
   int total_length = startup_snapshot_offset;
@@ -166,14 +109,12 @@ v8::StartupData Snapshot::CreateSnapshotBlob(
     total_length += context_snapshot->RawData().length();
   }
 
-  uint32_t first_page_sizes[kNumPagedSpaces];
-  CalculateFirstPageSizes(startup_snapshot, context_snapshots,
-                          first_page_sizes);
+  ProfileDeserialization(startup_snapshot, context_snapshots);
 
   char* data = new char[total_length];
-  memcpy(data + kFirstPageSizesOffset, first_page_sizes,
-         kNumPagedSpaces * kInt32Size);
   memcpy(data + kNumberOfContextsOffset, &num_contexts, kInt32Size);
+  int rehashability = can_be_rehashed ? 1 : 0;
+  memcpy(data + kRehashabilityOffset, &rehashability, kInt32Size);
   int payload_offset = StartupSnapshotOffset(num_contexts);
   int payload_length = startup_snapshot->RawData().length();
   memcpy(data + payload_offset, startup_snapshot->RawData().start(),
@@ -204,6 +145,13 @@ int Snapshot::ExtractNumContexts(const v8::StartupData* data) {
   int num_contexts;
   memcpy(&num_contexts, data->data + kNumberOfContextsOffset, kInt32Size);
   return num_contexts;
+}
+
+bool Snapshot::ExtractRehashability(const v8::StartupData* data) {
+  CHECK_LT(kRehashabilityOffset, data->raw_size);
+  int rehashability;
+  memcpy(&rehashability, data->data + kRehashabilityOffset, kInt32Size);
+  return rehashability != 0;
 }
 
 Vector<const byte> Snapshot::ExtractStartupData(const v8::StartupData* data) {
@@ -258,7 +206,7 @@ SnapshotData::SnapshotData(const Serializer* serializer) {
 
   // Set header values.
   SetMagicNumber(serializer->isolate());
-  SetHeaderValue(kCheckSumOffset, Version::Hash());
+  SetHeaderValue(kVersionHashOffset, Version::Hash());
   SetHeaderValue(kNumReservationsOffset, reservations.length());
   SetHeaderValue(kPayloadLengthOffset, payload->length());
 
@@ -272,7 +220,7 @@ SnapshotData::SnapshotData(const Serializer* serializer) {
 }
 
 bool SnapshotData::IsSane() {
-  return GetHeaderValue(kCheckSumOffset) == Version::Hash();
+  return GetHeaderValue(kVersionHashOffset) == Version::Hash();
 }
 
 Vector<const SerializedData::Reservation> SnapshotData::Reservations() const {

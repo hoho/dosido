@@ -92,16 +92,16 @@
           ['OS=="linux" and use_sysroot==1', {
             'conditions': [
               ['target_arch=="arm"', {
-                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_wheezy_arm-sysroot',
+                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_jessie_arm-sysroot',
               }],
               ['target_arch=="x64"', {
-                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_wheezy_amd64-sysroot',
+                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_jessie_amd64-sysroot',
               }],
               ['target_arch=="ia32"', {
-                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_wheezy_i386-sysroot',
+                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_jessie_i386-sysroot',
               }],
               ['target_arch=="mipsel"', {
-                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_wheezy_mips-sysroot',
+                'sysroot%': '<!(cd <(DEPTH) && pwd -P)/build/linux/debian_jessie_mips-sysroot',
               }],
             ],
           }], # OS=="linux" and use_sysroot==1
@@ -242,9 +242,6 @@
     # Relative path to icu.gyp from this file.
     'icu_gyp_path': '../third_party/icu/icu.gyp',
 
-    # Relative path to inspector.gyp from this file.
-    'inspector_gyp_path': '../src/v8-inspector/inspector.gyp',
-
     'conditions': [
       ['(v8_target_arch=="arm" and host_arch!="arm") or \
         (v8_target_arch=="arm64" and host_arch!="arm64") or \
@@ -255,18 +252,6 @@
         'want_separate_host_toolset': 1,
       }, {
         'want_separate_host_toolset': 0,
-      }],
-      ['(v8_target_arch=="arm" and host_arch!="arm") or \
-        (v8_target_arch=="arm64" and host_arch!="arm64") or \
-        (v8_target_arch=="mipsel" and host_arch!="mipsel") or \
-        (v8_target_arch=="mips64el" and host_arch!="mips64el") or \
-        (v8_target_arch=="mips" and host_arch!="mips") or \
-        (v8_target_arch=="mips64" and host_arch!="mips64") or \
-        (v8_target_arch=="x64" and host_arch!="x64") or \
-        (OS=="android" or OS=="qnx")', {
-        'want_separate_host_toolset_mkpeephole': 1,
-      }, {
-        'want_separate_host_toolset_mkpeephole': 0,
       }],
       ['OS == "win"', {
         'os_posix%': 0,
@@ -319,7 +304,7 @@
             'android_ndk_root%': '<(base_dir)/third_party/android_tools/ndk/',
             'android_host_arch%': "<!(uname -m | sed -e 's/i[3456]86/x86/')",
             # Version of the NDK. Used to ensure full rebuilds on NDK rolls.
-            'android_ndk_version%': 'r11c',
+            'android_ndk_version%': 'r12b',
             'host_os%': "<!(uname -s | sed -e 's/Linux/linux/;s/Darwin/mac/')",
             'os_folder_name%': "<!(uname -s | sed -e 's/Linux/linux/;s/Darwin/darwin/')",
           },
@@ -377,6 +362,9 @@
         'android_toolchain%': '<(android_toolchain)',
         'arm_version%': '<(arm_version)',
         'host_os%': '<(host_os)',
+
+        # Print to stdout on Android.
+        'v8_android_log_stdout%': 1,
 
         'conditions': [
           ['android_ndk_root==""', {
@@ -451,6 +439,7 @@
     'variables': {
       'v8_code%': '<(v8_code)',
       'clang_warning_flags': [
+        '-Wsign-compare',
         # TODO(thakis): https://crbug.com/604888
         '-Wno-undefined-var-template',
         # TODO(yangguo): issue 5258
@@ -499,7 +488,9 @@
     },
     'conditions':[
       ['clang==0', {
-        'cflags+': ['-Wno-sign-compare',],
+        'cflags+': [
+          '-Wno-uninitialized',
+        ],
       }],
       ['clang==1 or host_clang==1', {
         # This is here so that all files get recompiled after a clang roll and
@@ -789,6 +780,12 @@
               # Don't warn about unrecognized command line option.
               '-Wno-gnu-zero-variadic-macro-arguments',
             ],
+            'cflags' : [
+              # Disable gcc warnings for optimizations based on the assumption
+              # that signed overflow does not occur. Generates false positives
+              # (see http://crbug.com/v8/6341).
+              "-Wno-strict-overflow",
+            ],
           }],
           [ 'clang==1 and (v8_target_arch=="x64" or v8_target_arch=="arm64" \
             or v8_target_arch=="mips64el")', {
@@ -863,7 +860,7 @@
             ],
           }],
         ],
-        'msvs_cygwin_dirs': ['<(DEPTH)/third_party/cygwin'],
+        'msvs_cygwin_shell': 0,
         'msvs_disabled_warnings': [
           # C4091: 'typedef ': ignored on left of 'X' when no variable is
           #                    declared.

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/crankshaft/hydrogen-bce.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -307,24 +308,25 @@ static bool BoundsCheckKeyMatch(void* key1, void* key2) {
   return k1->IndexBase() == k2->IndexBase() && k1->Length() == k2->Length();
 }
 
-
 BoundsCheckTable::BoundsCheckTable(Zone* zone)
-    : ZoneHashMap(BoundsCheckKeyMatch, ZoneHashMap::kDefaultHashMapCapacity,
-                  ZoneAllocationPolicy(zone)) { }
-
+    : CustomMatcherZoneHashMap(BoundsCheckKeyMatch,
+                               ZoneHashMap::kDefaultHashMapCapacity,
+                               ZoneAllocationPolicy(zone)) {}
 
 BoundsCheckBbData** BoundsCheckTable::LookupOrInsert(BoundsCheckKey* key,
                                                      Zone* zone) {
   return reinterpret_cast<BoundsCheckBbData**>(
-      &(ZoneHashMap::LookupOrInsert(key, key->Hash(),
-                                    ZoneAllocationPolicy(zone))->value));
+      &(CustomMatcherZoneHashMap::LookupOrInsert(key, key->Hash(),
+                                                 ZoneAllocationPolicy(zone))
+            ->value));
 }
 
 
 void BoundsCheckTable::Insert(BoundsCheckKey* key,
                               BoundsCheckBbData* data,
                               Zone* zone) {
-  ZoneHashMap::LookupOrInsert(key, key->Hash(), ZoneAllocationPolicy(zone))
+  CustomMatcherZoneHashMap::LookupOrInsert(key, key->Hash(),
+                                           ZoneAllocationPolicy(zone))
       ->value = data;
 }
 

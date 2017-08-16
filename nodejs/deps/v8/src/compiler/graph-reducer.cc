@@ -25,15 +25,17 @@ enum class GraphReducer::State : uint8_t {
 
 void Reducer::Finalize() {}
 
-
 GraphReducer::GraphReducer(Zone* zone, Graph* graph, Node* dead)
     : graph_(graph),
       dead_(dead),
       state_(graph, 4),
       reducers_(zone),
       revisit_(zone),
-      stack_(zone) {}
-
+      stack_(zone) {
+  if (dead != nullptr) {
+    NodeProperties::SetType(dead_, Type::None());
+  }
+}
 
 GraphReducer::~GraphReducer() {}
 
@@ -54,7 +56,7 @@ void GraphReducer::ReduceNode(Node* node) {
       ReduceTop();
     } else if (!revisit_.empty()) {
       // If the stack becomes empty, revisit any nodes in the revisit queue.
-      Node* const node = revisit_.top();
+      Node* const node = revisit_.front();
       revisit_.pop();
       if (state_.Get(node) == State::kRevisit) {
         // state can change while in queue.
@@ -113,17 +115,23 @@ void GraphReducer::ReduceTop() {
 
   if (node->IsDead()) return Pop();  // Node was killed while on stack.
 
+  Node::Inputs node_inputs = node->inputs();
+
   // Recurse on an input if necessary.
-  int start = entry.input_index < node->InputCount() ? entry.input_index : 0;
-  for (int i = start; i < node->InputCount(); i++) {
-    Node* input = node->InputAt(i);
-    entry.input_index = i + 1;
-    if (input != node && Recurse(input)) return;
+  int start = entry.input_index < node_inputs.count() ? entry.input_index : 0;
+  for (int i = start; i < node_inputs.count(); ++i) {
+    Node* input = node_inputs[i];
+    if (input != node && Recurse(input)) {
+      entry.input_index = i + 1;
+      return;
+    }
   }
-  for (int i = 0; i < start; i++) {
-    Node* input = node->InputAt(i);
-    entry.input_index = i + 1;
-    if (input != node && Recurse(input)) return;
+  for (int i = 0; i < start; ++i) {
+    Node* input = node_inputs[i];
+    if (input != node && Recurse(input)) {
+      entry.input_index = i + 1;
+      return;
+    }
   }
 
   // Remember the max node id before reduction.
@@ -138,11 +146,18 @@ void GraphReducer::ReduceTop() {
   // Check if the reduction is an in-place update of the {node}.
   Node* const replacement = reduction.replacement();
   if (replacement == node) {
+    if (FLAG_trace_turbo_reduction) {
+      OFStream os(stdout);
+      os << "- In-place update of " << *replacement << std::endl;
+    }
     // In-place update of {node}, may need to recurse on an input.
-    for (int i = 0; i < node->InputCount(); ++i) {
-      Node* input = node->InputAt(i);
-      entry.input_index = i + 1;
-      if (input != node && Recurse(input)) return;
+    Node::Inputs node_inputs = node->inputs();
+    for (int i = 0; i < node_inputs.count(); ++i) {
+      Node* input = node_inputs[i];
+      if (input != node && Recurse(input)) {
+        entry.input_index = i + 1;
+        return;
+      }
     }
   }
 
@@ -229,8 +244,6 @@ void GraphReducer::ReplaceWithValue(Node* node, Node* value, Node* effect,
         DCHECK_NOT_NULL(control);
         edge.UpdateTo(control);
         Revisit(user);
-        // TODO(jarin) Check that the node cannot throw (otherwise, it
-        // would have to be connected via IfSuccess/IfException).
       }
     } else if (NodeProperties::IsEffectEdge(edge)) {
       DCHECK_NOT_NULL(effect);

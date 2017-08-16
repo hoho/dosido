@@ -7,7 +7,8 @@
 #include "src/base/lazy-instance.h"
 #include "src/compiler/opcodes.h"
 #include "src/compiler/operator.h"
-#include "src/types.h"
+#include "src/compiler/types.h"
+#include "src/objects/map.h"
 
 namespace v8 {
 namespace internal {
@@ -92,6 +93,7 @@ bool operator==(FieldAccess const& lhs, FieldAccess const& rhs) {
   // really only relevant for eliminating loads and they don't care about the
   // write barrier mode.
   return lhs.base_is_tagged == rhs.base_is_tagged && lhs.offset == rhs.offset &&
+         lhs.map.address() == rhs.map.address() &&
          lhs.machine_type == rhs.machine_type;
 }
 
@@ -117,6 +119,10 @@ std::ostream& operator<<(std::ostream& os, FieldAccess const& access) {
   if (access.name.ToHandle(&name)) {
     name->Print(os);
     os << ", ";
+  }
+  Handle<Map> map;
+  if (access.map.ToHandle(&map)) {
+    os << Brief(*map) << ", ";
   }
 #endif
   access.type->PrintTo(os);
@@ -230,6 +236,44 @@ std::ostream& operator<<(std::ostream& os, CheckForMinusZeroMode mode) {
   return os;
 }
 
+std::ostream& operator<<(std::ostream& os, CheckMapsFlags flags) {
+  bool empty = true;
+  if (flags & CheckMapsFlag::kTryMigrateInstance) {
+    os << "TryMigrateInstance";
+    empty = false;
+  }
+  if (empty) os << "None";
+  return os;
+}
+
+bool operator==(CheckMapsParameters const& lhs,
+                CheckMapsParameters const& rhs) {
+  return lhs.flags() == rhs.flags() && lhs.maps() == rhs.maps();
+}
+
+bool operator!=(CheckMapsParameters const& lhs,
+                CheckMapsParameters const& rhs) {
+  return !(lhs == rhs);
+}
+
+size_t hash_value(CheckMapsParameters const& p) {
+  return base::hash_combine(p.flags(), p.maps());
+}
+
+std::ostream& operator<<(std::ostream& os, CheckMapsParameters const& p) {
+  ZoneHandleSet<Map> const& maps = p.maps();
+  os << p.flags();
+  for (size_t i = 0; i < maps.size(); ++i) {
+    os << ", " << Brief(*maps[i]);
+  }
+  return os;
+}
+
+CheckMapsParameters const& CheckMapsParametersOf(Operator const* op) {
+  DCHECK_EQ(IrOpcode::kCheckMaps, op->opcode());
+  return OpParameter<CheckMapsParameters>(op);
+}
+
 size_t hash_value(CheckTaggedInputMode mode) {
   return static_cast<size_t>(mode);
 }
@@ -275,22 +319,36 @@ GrowFastElementsFlags GrowFastElementsFlagsOf(const Operator* op) {
   return OpParameter<GrowFastElementsFlags>(op);
 }
 
+bool operator==(ElementsTransition const& lhs, ElementsTransition const& rhs) {
+  return lhs.mode() == rhs.mode() &&
+         lhs.source().address() == rhs.source().address() &&
+         lhs.target().address() == rhs.target().address();
+}
+
+bool operator!=(ElementsTransition const& lhs, ElementsTransition const& rhs) {
+  return !(lhs == rhs);
+}
+
 size_t hash_value(ElementsTransition transition) {
-  return static_cast<uint8_t>(transition);
+  return base::hash_combine(static_cast<uint8_t>(transition.mode()),
+                            transition.source().address(),
+                            transition.target().address());
 }
 
 std::ostream& operator<<(std::ostream& os, ElementsTransition transition) {
-  switch (transition) {
+  switch (transition.mode()) {
     case ElementsTransition::kFastTransition:
-      return os << "fast-transition";
+      return os << "fast-transition from " << Brief(*transition.source())
+                << " to " << Brief(*transition.target());
     case ElementsTransition::kSlowTransition:
-      return os << "slow-transition";
+      return os << "slow-transition from " << Brief(*transition.source())
+                << " to " << Brief(*transition.target());
   }
   UNREACHABLE();
   return os;
 }
 
-ElementsTransition ElementsTransitionOf(const Operator* op) {
+ElementsTransition const& ElementsTransitionOf(const Operator* op) {
   DCHECK_EQ(IrOpcode::kTransitionElementsKind, op->opcode());
   return OpParameter<ElementsTransition>(op);
 }
@@ -315,7 +373,8 @@ size_t hash_value(NumberOperationHint hint) {
 }
 
 NumberOperationHint NumberOperationHintOf(const Operator* op) {
-  DCHECK(op->opcode() == IrOpcode::kSpeculativeNumberAdd ||
+  DCHECK(op->opcode() == IrOpcode::kSpeculativeToNumber ||
+         op->opcode() == IrOpcode::kSpeculativeNumberAdd ||
          op->opcode() == IrOpcode::kSpeculativeNumberSubtract ||
          op->opcode() == IrOpcode::kSpeculativeNumberMultiply ||
          op->opcode() == IrOpcode::kSpeculativeNumberDivide ||
@@ -330,6 +389,39 @@ NumberOperationHint NumberOperationHintOf(const Operator* op) {
          op->opcode() == IrOpcode::kSpeculativeNumberLessThan ||
          op->opcode() == IrOpcode::kSpeculativeNumberLessThanOrEqual);
   return OpParameter<NumberOperationHint>(op);
+}
+
+size_t hash_value(AllocateParameters info) {
+  return base::hash_combine(info.type(), info.pretenure());
+}
+
+V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
+                                           AllocateParameters info) {
+  info.type()->PrintTo(os);
+  return os << ", " << info.pretenure();
+}
+
+bool operator==(AllocateParameters const& lhs, AllocateParameters const& rhs) {
+  return lhs.pretenure() == rhs.pretenure() && lhs.type() == rhs.type();
+}
+
+bool operator!=(AllocateParameters const& lhs, AllocateParameters const& rhs) {
+  return !(lhs == rhs);
+}
+
+PretenureFlag PretenureFlagOf(const Operator* op) {
+  DCHECK_EQ(IrOpcode::kAllocate, op->opcode());
+  return OpParameter<AllocateParameters>(op).pretenure();
+}
+
+Type* AllocateTypeOf(const Operator* op) {
+  DCHECK_EQ(IrOpcode::kAllocate, op->opcode());
+  return OpParameter<AllocateParameters>(op).type();
+}
+
+UnicodeEncoding UnicodeEncodingOf(const Operator* op) {
+  DCHECK(op->opcode() == IrOpcode::kStringFromCodePoint);
+  return OpParameter<UnicodeEncoding>(op);
 }
 
 #define PURE_OP_LIST(V)                                          \
@@ -381,11 +473,15 @@ NumberOperationHint NumberOperationHintOf(const Operator* op) {
   V(NumberTan, Operator::kNoProperties, 1, 0)                    \
   V(NumberTanh, Operator::kNoProperties, 1, 0)                   \
   V(NumberTrunc, Operator::kNoProperties, 1, 0)                  \
+  V(NumberToBoolean, Operator::kNoProperties, 1, 0)              \
   V(NumberToInt32, Operator::kNoProperties, 1, 0)                \
   V(NumberToUint32, Operator::kNoProperties, 1, 0)               \
+  V(NumberToUint8Clamped, Operator::kNoProperties, 1, 0)         \
   V(NumberSilenceNaN, Operator::kNoProperties, 1, 0)             \
+  V(StringCharAt, Operator::kNoProperties, 2, 1)                 \
   V(StringCharCodeAt, Operator::kNoProperties, 2, 1)             \
   V(StringFromCharCode, Operator::kNoProperties, 1, 0)           \
+  V(StringIndexOf, Operator::kNoProperties, 3, 0)                \
   V(PlainPrimitiveToNumber, Operator::kNoProperties, 1, 0)       \
   V(PlainPrimitiveToWord32, Operator::kNoProperties, 1, 0)       \
   V(PlainPrimitiveToFloat64, Operator::kNoProperties, 1, 0)      \
@@ -393,18 +489,25 @@ NumberOperationHint NumberOperationHintOf(const Operator* op) {
   V(ChangeTaggedToInt32, Operator::kNoProperties, 1, 0)          \
   V(ChangeTaggedToUint32, Operator::kNoProperties, 1, 0)         \
   V(ChangeTaggedToFloat64, Operator::kNoProperties, 1, 0)        \
+  V(ChangeTaggedToTaggedSigned, Operator::kNoProperties, 1, 0)   \
+  V(ChangeFloat64ToTaggedPointer, Operator::kNoProperties, 1, 0) \
   V(ChangeInt31ToTaggedSigned, Operator::kNoProperties, 1, 0)    \
   V(ChangeInt32ToTagged, Operator::kNoProperties, 1, 0)          \
   V(ChangeUint32ToTagged, Operator::kNoProperties, 1, 0)         \
   V(ChangeTaggedToBit, Operator::kNoProperties, 1, 0)            \
   V(ChangeBitToTagged, Operator::kNoProperties, 1, 0)            \
+  V(TruncateTaggedToBit, Operator::kNoProperties, 1, 0)          \
+  V(TruncateTaggedPointerToBit, Operator::kNoProperties, 1, 0)   \
   V(TruncateTaggedToWord32, Operator::kNoProperties, 1, 0)       \
   V(TruncateTaggedToFloat64, Operator::kNoProperties, 1, 0)      \
-  V(ObjectIsCallable, Operator::kNoProperties, 1, 0)             \
+  V(ObjectIsDetectableCallable, Operator::kNoProperties, 1, 0)   \
+  V(ObjectIsNaN, Operator::kNoProperties, 1, 0)                  \
+  V(ObjectIsNonCallable, Operator::kNoProperties, 1, 0)          \
   V(ObjectIsNumber, Operator::kNoProperties, 1, 0)               \
   V(ObjectIsReceiver, Operator::kNoProperties, 1, 0)             \
   V(ObjectIsSmi, Operator::kNoProperties, 1, 0)                  \
   V(ObjectIsString, Operator::kNoProperties, 1, 0)               \
+  V(ObjectIsSymbol, Operator::kNoProperties, 1, 0)               \
   V(ObjectIsUndetectable, Operator::kNoProperties, 1, 0)         \
   V(ConvertTaggedHoleToUndefined, Operator::kNoProperties, 1, 0) \
   V(ReferenceEqual, Operator::kCommutative, 2, 0)                \
@@ -418,22 +521,28 @@ NumberOperationHint NumberOperationHintOf(const Operator* op) {
   V(SpeculativeNumberLessThan)                \
   V(SpeculativeNumberLessThanOrEqual)
 
-#define CHECKED_OP_LIST(V)            \
-  V(CheckBounds, 2, 1)                \
-  V(CheckIf, 1, 0)                    \
-  V(CheckNumber, 1, 1)                \
-  V(CheckString, 1, 1)                \
-  V(CheckTaggedHole, 1, 1)            \
-  V(CheckTaggedPointer, 1, 1)         \
-  V(CheckTaggedSigned, 1, 1)          \
-  V(CheckedInt32Add, 2, 1)            \
-  V(CheckedInt32Sub, 2, 1)            \
-  V(CheckedInt32Div, 2, 1)            \
-  V(CheckedInt32Mod, 2, 1)            \
-  V(CheckedUint32Div, 2, 1)           \
-  V(CheckedUint32Mod, 2, 1)           \
-  V(CheckedUint32ToInt32, 1, 1)       \
-  V(CheckedTaggedSignedToInt32, 1, 1) \
+#define CHECKED_OP_LIST(V)              \
+  V(CheckBounds, 2, 1)                  \
+  V(CheckHeapObject, 1, 1)              \
+  V(CheckIf, 1, 0)                      \
+  V(CheckInternalizedString, 1, 1)      \
+  V(CheckNumber, 1, 1)                  \
+  V(CheckReceiver, 1, 1)                \
+  V(CheckSmi, 1, 1)                     \
+  V(CheckString, 1, 1)                  \
+  V(CheckTaggedHole, 1, 1)              \
+  V(CheckedInt32Add, 2, 1)              \
+  V(CheckedInt32Sub, 2, 1)              \
+  V(CheckedInt32Div, 2, 1)              \
+  V(CheckedInt32Mod, 2, 1)              \
+  V(CheckedUint32Div, 2, 1)             \
+  V(CheckedUint32Mod, 2, 1)             \
+  V(CheckedUint32ToInt32, 1, 1)         \
+  V(CheckedUint32ToTaggedSigned, 1, 1)  \
+  V(CheckedInt32ToTaggedSigned, 1, 1)   \
+  V(CheckedTaggedSignedToInt32, 1, 1)   \
+  V(CheckedTaggedToTaggedSigned, 1, 1)  \
+  V(CheckedTaggedToTaggedPointer, 1, 1) \
   V(CheckedTruncateTaggedToWord32, 1, 1)
 
 struct SimplifiedOperatorGlobalCache final {
@@ -457,6 +566,40 @@ struct SimplifiedOperatorGlobalCache final {
   Name##Operator k##Name;
   CHECKED_OP_LIST(CHECKED)
 #undef CHECKED
+
+  template <UnicodeEncoding kEncoding>
+  struct StringFromCodePointOperator final : public Operator1<UnicodeEncoding> {
+    StringFromCodePointOperator()
+        : Operator1<UnicodeEncoding>(IrOpcode::kStringFromCodePoint,
+                                     Operator::kPure, "StringFromCodePoint", 1,
+                                     0, 0, 1, 0, 0, kEncoding) {}
+  };
+  StringFromCodePointOperator<UnicodeEncoding::UTF16>
+      kStringFromCodePointOperatorUTF16;
+  StringFromCodePointOperator<UnicodeEncoding::UTF32>
+      kStringFromCodePointOperatorUTF32;
+
+  struct ArrayBufferWasNeuteredOperator final : public Operator {
+    ArrayBufferWasNeuteredOperator()
+        : Operator(IrOpcode::kArrayBufferWasNeutered, Operator::kEliminatable,
+                   "ArrayBufferWasNeutered", 1, 1, 1, 1, 1, 0) {}
+  };
+  ArrayBufferWasNeuteredOperator kArrayBufferWasNeutered;
+
+  struct ArgumentsFrameOperator final : public Operator {
+    ArgumentsFrameOperator()
+        : Operator(IrOpcode::kArgumentsFrame, Operator::kPure, "ArgumentsFrame",
+                   0, 0, 0, 1, 0, 0) {}
+  };
+  ArgumentsFrameOperator kArgumentsFrame;
+
+  struct NewUnmappedArgumentsElementsOperator final : public Operator {
+    NewUnmappedArgumentsElementsOperator()
+        : Operator(IrOpcode::kNewUnmappedArgumentsElements,
+                   Operator::kEliminatable, "NewUnmappedArgumentsElements", 2,
+                   1, 0, 1, 1, 0) {}
+  };
+  NewUnmappedArgumentsElementsOperator kNewUnmappedArgumentsElements;
 
   template <CheckForMinusZeroMode kMode>
   struct ChangeFloat64ToTaggedOperator final
@@ -541,17 +684,6 @@ struct SimplifiedOperatorGlobalCache final {
   CheckFloat64HoleNaNOperator<CheckFloat64HoleMode::kNeverReturnHole>
       kCheckFloat64HoleNeverReturnHoleOperator;
 
-  template <PretenureFlag kPretenure>
-  struct AllocateOperator final : public Operator1<PretenureFlag> {
-    AllocateOperator()
-        : Operator1<PretenureFlag>(
-              IrOpcode::kAllocate,
-              Operator::kNoDeopt | Operator::kNoThrow | Operator::kNoWrite,
-              "Allocate", 1, 1, 1, 1, 1, 0, kPretenure) {}
-  };
-  AllocateOperator<NOT_TENURED> kAllocateNotTenuredOperator;
-  AllocateOperator<TENURED> kAllocateTenuredOperator;
-
   struct EnsureWritableFastElementsOperator final : public Operator {
     EnsureWritableFastElementsOperator()
         : Operator(                                     // --
@@ -578,6 +710,26 @@ struct SimplifiedOperatorGlobalCache final {
       k##Name##NumberOrOddballOperator;
   SPECULATIVE_NUMBER_BINOP_LIST(SPECULATIVE_NUMBER_BINOP)
 #undef SPECULATIVE_NUMBER_BINOP
+
+  template <NumberOperationHint kHint>
+  struct SpeculativeToNumberOperator final
+      : public Operator1<NumberOperationHint> {
+    SpeculativeToNumberOperator()
+        : Operator1<NumberOperationHint>(
+              IrOpcode::kSpeculativeToNumber,            // opcode
+              Operator::kFoldable | Operator::kNoThrow,  // flags
+              "SpeculativeToNumber",                     // name
+              1, 1, 1, 1, 1, 0,                          // counts
+              kHint) {}                                  // parameter
+  };
+  SpeculativeToNumberOperator<NumberOperationHint::kSignedSmall>
+      kSpeculativeToNumberSignedSmallOperator;
+  SpeculativeToNumberOperator<NumberOperationHint::kSigned32>
+      kSpeculativeToNumberSigned32Operator;
+  SpeculativeToNumberOperator<NumberOperationHint::kNumber>
+      kSpeculativeToNumberNumberOperator;
+  SpeculativeToNumberOperator<NumberOperationHint::kNumberOrOddball>
+      kSpeculativeToNumberNumberOrOddballOperator;
 
 #define BUFFER_ACCESS(Type, type, TYPE, ctype, size)                          \
   struct LoadBuffer##Type##Operator final : public Operator1<BufferAccess> {  \
@@ -614,6 +766,9 @@ SimplifiedOperatorBuilder::SimplifiedOperatorBuilder(Zone* zone)
   const Operator* SimplifiedOperatorBuilder::Name() { return &cache_.k##Name; }
 PURE_OP_LIST(GET_FROM_CACHE)
 CHECKED_OP_LIST(GET_FROM_CACHE)
+GET_FROM_CACHE(ArrayBufferWasNeutered)
+GET_FROM_CACHE(ArgumentsFrame)
+GET_FROM_CACHE(NewUnmappedArgumentsElements)
 #undef GET_FROM_CACHE
 
 const Operator* SimplifiedOperatorBuilder::ChangeFloat64ToTagged(
@@ -676,16 +831,15 @@ const Operator* SimplifiedOperatorBuilder::CheckedTaggedToFloat64(
   return nullptr;
 }
 
-const Operator* SimplifiedOperatorBuilder::CheckMaps(int map_input_count) {
-  // TODO(bmeurer): Cache the most important versions of this operator.
-  DCHECK_LT(0, map_input_count);
-  int const value_input_count = 1 + map_input_count;
-  return new (zone()) Operator1<int>(           // --
-      IrOpcode::kCheckMaps,                     // opcode
-      Operator::kNoThrow | Operator::kNoWrite,  // flags
-      "CheckMaps",                              // name
-      value_input_count, 1, 1, 0, 1, 0,         // counts
-      map_input_count);                         // parameter
+const Operator* SimplifiedOperatorBuilder::CheckMaps(CheckMapsFlags flags,
+                                                     ZoneHandleSet<Map> maps) {
+  CheckMapsParameters const parameters(flags, maps);
+  return new (zone()) Operator1<CheckMapsParameters>(  // --
+      IrOpcode::kCheckMaps,                            // opcode
+      Operator::kNoThrow | Operator::kNoWrite,         // flags
+      "CheckMaps",                                     // name
+      1, 1, 1, 0, 1, 0,                                // counts
+      parameters);                                     // parameter
 }
 
 const Operator* SimplifiedOperatorBuilder::CheckFloat64Hole(
@@ -695,6 +849,22 @@ const Operator* SimplifiedOperatorBuilder::CheckFloat64Hole(
       return &cache_.kCheckFloat64HoleAllowReturnHoleOperator;
     case CheckFloat64HoleMode::kNeverReturnHole:
       return &cache_.kCheckFloat64HoleNeverReturnHoleOperator;
+  }
+  UNREACHABLE();
+  return nullptr;
+}
+
+const Operator* SimplifiedOperatorBuilder::SpeculativeToNumber(
+    NumberOperationHint hint) {
+  switch (hint) {
+    case NumberOperationHint::kSignedSmall:
+      return &cache_.kSpeculativeToNumberSignedSmallOperator;
+    case NumberOperationHint::kSigned32:
+      return &cache_.kSpeculativeToNumberSigned32Operator;
+    case NumberOperationHint::kNumber:
+      return &cache_.kSpeculativeToNumberNumberOperator;
+    case NumberOperationHint::kNumberOrOddball:
+      return &cache_.kSpeculativeToNumberNumberOrOddballOperator;
   }
   UNREACHABLE();
   return nullptr;
@@ -720,19 +890,61 @@ const Operator* SimplifiedOperatorBuilder::TransitionElementsKind(
       IrOpcode::kTransitionElementsKind,              // opcode
       Operator::kNoDeopt | Operator::kNoThrow,        // flags
       "TransitionElementsKind",                       // name
-      3, 1, 1, 0, 1, 0,                               // counts
+      1, 1, 1, 0, 1, 0,                               // counts
       transition);                                    // parameter
 }
 
-const Operator* SimplifiedOperatorBuilder::Allocate(PretenureFlag pretenure) {
-  switch (pretenure) {
-    case NOT_TENURED:
-      return &cache_.kAllocateNotTenuredOperator;
-    case TENURED:
-      return &cache_.kAllocateTenuredOperator;
-  }
-  UNREACHABLE();
-  return nullptr;
+namespace {
+
+struct ArgumentsLengthParameters {
+  int formal_parameter_count;
+  bool is_rest_length;
+};
+
+bool operator==(ArgumentsLengthParameters first,
+                ArgumentsLengthParameters second) {
+  return first.formal_parameter_count == second.formal_parameter_count &&
+         first.is_rest_length == second.is_rest_length;
+}
+
+size_t hash_value(ArgumentsLengthParameters param) {
+  return base::hash_combine(param.formal_parameter_count, param.is_rest_length);
+}
+
+std::ostream& operator<<(std::ostream& os, ArgumentsLengthParameters param) {
+  return os << param.formal_parameter_count << ", "
+            << (param.is_rest_length ? "rest length" : "not rest length");
+}
+
+}  // namespace
+
+const Operator* SimplifiedOperatorBuilder::ArgumentsLength(
+    int formal_parameter_count, bool is_rest_length) {
+  return new (zone()) Operator1<ArgumentsLengthParameters>(  // --
+      IrOpcode::kArgumentsLength,                            // opcode
+      Operator::kPure,                                       // flags
+      "ArgumentsLength",                                     // name
+      1, 0, 0, 1, 0, 0,                                      // counts
+      ArgumentsLengthParameters{formal_parameter_count,
+                                is_rest_length});  // parameter
+}
+
+int FormalParameterCountOf(const Operator* op) {
+  DCHECK(op->opcode() == IrOpcode::kArgumentsLength);
+  return OpParameter<ArgumentsLengthParameters>(op).formal_parameter_count;
+}
+
+bool IsRestLengthOf(const Operator* op) {
+  DCHECK(op->opcode() == IrOpcode::kArgumentsLength);
+  return OpParameter<ArgumentsLengthParameters>(op).is_rest_length;
+}
+
+const Operator* SimplifiedOperatorBuilder::Allocate(Type* type,
+                                                    PretenureFlag pretenure) {
+  return new (zone()) Operator1<AllocateParameters>(
+      IrOpcode::kAllocate,
+      Operator::kNoDeopt | Operator::kNoThrow | Operator::kNoWrite, "Allocate",
+      1, 1, 1, 1, 1, 0, AllocateParameters(type, pretenure));
 }
 
 
@@ -756,6 +968,18 @@ const Operator* SimplifiedOperatorBuilder::StoreBuffer(BufferAccess access) {
     return &cache_.kStoreBuffer##Type;
     TYPED_ARRAYS(STORE_BUFFER)
 #undef STORE_BUFFER
+  }
+  UNREACHABLE();
+  return nullptr;
+}
+
+const Operator* SimplifiedOperatorBuilder::StringFromCodePoint(
+    UnicodeEncoding encoding) {
+  switch (encoding) {
+    case UnicodeEncoding::UTF16:
+      return &cache_.kStringFromCodePointOperatorUTF16;
+    case UnicodeEncoding::UTF32:
+      return &cache_.kStringFromCodePointOperatorUTF32;
   }
   UNREACHABLE();
   return nullptr;

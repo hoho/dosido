@@ -4,7 +4,9 @@ const assert = require('assert');
 const util = require('util');
 const Socket = require('net').Socket;
 const JSStream = process.binding('js_stream').JSStream;
-const Buffer = require('buffer').Buffer;
+// TODO(bmeurer): Change this back to const once hole checks are
+// properly optimized away early in Ignition+TurboFan.
+var Buffer = require('buffer').Buffer;
 const uv = process.binding('uv');
 const debug = util.debuglog('stream_wrap');
 
@@ -118,9 +120,8 @@ StreamWrap.prototype.doWrite = function doWrite(req, bufs) {
   const item = self._enqueue('write', req);
 
   self.stream.cork();
-  bufs.forEach(function(buf) {
-    self.stream.write(buf, done);
-  });
+  for (var n = 0; n < bufs.length; n++)
+    self.stream.write(bufs[n], done);
   self.stream.uncork();
 
   function done(err) {

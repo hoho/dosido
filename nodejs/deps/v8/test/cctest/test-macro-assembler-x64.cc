@@ -32,6 +32,7 @@
 #include "src/base/platform/platform.h"
 #include "src/factory.h"
 #include "src/macro-assembler.h"
+#include "src/objects-inl.h"
 #include "test/cctest/cctest.h"
 
 namespace i = v8::internal;
@@ -176,7 +177,7 @@ TEST(SmiMove) {
   EntryCode(masm);
   Label exit;
 
-  TestMoveSmi(masm, &exit, 1, Smi::FromInt(0));
+  TestMoveSmi(masm, &exit, 1, Smi::kZero);
   TestMoveSmi(masm, &exit, 2, Smi::FromInt(127));
   TestMoveSmi(masm, &exit, 3, Smi::FromInt(128));
   TestMoveSmi(masm, &exit, 4, Smi::FromInt(255));
@@ -315,7 +316,7 @@ TEST(Integer32ToSmi) {
   __ movq(rax, Immediate(1));  // Test number.
   __ movl(rcx, Immediate(0));
   __ Integer32ToSmi(rcx, rcx);
-  __ Set(rdx, reinterpret_cast<intptr_t>(Smi::FromInt(0)));
+  __ Set(rdx, reinterpret_cast<intptr_t>(Smi::kZero));
   __ cmpq(rcx, rdx);
   __ j(not_equal, &exit);
 
@@ -352,7 +353,7 @@ TEST(Integer32ToSmi) {
   __ movq(rax, Immediate(6));  // Test number.
   __ movl(rcx, Immediate(0));
   __ Integer32ToSmi(r8, rcx);
-  __ Set(rdx, reinterpret_cast<intptr_t>(Smi::FromInt(0)));
+  __ Set(rdx, reinterpret_cast<intptr_t>(Smi::kZero));
   __ cmpq(r8, rdx);
   __ j(not_equal, &exit);
 

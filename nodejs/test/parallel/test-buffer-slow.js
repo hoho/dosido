@@ -1,9 +1,8 @@
 'use strict';
 
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const buffer = require('buffer');
-const Buffer = buffer.Buffer;
 const SlowBuffer = buffer.SlowBuffer;
 
 const ones = [1, 1, 1, 1];
@@ -35,7 +34,7 @@ try {
   assert.strictEqual(
     SlowBuffer(buffer.kMaxLength).length, buffer.kMaxLength);
 } catch (e) {
-  assert.equal(e.message, 'Array buffer allocation failed');
+  assert.strictEqual(e.message, 'Array buffer allocation failed');
 }
 
 // should work with number-coercible values
@@ -51,10 +50,10 @@ assert.strictEqual(SlowBuffer('string').length, 0);
 // should throw with invalid length
 assert.throws(function() {
   SlowBuffer(Infinity);
-}, 'invalid Buffer length');
+}, common.bufferMaxSizeMsg);
 assert.throws(function() {
   SlowBuffer(-1);
-}, 'invalid Buffer length');
+}, /^RangeError: "size" argument must not be negative$/);
 assert.throws(function() {
   SlowBuffer(buffer.kMaxLength + 1);
-}, 'invalid Buffer length');
+}, common.bufferMaxSizeMsg);

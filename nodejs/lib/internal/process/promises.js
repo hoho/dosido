@@ -8,7 +8,14 @@ let lastPromiseId = 1;
 
 exports.setup = setupPromises;
 
+function getAsynchronousRejectionWarningObject(uid) {
+  return new Error('Promise rejection was handled ' +
+                   `asynchronously (rejection id: ${uid})`);
+}
+
 function setupPromises(scheduleMicrotasks) {
+  let deprecationWarned = false;
+
   process._setupPromises(function(event, promise, reason) {
     if (event === promiseRejectEvent.unhandled)
       unhandledRejection(promise, reason);
@@ -31,10 +38,15 @@ function setupPromises(scheduleMicrotasks) {
       const uid = promiseToGuidProperty.get(promise);
       promiseToGuidProperty.delete(promise);
       if (hasBeenNotified === true) {
+        let warning = null;
+        if (!process.listenerCount('rejectionHandled')) {
+          // Generate the warning object early to get a good stack trace.
+          warning = getAsynchronousRejectionWarningObject(uid);
+        }
         process.nextTick(function() {
           if (!process.emit('rejectionHandled', promise)) {
-            const warning = new Error('Promise rejection was handled ' +
-                                      `asynchronously (rejection id: ${uid})`);
+            if (warning === null)
+              warning = getAsynchronousRejectionWarningObject(uid);
             warning.name = 'PromiseRejectionHandledWarning';
             warning.id = uid;
             process.emitWarning(warning);
@@ -47,9 +59,12 @@ function setupPromises(scheduleMicrotasks) {
 
   function emitWarning(uid, reason) {
     const warning = new Error('Unhandled promise rejection ' +
-                              `(rejection id: ${uid}): ${reason}`);
+                              `(rejection id: ${uid}): ${String(reason)}`);
     warning.name = 'UnhandledPromiseRejectionWarning';
     warning.id = uid;
+    if (reason instanceof Error) {
+      warning.stack = reason.stack;
+    }
     process.emitWarning(warning);
     if (!deprecationWarned) {
       deprecationWarned = true;
@@ -57,10 +72,10 @@ function setupPromises(scheduleMicrotasks) {
         'Unhandled promise rejections are deprecated. In the future, ' +
         'promise rejections that are not handled will terminate the ' +
         'Node.js process with a non-zero exit code.',
-        'DeprecationWarning');
+        'DeprecationWarning', 'DEP0018');
     }
   }
-  var deprecationWarned = false;
+
   function emitPendingUnhandledRejections() {
     let hadListeners = false;
     while (pendingUnhandledRejections.length > 0) {

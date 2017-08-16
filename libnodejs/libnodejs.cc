@@ -1,6 +1,5 @@
 #include "env.h"
 #include "env-inl.h"
-#include "node_natives.h"
 
 #include "libnodejsInternals.h"
 #include <fcntl.h>
@@ -105,8 +104,6 @@ inline int nodejsClose(PIPE_FD_TYPE fd)
 
 
 using node::Environment;
-using node::libnodejs_libnodejs_name;
-using node::libnodejs_libnodejs_data;
 using node::OneByteString;
 using node::Utf8Value;
 
@@ -448,12 +445,12 @@ nodejsCallJSCallback(Environment *env, nodejsToJSCallbackCommandType what,
                                                   String::kNormalString,
                                                   c->chunk.len);
                     // Call the callback in the context of itself.
-                    MakeCallback(env, f, f, 2, args);
+                    node::MakeCallback(env->isolate(), f, f, 2, args);
                 }
 
                 if (c->last) {
                     args[1] = Null(env->isolate());
-                    MakeCallback(env, f, f, 2, args);
+                    node::MakeCallback(env->isolate(), f, f, 2, args);
                 }
             }
             break;
@@ -490,7 +487,7 @@ nodejsCallJSCallback(Environment *env, nodejsToJSCallbackCommandType what,
                 args[1] = meta;
                 args[2] = h;
 
-                MakeCallback(env, f, f, 3, args);
+                node::MakeCallback(env->isolate(), f, f, 3, args);
             }
             break;
 
@@ -877,7 +874,7 @@ nodejsCallJSModule(Environment *env, nodejsCallCmd *cmd)
     Local<Value>      callModule = global->Get(callModule_name);
     CHECK(callModule->IsFunction());
 
-    MakeCallback(env, global.As<Value>(), callModule.As<Function>(), 5, args);
+    node::MakeCallback(env->isolate(), global, callModule.As<Function>(), 5, args);
 }
 
 

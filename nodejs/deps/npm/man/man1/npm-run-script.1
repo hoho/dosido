@@ -1,11 +1,11 @@
-.TH "NPM\-RUN\-SCRIPT" "1" "October 2016" "" ""
+.TH "NPM\-RUN\-SCRIPT" "1" "July 2017" "" ""
 .SH "NAME"
 \fBnpm-run-script\fR \- Run arbitrary package scripts
 .SH SYNOPSIS
 .P
 .RS 2
 .nf
-npm run\-script <command> [\-\- <args>\.\.\.]
+npm run\-script <command> [\-\-silent] [\-\- <args>\.\.\.]
 
 alias: npm run
 .fi
@@ -52,11 +52,16 @@ you should write:
 instead of \fB"scripts": {"test": "node_modules/\.bin/tap test/\\*\.js"}\fP to run your tests\.
 .P
 \fBnpm run\fP sets the \fBNODE\fP environment variable to the \fBnode\fP executable with
-which \fBnpm\fP is executed\. Also, the directory within which it resides is added to the
-\fBPATH\fP, if the \fBnode\fP executable is not in the \fBPATH\fP\|\.
+which \fBnpm\fP is executed\. Also, if the \fB\-\-scripts\-prepend\-node\-path\fP is passed,
+the directory within which \fBnode\fP resides is added to the
+\fBPATH\fP\|\. If \fB\-\-scripts\-prepend\-node\-path=auto\fP is passed (which has been the
+default in \fBnpm\fP v3), this is only performed when that \fBnode\fP executable is
+not found in the \fBPATH\fP\|\.
 .P
 If you try to run a script without having a \fBnode_modules\fP directory and it fails,
 you will be given a warning to run \fBnpm install\fP, just in case you've forgotten\.
+.P
+You can use the \fB\-\-silent\fP flag to prevent showing \fBnpm ERR!\fP output on error\.
 .SH SEE ALSO
 .RS 0
 .IP \(bu 2

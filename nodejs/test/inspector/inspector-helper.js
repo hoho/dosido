@@ -8,9 +8,9 @@ const spawn = require('child_process').spawn;
 const url = require('url');
 
 const DEBUG = false;
-
 const TIMEOUT = 15 * 1000;
-
+const EXPECT_ALIVE_SYMBOL = Symbol('isAlive');
+const DONT_EXPECT_RESPONSE_SYMBOL = Symbol('dontExpectResponse');
 const mainScript = path.join(common.fixturesDir, 'loop.js');
 
 function send(socket, message, id, callback) {
@@ -24,6 +24,7 @@ function send(socket, message, id, callback) {
   wsHeaderBuf.writeUInt8(0x81, 0);
   let byte2 = 0x80;
   const bodyLen = messageBuf.length;
+
   let maskOffset = 2;
   if (bodyLen < 126) {
     byte2 = 0x80 + bodyLen;
@@ -43,13 +44,22 @@ function send(socket, message, id, callback) {
   for (let i = 0; i < messageBuf.length; i++)
     messageBuf[i] = messageBuf[i] ^ (1 << (i % 4));
   socket.write(
-      Buffer.concat([wsHeaderBuf.slice(0, maskOffset + 4), messageBuf]),
-      callback);
+    Buffer.concat([wsHeaderBuf.slice(0, maskOffset + 4), messageBuf]),
+    callback);
+}
+
+function sendEnd(socket) {
+  socket.write(Buffer.from([0x88, 0x80, 0x2D, 0x0E, 0x1E, 0xFA]));
 }
 
 function parseWSFrame(buffer, handler) {
+  // Protocol described in https://tools.ietf.org/html/rfc6455#section-5
   if (buffer.length < 2)
     return 0;
+  if (buffer[0] === 0x88 && buffer[1] === 0x00) {
+    handler(null);
+    return 2;
+  }
   assert.strictEqual(0x81, buffer[0]);
   let dataLen = 0x7F & buffer[1];
   let bodyOffset = 2;
@@ -59,13 +69,21 @@ function parseWSFrame(buffer, handler) {
     dataLen = buffer.readUInt16BE(2);
     bodyOffset = 4;
   } else if (dataLen === 127) {
-    dataLen = buffer.readUInt32BE(2);
+    assert(buffer[2] === 0 && buffer[3] === 0, 'Inspector message too big');
+    dataLen = buffer.readUIntBE(4, 6);
     bodyOffset = 10;
   }
   if (buffer.length < bodyOffset + dataLen)
     return 0;
-  const message = JSON.parse(
-      buffer.slice(bodyOffset, bodyOffset + dataLen).toString('utf8'));
+  const jsonPayload =
+    buffer.slice(bodyOffset, bodyOffset + dataLen).toString('utf8');
+  let message;
+  try {
+    message = JSON.parse(jsonPayload);
+  } catch (e) {
+    console.error(`JSON.parse() failed for: ${jsonPayload}`);
+    throw e;
+  }
   if (DEBUG)
     console.log('[received]', JSON.stringify(message));
   handler(message);
@@ -80,8 +98,8 @@ function tearDown(child, err) {
   }
 }
 
-function checkHttpResponse(port, path, callback) {
-  http.get({port, path}, function(res) {
+function checkHttpResponse(host, port, path, callback, errorcb) {
+  const req = http.get({host, port, path}, function(res) {
     let response = '';
     res.setEncoding('utf8');
     res
@@ -98,6 +116,8 @@ function checkHttpResponse(port, path, callback) {
         callback(err, json);
       });
   });
+  if (errorcb)
+    req.on('error', errorcb);
 }
 
 function makeBufferingDataCallback(dataCallback) {
@@ -110,16 +130,17 @@ function makeBufferingDataCallback(dataCallback) {
       buffer = Buffer.alloc(0);
     else
       buffer = Buffer.from(lines.pop(), 'utf8');
-    for (var line of lines)
+    for (const line of lines)
       dataCallback(line);
   };
 }
 
 function timeout(message, multiplicator) {
-  return setTimeout(() => common.fail(message), TIMEOUT * (multiplicator || 1));
+  return setTimeout(common.mustNotCall(message),
+                    TIMEOUT * (multiplicator || 1));
 }
 
-const TestSession = function(socket, harness) {
+function TestSession(socket, harness) {
   this.mainScriptPath = harness.mainScriptPath;
   this.mainScriptId = null;
 
@@ -133,6 +154,7 @@ const TestSession = function(socket, harness) {
   this.messages_ = {};
   this.expectedId_ = 1;
   this.lastMessageResponseCallback_ = null;
+  this.closeCallback_ = null;
 
   let buffer = Buffer.alloc(0);
   socket.on('data', (data) => {
@@ -143,14 +165,22 @@ const TestSession = function(socket, harness) {
       if (consumed)
         buffer = buffer.slice(consumed);
     } while (consumed);
-  }).on('close', () => assert(this.expectClose_, 'Socket closed prematurely'));
-};
+  }).on('close', () => {
+    assert(this.expectClose_, 'Socket closed prematurely');
+    this.closeCallback_ && this.closeCallback_();
+  });
+}
 
 TestSession.prototype.scriptUrlForId = function(id) {
   return this.scripts_[id];
 };
 
 TestSession.prototype.processMessage_ = function(message) {
+  if (message === null) {
+    sendEnd(this.socket_);
+    return;
+  }
+
   const method = message['method'];
   if (method === 'Debugger.scriptParsed') {
     const script = message['params'];
@@ -163,16 +193,17 @@ TestSession.prototype.processMessage_ = function(message) {
   this.messagefilter_ && this.messagefilter_(message);
   const id = message['id'];
   if (id) {
-    assert.strictEqual(id, this.expectedId_);
     this.expectedId_++;
     if (this.responseCheckers_[id]) {
-      assert(message['result'], JSON.stringify(message) + ' (response to ' +
-             JSON.stringify(this.messages_[id]) + ')');
+      const messageJSON = JSON.stringify(message);
+      const idJSON = JSON.stringify(this.messages_[id]);
+      assert(message['result'], `${messageJSON} (response to ${idJSON})`);
       this.responseCheckers_[id](message['result']);
       delete this.responseCheckers_[id];
     }
-    assert(!message['error'], JSON.stringify(message) + ' (replying to ' +
-           JSON.stringify(this.messages_[id]) + ')');
+    const messageJSON = JSON.stringify(message);
+    const idJSON = JSON.stringify(this.messages_[id]);
+    assert(!message['error'], `${messageJSON} (replying to ${idJSON})`);
     delete this.messages_[id];
     if (id === this.lastId_) {
       this.lastMessageResponseCallback_ && this.lastMessageResponseCallback_();
@@ -185,16 +216,21 @@ TestSession.prototype.sendAll_ = function(commands, callback) {
   if (!commands.length) {
     callback();
   } else {
-    this.lastId_++;
+    let id = ++this.lastId_;
     let command = commands[0];
     if (command instanceof Array) {
-      this.responseCheckers_[this.lastId_] = command[1];
+      this.responseCheckers_[id] = command[1];
       command = command[0];
     }
     if (command instanceof Function)
       command = command();
-    this.messages_[this.lastId_] = command;
-    send(this.socket_, command, this.lastId_,
+    if (!command[DONT_EXPECT_RESPONSE_SYMBOL]) {
+      this.messages_[id] = command;
+    } else {
+      id += 100000;
+      this.lastId_--;
+    }
+    send(this.socket_, command, id,
          () => this.sendAll_(commands.slice(1), callback));
   }
 };
@@ -210,19 +246,36 @@ TestSession.prototype.sendInspectorCommands = function(commands) {
     };
     this.sendAll_(commands, () => {
       timeoutId = setTimeout(() => {
-        let s = '';
-        for (const id in this.messages_) {
-          s += id + ', ';
-        }
-        common.fail('Messages without response: ' +
-                    s.substring(0, s.length - 2));
+        assert.fail(`Messages without response: ${
+          Object.keys(this.messages_).join(', ')}`);
       }, TIMEOUT);
     });
   });
 };
 
+TestSession.prototype.sendCommandsAndExpectClose = function(commands) {
+  if (!(commands instanceof Array))
+    commands = [commands];
+  return this.enqueue((callback) => {
+    let timeoutId = null;
+    let done = false;
+    this.expectClose_ = true;
+    this.closeCallback_ = function() {
+      if (timeoutId)
+        clearTimeout(timeoutId);
+      done = true;
+      callback();
+    };
+    this.sendAll_(commands, () => {
+      if (!done) {
+        timeoutId = timeout('Session still open');
+      }
+    });
+  });
+};
+
 TestSession.prototype.createCallbackWithTimeout_ = function(message) {
-  var promise = new Promise((resolve) => {
+  const promise = new Promise((resolve) => {
     this.enqueue((callback) => {
       const timeoutId = timeout(message);
       resolve(() => {
@@ -238,7 +291,7 @@ TestSession.prototype.expectMessages = function(expects) {
   if (!(expects instanceof Array)) expects = [ expects ];
 
   const callback = this.createCallbackWithTimeout_(
-      'Matching response was not received:\n' + expects[0]);
+    `Matching response was not received:\n${expects[0]}`);
   this.messagefilter_ = (message) => {
     if (expects[0](message))
       expects.shift();
@@ -252,8 +305,8 @@ TestSession.prototype.expectMessages = function(expects) {
 
 TestSession.prototype.expectStderrOutput = function(regexp) {
   this.harness_.addStderrFilter(
-      regexp,
-      this.createCallbackWithTimeout_('Timed out waiting for ' + regexp));
+    regexp,
+    this.createCallbackWithTimeout_(`Timed out waiting for ${regexp}`));
   return this;
 };
 
@@ -284,34 +337,45 @@ TestSession.prototype.enqueue = function(task) {
 TestSession.prototype.disconnect = function(childDone) {
   return this.enqueue((callback) => {
     this.expectClose_ = true;
-    this.harness_.childInstanceDone =
-        this.harness_.childInstanceDone || childDone;
-    this.socket_.end();
+    this.socket_.destroy();
     console.log('[test]', 'Connection terminated');
+    callback();
+  }, childDone);
+};
+
+TestSession.prototype.expectClose = function() {
+  return this.enqueue((callback) => {
+    this.expectClose_ = true;
+    callback();
+  });
+};
+
+TestSession.prototype.assertClosed = function() {
+  return this.enqueue((callback) => {
+    assert.strictEqual(this.closed_, true);
     callback();
   });
 };
 
 TestSession.prototype.testHttpResponse = function(path, check) {
   return this.enqueue((callback) =>
-      checkHttpResponse(this.harness_.port, path, (err, response) => {
-        check.call(this, err, response);
-        callback();
-      }));
+    checkHttpResponse(null, this.harness_.port, path, (err, response) => {
+      check.call(this, err, response);
+      callback();
+    }));
 };
 
 
-const Harness = function(port, childProcess) {
+function Harness(port, childProcess) {
   this.port = port;
   this.mainScriptPath = mainScript;
   this.stderrFilters_ = [];
   this.process_ = childProcess;
-  this.childInstanceDone = false;
-  this.returnCode_ = null;
+  this.result_ = {};
   this.running_ = true;
 
   childProcess.stdout.on('data', makeBufferingDataCallback(
-      (line) => console.log('[out]', line)));
+    (line) => console.log('[out]', line)));
 
 
   childProcess.stderr.on('data', makeBufferingDataCallback((message) => {
@@ -322,11 +386,10 @@ const Harness = function(port, childProcess) {
     this.stderrFilters_ = pending;
   }));
   childProcess.on('exit', (code, signal) => {
-    assert(this.childInstanceDone, 'Child instance died prematurely');
-    this.returnCode_ = code;
+    this.result_ = {code, signal};
     this.running_ = false;
   });
-};
+}
 
 Harness.prototype.addStderrFilter = function(regexp, callback) {
   this.stderrFilters_.push((message) => {
@@ -337,8 +400,15 @@ Harness.prototype.addStderrFilter = function(regexp, callback) {
   });
 };
 
+Harness.prototype.assertStillAlive = function() {
+  assert.strictEqual(this.running_, true,
+                     `Child died: ${JSON.stringify(this.result_)}`);
+};
+
 Harness.prototype.run_ = function() {
   setImmediate(() => {
+    if (!this.task_[EXPECT_ALIVE_SYMBOL])
+      this.assertStillAlive();
     this.task_(() => {
       this.task_ = this.task_.next_;
       if (this.task_)
@@ -347,7 +417,8 @@ Harness.prototype.run_ = function() {
   });
 };
 
-Harness.prototype.enqueue_ = function(task) {
+Harness.prototype.enqueue_ = function(task, expectAlive) {
+  task[EXPECT_ALIVE_SYMBOL] = !!expectAlive;
   if (!this.task_) {
     this.task_ = task;
     this.run_();
@@ -360,12 +431,17 @@ Harness.prototype.enqueue_ = function(task) {
   return this;
 };
 
-Harness.prototype.testHttpResponse = function(path, check) {
+Harness.prototype.testHttpResponse = function(host, path, check, errorcb) {
   return this.enqueue_((doneCallback) => {
-    checkHttpResponse(this.port, path, (err, response) => {
-      check.call(this, err, response);
-      doneCallback();
-    });
+    function wrap(callback) {
+      if (callback) {
+        return function() {
+          callback(...arguments);
+          doneCallback();
+        };
+      }
+    }
+    checkHttpResponse(host, this.port, path, wrap(check), wrap(errorcb));
   });
 };
 
@@ -398,12 +474,12 @@ Harness.prototype.wsHandshake = function(devtoolsUrl, tests, readyCallback) {
       });
     }
     enqueue(tests);
-  }).on('response', () => common.fail('Upgrade was not received'));
+  }).on('response', common.mustNotCall('Upgrade was not received'));
 };
 
 Harness.prototype.runFrontendSession = function(tests) {
   return this.enqueue_((callback) => {
-    checkHttpResponse(this.port, '/json/list', (err, response) => {
+    checkHttpResponse(null, this.port, '/json/list', (err, response) => {
       assert.ifError(err);
       this.wsHandshake(response[0]['webSocketDebuggerUrl'], tests, callback);
     });
@@ -414,21 +490,37 @@ Harness.prototype.expectShutDown = function(errorCode) {
   this.enqueue_((callback) => {
     if (this.running_) {
       const timeoutId = timeout('Have not terminated');
-      this.process_.on('exit', (code) => {
+      this.process_.on('exit', (code, signal) => {
         clearTimeout(timeoutId);
-        assert.strictEqual(errorCode, code);
+        assert.strictEqual(errorCode, code, JSON.stringify({code, signal}));
         callback();
       });
     } else {
-      assert.strictEqual(errorCode, this.returnCode_);
+      assert.strictEqual(errorCode, this.result_.code);
       callback();
     }
+  }, true);
+};
+
+Harness.prototype.kill = function() {
+  return this.enqueue_((callback) => {
+    this.process_.kill();
+    callback();
   });
 };
 
-exports.startNodeForInspectorTest = function(callback) {
-  const child = spawn(process.execPath,
-      [ '--inspect', '--debug-brk', mainScript ]);
+exports.startNodeForInspectorTest = function(callback,
+                                             inspectorFlags = ['--inspect-brk'],
+                                             scriptContents = '',
+                                             scriptFile = mainScript) {
+  const args = [].concat(inspectorFlags);
+  if (scriptContents) {
+    args.push('-e', scriptContents);
+  } else {
+    args.push(scriptFile);
+  }
+
+  const child = spawn(process.execPath, args);
 
   const timeoutId = timeout('Child process did not start properly', 4);
 
@@ -438,7 +530,7 @@ exports.startNodeForInspectorTest = function(callback) {
     clearTimeout(timeoutId);
     console.log('[err]', text);
     if (found) return;
-    const match = text.match(/Debugger listening on port (\d+)/);
+    const match = text.match(/Debugger listening on ws:\/\/.+:(\d+)\/.+/);
     found = true;
     child.stderr.removeListener('data', dataCallback);
     assert.ok(match, text);
@@ -456,4 +548,8 @@ exports.startNodeForInspectorTest = function(callback) {
 
 exports.mainScriptSource = function() {
   return fs.readFileSync(mainScript, 'utf8');
+};
+
+exports.markMessageNoResponse = function(message) {
+  message[DONT_EXPECT_RESPONSE_SYMBOL] = true;
 };

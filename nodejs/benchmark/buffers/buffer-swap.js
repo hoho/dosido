@@ -1,7 +1,6 @@
 'use strict';
 
 const common = require('../common.js');
-const v8 = require('v8');
 
 const bench = common.createBenchmark(main, {
   aligned: ['true', 'false'],
@@ -65,11 +64,11 @@ function createBuffer(len, aligned) {
 }
 
 function genMethod(method) {
-  const fnString =
-      'return function ' + method + '(n, buf) {' +
-      '  for (var i = 0; i <= n; i++)' +
-      '    buf.' + method + '();' +
-      '}';
+  const fnString = `
+      return function ${method}(n, buf) {
+        for (var i = 0; i <= n; i++)
+          buf.${method}();
+      }`;
   return (new Function(fnString))();
 }
 
@@ -81,9 +80,7 @@ function main(conf) {
   const buf = createBuffer(len, aligned === 'true');
   const bufferSwap = genMethod(method);
 
-  v8.setFlagsFromString('--allow_natives_syntax');
-  eval('%OptimizeFunctionOnNextCall(bufferSwap)');
-
+  bufferSwap(n, buf);
   bench.start();
   bufferSwap(n, buf);
   bench.end(n);

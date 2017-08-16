@@ -34,9 +34,11 @@
 #include "src/v8.h"
 
 #include "include/v8-profiler.h"
+#include "src/api.h"
 #include "src/base/hashmap.h"
 #include "src/collector.h"
 #include "src/debug/debug.h"
+#include "src/objects-inl.h"
 #include "src/profiler/allocation-tracker.h"
 #include "src/profiler/heap-profiler.h"
 #include "src/profiler/heap-snapshot-generator-inl.h"
@@ -62,21 +64,17 @@ class NamedEntriesDetector {
     if (strcmp(entry->name(), "C2") == 0) has_C2 = true;
   }
 
-  static bool AddressesMatch(void* key1, void* key2) {
-    return key1 == key2;
-  }
-
   void CheckAllReachables(i::HeapEntry* root) {
-    v8::base::HashMap visited(AddressesMatch);
+    v8::base::HashMap visited;
     i::List<i::HeapEntry*> list(10);
     list.Add(root);
     CheckEntry(root);
     while (!list.is_empty()) {
       i::HeapEntry* entry = list.RemoveLast();
-      i::Vector<i::HeapGraphEdge*> children = entry->children();
-      for (int i = 0; i < children.length(); ++i) {
-        if (children[i]->type() == i::HeapGraphEdge::kShortcut) continue;
-        i::HeapEntry* child = children[i]->to();
+      for (int i = 0; i < entry->children_count(); ++i) {
+        i::HeapGraphEdge* edge = entry->child(i);
+        if (edge->type() == i::HeapGraphEdge::kShortcut) continue;
+        i::HeapEntry* child = edge->to();
         v8::base::HashMap::Entry* entry = visited.LookupOrInsert(
             reinterpret_cast<void*>(child),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)));
@@ -135,19 +133,14 @@ static bool HasString(const v8::HeapGraphNode* node, const char* contents) {
 }
 
 
-static bool AddressesMatch(void* key1, void* key2) {
-  return key1 == key2;
-}
-
-
 // Check that snapshot has no unretained entries except root.
 static bool ValidateSnapshot(const v8::HeapSnapshot* snapshot, int depth = 3) {
   i::HeapSnapshot* heap_snapshot = const_cast<i::HeapSnapshot*>(
       reinterpret_cast<const i::HeapSnapshot*>(snapshot));
 
-  v8::base::HashMap visited(AddressesMatch);
-  i::List<i::HeapGraphEdge>& edges = heap_snapshot->edges();
-  for (int i = 0; i < edges.length(); ++i) {
+  v8::base::HashMap visited;
+  std::deque<i::HeapGraphEdge>& edges = heap_snapshot->edges();
+  for (size_t i = 0; i < edges.size(); ++i) {
     v8::base::HashMap::Entry* entry = visited.LookupOrInsert(
         reinterpret_cast<void*>(edges[i].to()),
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(edges[i].to())));
@@ -369,7 +362,7 @@ TEST(HeapSnapshotCodeObjects) {
     }
   }
   CHECK(compiled_references_x);
-  if (i::FLAG_lazy && !(i::FLAG_ignition && i::FLAG_ignition_eager)) {
+  if (i::FLAG_lazy) {
     CHECK(!lazy_references_x);
   }
 }
@@ -484,48 +477,6 @@ TEST(HeapSnapshotSymbol) {
   CHECK(name);
   CHECK(v8_str("mySymbol")->Equals(env.local(), name->GetName()).FromJust());
 }
-
-
-void CheckSimdSnapshot(const char* program, const char* var_name) {
-  i::FLAG_harmony_simd = true;
-  LocalContext env;
-  v8::HandleScope scope(env->GetIsolate());
-  v8::HeapProfiler* heap_profiler = env->GetIsolate()->GetHeapProfiler();
-
-  CompileRun(program);
-  // The TakeHeapSnapshot function does not do enough GCs to ensure
-  // that all garbage is collected. We perform addition GC here
-  // to reclaim a floating AllocationSite and to fix the following failure:
-  // # Check failed: ValidateSnapshot(snapshot).
-  // Stdout:
-  //     28 @ 13523   entry with no retainer: /hidden/ system / AllocationSite
-  //     44 @   767    $map: /hidden/ system / Map
-  //     44 @    59      $map: /hidden/ system / Map
-  CcTest::heap()->CollectAllGarbage();
-
-  const v8::HeapSnapshot* snapshot = heap_profiler->TakeHeapSnapshot();
-  CHECK(ValidateSnapshot(snapshot));
-  const v8::HeapGraphNode* global = GetGlobalObject(snapshot);
-  const v8::HeapGraphNode* var =
-      GetProperty(global, v8::HeapGraphEdge::kProperty, var_name);
-  CHECK(var);
-  CHECK_EQ(var->GetType(), v8::HeapGraphNode::kSimdValue);
-}
-
-
-TEST(HeapSnapshotSimd) {
-  CheckSimdSnapshot("a = SIMD.Float32x4();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Int32x4();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Uint32x4();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Bool32x4();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Int16x8();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Uint16x8();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Bool16x8();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Int8x16();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Uint8x16();\n", "a");
-  CheckSimdSnapshot("a = SIMD.Bool8x16();\n", "a");
-}
-
 
 TEST(HeapSnapshotWeakCollection) {
   LocalContext env;
@@ -738,7 +689,7 @@ TEST(HeapSnapshotAddressReuse) {
   CompileRun(
       "for (var i = 0; i < 10000; ++i)\n"
       "  a[i] = new A();\n");
-  CcTest::heap()->CollectAllGarbage();
+  CcTest::CollectAllGarbage();
 
   const v8::HeapSnapshot* snapshot2 = heap_profiler->TakeHeapSnapshot();
   CHECK(ValidateSnapshot(snapshot2));
@@ -780,7 +731,7 @@ TEST(HeapEntryIdsAndArrayShift) {
       "for (var i = 0; i < 1; ++i)\n"
       "  a.shift();\n");
 
-  CcTest::heap()->CollectAllGarbage();
+  CcTest::CollectAllGarbage();
 
   const v8::HeapSnapshot* snapshot2 = heap_profiler->TakeHeapSnapshot();
   CHECK(ValidateSnapshot(snapshot2));
@@ -821,7 +772,7 @@ TEST(HeapEntryIdsAndGC) {
   const v8::HeapSnapshot* snapshot1 = heap_profiler->TakeHeapSnapshot();
   CHECK(ValidateSnapshot(snapshot1));
 
-  CcTest::heap()->CollectAllGarbage();
+  CcTest::CollectAllGarbage();
 
   const v8::HeapSnapshot* snapshot2 = heap_profiler->TakeHeapSnapshot();
   CHECK(ValidateSnapshot(snapshot2));
@@ -1150,7 +1101,7 @@ TEST(HeapSnapshotObjectsStats) {
   // We have to call GC 6 times. In other case the garbage will be
   // the reason of flakiness.
   for (int i = 0; i < 6; ++i) {
-    CcTest::heap()->CollectAllGarbage();
+    CcTest::CollectAllGarbage();
   }
 
   v8::SnapshotObjectId initial_id;
@@ -1305,7 +1256,7 @@ TEST(HeapObjectIds) {
   }
 
   heap_profiler->StopTrackingHeapObjects();
-  CcTest::heap()->CollectAllAvailableGarbage();
+  CcTest::CollectAllAvailableGarbage();
 
   for (int i = 0; i < kLength; i++) {
     v8::SnapshotObjectId id = heap_profiler->GetObjectId(objects[i]);
@@ -1578,88 +1529,6 @@ TEST(HeapSnapshotRetainedObjectInfo) {
   CHECK_EQ(aaa, GetProperty(n_BBB, v8::HeapGraphEdge::kInternal, "native"));
   CHECK_EQ(ccc, GetProperty(n_CCC, v8::HeapGraphEdge::kInternal, "native"));
 }
-
-
-class GraphWithImplicitRefs {
- public:
-  static const int kObjectsCount = 4;
-  explicit GraphWithImplicitRefs(LocalContext* env) {
-    CHECK(!instance_);
-    instance_ = this;
-    isolate_ = (*env)->GetIsolate();
-    for (int i = 0; i < kObjectsCount; i++) {
-      objects_[i].Reset(isolate_, v8::Object::New(isolate_));
-    }
-    (*env)
-        ->Global()
-        ->Set(isolate_->GetCurrentContext(), v8_str("root_object"),
-              v8::Local<v8::Value>::New(isolate_, objects_[0]))
-        .FromJust();
-  }
-  ~GraphWithImplicitRefs() {
-    instance_ = NULL;
-  }
-
-  static void gcPrologue(v8::Isolate* isolate, v8::GCType type,
-                         v8::GCCallbackFlags flags) {
-    instance_->AddImplicitReferences();
-  }
-
- private:
-  void AddImplicitReferences() {
-    // 0 -> 1
-    isolate_->SetObjectGroupId(objects_[0],
-                               v8::UniqueId(1));
-    isolate_->SetReferenceFromGroup(
-        v8::UniqueId(1), objects_[1]);
-    // Adding two more references: 1 -> 2, 1 -> 3
-    isolate_->SetReference(objects_[1].As<v8::Object>(),
-                           objects_[2]);
-    isolate_->SetReference(objects_[1].As<v8::Object>(),
-                           objects_[3]);
-  }
-
-  v8::Persistent<v8::Value> objects_[kObjectsCount];
-  static GraphWithImplicitRefs* instance_;
-  v8::Isolate* isolate_;
-};
-
-GraphWithImplicitRefs* GraphWithImplicitRefs::instance_ = NULL;
-
-
-TEST(HeapSnapshotImplicitReferences) {
-  LocalContext env;
-  v8::HandleScope scope(env->GetIsolate());
-  v8::HeapProfiler* heap_profiler = env->GetIsolate()->GetHeapProfiler();
-
-  GraphWithImplicitRefs graph(&env);
-  env->GetIsolate()->AddGCPrologueCallback(&GraphWithImplicitRefs::gcPrologue);
-
-  const v8::HeapSnapshot* snapshot = heap_profiler->TakeHeapSnapshot();
-  CHECK(ValidateSnapshot(snapshot));
-
-  const v8::HeapGraphNode* global_object = GetGlobalObject(snapshot);
-  const v8::HeapGraphNode* obj0 = GetProperty(
-      global_object, v8::HeapGraphEdge::kProperty, "root_object");
-  CHECK(obj0);
-  CHECK_EQ(v8::HeapGraphNode::kObject, obj0->GetType());
-  const v8::HeapGraphNode* obj1 = GetProperty(
-      obj0, v8::HeapGraphEdge::kInternal, "native");
-  CHECK(obj1);
-  int implicit_targets_count = 0;
-  for (int i = 0, count = obj1->GetChildrenCount(); i < count; ++i) {
-    const v8::HeapGraphEdge* prop = obj1->GetChild(i);
-    v8::String::Utf8Value prop_name(prop->GetName());
-    if (prop->GetType() == v8::HeapGraphEdge::kInternal &&
-        strcmp("native", *prop_name) == 0) {
-      ++implicit_targets_count;
-    }
-  }
-  CHECK_EQ(2, implicit_targets_count);
-  env->GetIsolate()->RemoveGCPrologueCallback(
-      &GraphWithImplicitRefs::gcPrologue);
-}
-
 
 TEST(DeleteAllHeapSnapshots) {
   LocalContext env;
@@ -2343,15 +2212,19 @@ TEST(AllocationSitesAreVisible) {
   const v8::HeapGraphNode* fun_code =
       GetProperty(global, v8::HeapGraphEdge::kProperty, "fun");
   CHECK(fun_code);
-  const v8::HeapGraphNode* literals =
-      GetProperty(fun_code, v8::HeapGraphEdge::kInternal, "literals");
-  CHECK(literals);
-  CHECK_EQ(v8::HeapGraphNode::kArray, literals->GetType());
-  CHECK_EQ(1, literals->GetChildrenCount());
+  const v8::HeapGraphNode* vector_cell = GetProperty(
+      fun_code, v8::HeapGraphEdge::kInternal, "feedback_vector_cell");
+  // TODO(mvstanton): I'm not sure if this is the best way to expose
+  // literals. Is it too much to expose the Cell?
+  CHECK(vector_cell);
+  const v8::HeapGraphNode* vector =
+      GetProperty(vector_cell, v8::HeapGraphEdge::kInternal, "value");
+  CHECK_EQ(v8::HeapGraphNode::kArray, vector->GetType());
+  CHECK_EQ(3, vector->GetChildrenCount());
 
-  // The first value in the literals array should be the boilerplate,
+  // The first value in the feedback vector should be the boilerplate,
   // after an AllocationSite.
-  const v8::HeapGraphEdge* prop = literals->GetChild(0);
+  const v8::HeapGraphEdge* prop = vector->GetChild(2);
   const v8::HeapGraphNode* allocation_site = prop->GetToNode();
   v8::String::Utf8Value name(allocation_site->GetName());
   CHECK_EQ(0, strcmp("system / AllocationSite", *name));
@@ -2452,7 +2325,7 @@ TEST(CheckCodeNames) {
   CHECK(node);
 
   const char* builtin_path1[] = {"::(GC roots)", "::(Builtins)",
-                                 "::(KeyedLoadIC_Megamorphic builtin)"};
+                                 "::(KeyedLoadIC_Slow builtin)"};
   node = GetNodeByPath(snapshot, builtin_path1, arraysize(builtin_path1));
   CHECK(node);
 
@@ -2557,8 +2430,34 @@ TEST(ArrayGrowLeftTrim) {
   heap_profiler->StopTrackingHeapObjects();
 }
 
+TEST(TrackHeapAllocationsWithInlining) {
+  v8::HandleScope scope(v8::Isolate::GetCurrent());
+  LocalContext env;
 
-TEST(TrackHeapAllocations) {
+  v8::HeapProfiler* heap_profiler = env->GetIsolate()->GetHeapProfiler();
+  heap_profiler->StartTrackingHeapObjects(true);
+
+  CompileRun(record_trace_tree_source);
+
+  AllocationTracker* tracker =
+      reinterpret_cast<i::HeapProfiler*>(heap_profiler)->allocation_tracker();
+  CHECK(tracker);
+  // Resolve all function locations.
+  tracker->PrepareForSerialization();
+  // Print for better diagnostics in case of failure.
+  tracker->trace_tree()->Print(tracker);
+
+  const char* names[] = {"", "start", "f_0_0"};
+  AllocationTraceNode* node = FindNode(tracker, ArrayVector(names));
+  CHECK(node);
+  CHECK_GE(node->allocation_count(), 10u);
+  CHECK_GE(node->allocation_size(), 4 * node->allocation_count());
+  heap_profiler->StopTrackingHeapObjects();
+}
+
+TEST(TrackHeapAllocationsWithoutInlining) {
+  i::FLAG_turbo_inlining = false;
+  i::FLAG_max_inlined_source_size = 0;  // Disable inlining
   v8::HandleScope scope(v8::Isolate::GetCurrent());
   LocalContext env;
 
@@ -2768,38 +2667,11 @@ TEST(ArrayBufferSharedBackingStore) {
 }
 
 
-TEST(BoxObject) {
-  v8::Isolate* isolate = CcTest::isolate();
-  v8::HandleScope scope(isolate);
-  LocalContext env;
-  v8::Local<v8::Object> global_proxy = env->Global();
-  v8::Local<v8::Object> global = global_proxy->GetPrototype().As<v8::Object>();
-
-  i::Factory* factory = CcTest::i_isolate()->factory();
-  i::Handle<i::String> string = factory->NewStringFromStaticChars("string");
-  i::Handle<i::Object> box = factory->NewBox(string);
-  global->Set(env.local(), 0, v8::ToApiHandle<v8::Object>(box)).FromJust();
-
-  v8::HeapProfiler* heap_profiler = isolate->GetHeapProfiler();
-  const v8::HeapSnapshot* snapshot = heap_profiler->TakeHeapSnapshot();
-  CHECK(ValidateSnapshot(snapshot));
-  const v8::HeapGraphNode* global_node = GetGlobalObject(snapshot);
-  const v8::HeapGraphNode* box_node =
-      GetProperty(global_node, v8::HeapGraphEdge::kElement, "0");
-  CHECK(box_node);
-  v8::String::Utf8Value box_node_name(box_node->GetName());
-  CHECK_EQ(0, strcmp("system / Box", *box_node_name));
-  const v8::HeapGraphNode* box_value =
-      GetProperty(box_node, v8::HeapGraphEdge::kInternal, "value");
-  CHECK(box_value);
-}
-
-
 TEST(WeakContainers) {
   i::FLAG_allow_natives_syntax = true;
   LocalContext env;
   v8::HandleScope scope(env->GetIsolate());
-  if (!CcTest::i_isolate()->use_crankshaft()) return;
+  if (!CcTest::i_isolate()->use_optimizer()) return;
   v8::HeapProfiler* heap_profiler = env->GetIsolate()->GetHeapProfiler();
   CompileRun(
       "function foo(a) { return a.x; }\n"
@@ -3033,7 +2905,7 @@ TEST(SamplingHeapProfiler) {
         "  eval(\"new Array(100)\");\n"
         "}\n");
 
-    CcTest::heap()->CollectAllGarbage();
+    CcTest::CollectAllGarbage();
 
     std::unique_ptr<v8::AllocationProfile> profile(
         heap_profiler->GetAllocationProfile());
@@ -3087,7 +2959,7 @@ TEST(SamplingHeapProfilerLeftTrimming) {
       "      a.shift();\n"
       "}\n");
 
-  CcTest::heap()->CollectGarbage(v8::internal::NEW_SPACE);
+  CcTest::CollectGarbage(v8::internal::NEW_SPACE);
   // Should not crash.
 
   heap_profiler->StopSamplingHeapProfiler();

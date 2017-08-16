@@ -1,3 +1,24 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 'use strict';
 
 const common = require('./common.js');
@@ -12,7 +33,7 @@ module.exports = toHTML;
 const STABILITY_TEXT_REG_EXP = /(.*:)\s*(\d)([\s\S]*)/;
 
 // customized heading without id attribute
-var renderer = new marked.Renderer();
+const renderer = new marked.Renderer();
 renderer.heading = function(text, level) {
   return '<h' + level + '>' + text + '</h' + level + '>\n';
 };
@@ -21,7 +42,7 @@ marked.setOptions({
 });
 
 // TODO(chrisdickinson): never stop vomitting / fix this.
-var gtocPath = path.resolve(path.join(
+const gtocPath = path.resolve(path.join(
   __dirname,
   '..',
   '..',
@@ -36,8 +57,8 @@ var gtocData = null;
  * opts: input, filename, template, nodeVersion.
  */
 function toHTML(opts, cb) {
-  var template = opts.template;
-  var nodeVersion = opts.nodeVersion || process.version;
+  const template = opts.template;
+  const nodeVersion = opts.nodeVersion || process.version;
 
   if (gtocData) {
     return onGtocLoaded();
@@ -59,7 +80,7 @@ function toHTML(opts, cb) {
   }
 
   function onGtocLoaded() {
-    var lexed = marked.lexer(opts.input);
+    const lexed = marked.lexer(opts.input);
     fs.readFile(template, 'utf8', function(er, template) {
       if (er) return cb(er);
       render({
@@ -67,6 +88,7 @@ function toHTML(opts, cb) {
         filename: opts.filename,
         template: template,
         nodeVersion: nodeVersion,
+        analytics: opts.analytics,
       }, cb);
     });
   }
@@ -90,7 +112,7 @@ function loadGtoc(cb) {
 function toID(filename) {
   return filename
     .replace('.html', '')
-    .replace(/[^\w\-]/g, '-')
+    .replace(/[^\w-]/g, '-')
     .replace(/-+/g, '-');
 }
 
@@ -101,10 +123,10 @@ function render(opts, cb) {
   var lexed = opts.lexed;
   var filename = opts.filename;
   var template = opts.template;
-  var nodeVersion = opts.nodeVersion || process.version;
+  const nodeVersion = opts.nodeVersion || process.version;
 
   // get the section
-  var section = getSection(lexed);
+  const section = getSection(lexed);
 
   filename = path.basename(filename, '.md');
 
@@ -116,7 +138,7 @@ function render(opts, cb) {
   buildToc(lexed, filename, function(er, toc) {
     if (er) return cb(er);
 
-    var id = toID(path.basename(filename));
+    const id = toID(path.basename(filename));
 
     template = template.replace(/__ID__/g, id);
     template = template.replace(/__FILENAME__/g, filename);
@@ -128,6 +150,13 @@ function render(opts, cb) {
       gtocData.replace('class="nav-' + id, 'class="nav-' + id + ' active')
     );
 
+    if (opts.analytics) {
+      template = template.replace(
+        '<!-- __TRACKING__ -->',
+        analyticsScript(opts.analytics)
+      );
+    }
+
     // content has to be the last thing we do with
     // the lexed tokens, because it's destructive.
     const content = marked.parser(lexed);
@@ -137,13 +166,52 @@ function render(opts, cb) {
   });
 }
 
+function analyticsScript(analytics) {
+  return `
+    <script src="assets/dnt_helper.js"></script>
+    <script>
+      if (!_dntEnabled()) {
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;
+        i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},
+        i[r].l=1*new Date();a=s.createElement(o),m=s.getElementsByTagName(o)[0];
+        a.async=1;a.src=g;m.parentNode.insertBefore(a,m)})(window,document,
+        'script','//www.google-analytics.com/analytics.js','ga');
+        ga('create', '${analytics}', 'auto');
+        ga('send', 'pageview');
+      }
+    </script>
+  `;
+}
+
+// replace placeholders in text tokens
+function replaceInText(text) {
+  return linkJsTypeDocs(linkManPages(text));
+}
+
 // handle general body-text replacements
 // for example, link man page references to the actual page
 function parseText(lexed) {
   lexed.forEach(function(tok) {
-    if (tok.text && tok.type !== 'code') {
-      tok.text = linkManPages(tok.text);
-      tok.text = linkJsTypeDocs(tok.text);
+    if (tok.type === 'table') {
+      if (tok.cells) {
+        tok.cells.forEach((row, x) => {
+          row.forEach((_, y) => {
+            if (tok.cells[x] && tok.cells[x][y]) {
+              tok.cells[x][y] = replaceInText(tok.cells[x][y]);
+            }
+          });
+        });
+      }
+
+      if (tok.header) {
+        tok.header.forEach((_, i) => {
+          if (tok.header[i]) {
+            tok.header[i] = replaceInText(tok.header[i]);
+          }
+        });
+      }
+    } else if (tok.text && tok.type !== 'code') {
+      tok.text = replaceInText(tok.text);
     }
   });
 }
@@ -152,9 +220,9 @@ function parseText(lexed) {
 // lists that come right after a heading are what we're after.
 function parseLists(input) {
   var state = null;
-  var savedState = [];
+  const savedState = [];
   var depth = 0;
-  var output = [];
+  const output = [];
   let headingIndex = -1;
   let heading = null;
 
@@ -183,7 +251,7 @@ function parseLists(input) {
           headingIndex = -1;
           heading = null;
         }
-        tok.text = parseAPIHeader(tok.text);
+        tok.text = parseAPIHeader(tok.text).replace(/\n/g, ' ');
         output.push({ type: 'html', text: tok.text });
         return;
       } else if (state === 'MAYBE_STABILITY_BQ') {
@@ -244,12 +312,40 @@ function parseYAML(text) {
   const meta = common.extractAndParseYAML(text);
   const html = ['<div class="api_metadata">'];
 
+  const added = { description: '' };
+  const deprecated = { description: '' };
+
   if (meta.added) {
-    html.push(`<span>Added in: ${meta.added.join(', ')}</span>`);
+    added.version = meta.added.join(', ');
+    added.description = `<span>Added in: ${added.version}</span>`;
   }
 
   if (meta.deprecated) {
-    html.push(`<span>Deprecated since: ${meta.deprecated.join(', ')} </span>`);
+    deprecated.version = meta.deprecated.join(', ');
+    deprecated.description =
+        `<span>Deprecated since: ${deprecated.version}</span>`;
+  }
+
+  if (meta.changes.length > 0) {
+    let changes = meta.changes.slice();
+    if (added.description) changes.push(added);
+    if (deprecated.description) changes.push(deprecated);
+
+    changes = changes.sort((a, b) => versionSort(a.version, b.version));
+
+    html.push('<details class="changelog"><summary>History</summary>');
+    html.push('<table>');
+    html.push('<tr><th>Version</th><th>Changes</th></tr>');
+
+    changes.forEach((change) => {
+      html.push(`<tr><td>${change.version}</td>`);
+      html.push(`<td>${marked(change.description)}</td></tr>`);
+    });
+
+    html.push('</table>');
+    html.push('</details>');
+  } else {
+    html.push(`${added.description}${deprecated.description}`);
   }
 
   html.push('</div>');
@@ -257,34 +353,36 @@ function parseYAML(text) {
 }
 
 // Syscalls which appear in the docs, but which only exist in BSD / OSX
-var BSD_ONLY_SYSCALLS = new Set(['lchmod']);
+const BSD_ONLY_SYSCALLS = new Set(['lchmod']);
 
 // Handle references to man pages, eg "open(2)" or "lchmod(2)"
 // Returns modified text, with such refs replace with HTML links, for example
 // '<a href="http://man7.org/linux/man-pages/man2/open.2.html">open(2)</a>'
 function linkManPages(text) {
-  return text.replace(/ ([a-z.]+)\((\d)\)/gm, function(match, name, number) {
-    // name consists of lowercase letters, number is a single digit
-    var displayAs = name + '(' + number + ')';
-    if (BSD_ONLY_SYSCALLS.has(name)) {
-      return ' <a href="https://www.freebsd.org/cgi/man.cgi?query=' + name +
-             '&sektion=' + number + '">' + displayAs + '</a>';
-    } else {
-      return ' <a href="http://man7.org/linux/man-pages/man' + number +
-             '/' + name + '.' + number + '.html">' + displayAs + '</a>';
-    }
-  });
+  return text.replace(
+    / ([a-z.]+)\((\d)([a-z]?)\)/gm,
+    (match, name, number, optionalCharacter) => {
+      // name consists of lowercase letters, number is a single digit
+      const displayAs = `${name}(${number}${optionalCharacter})`;
+      if (BSD_ONLY_SYSCALLS.has(name)) {
+        return ` <a href="https://www.freebsd.org/cgi/man.cgi?query=${name}` +
+          `&sektion=${number}">${displayAs}</a>`;
+      } else {
+        return ` <a href="http://man7.org/linux/man-pages/man${number}` +
+          `/${name}.${number}${optionalCharacter}.html">${displayAs}</a>`;
+      }
+    });
 }
 
 function linkJsTypeDocs(text) {
-  var parts = text.split('`');
+  const parts = text.split('`');
   var i;
   var typeMatches;
 
   // Handle types, for example the source Markdown might say
   // "This argument should be a {Number} or {String}"
   for (i = 0; i < parts.length; i += 2) {
-    typeMatches = parts[i].match(/\{([^\}]+)\}/g);
+    typeMatches = parts[i].match(/\{([^}]+)\}/g);
     if (typeMatches) {
       typeMatches.forEach(function(typeMatch) {
         parts[i] = parts[i].replace(typeMatch, typeParser.toLink(typeMatch));
@@ -297,9 +395,12 @@ function linkJsTypeDocs(text) {
 }
 
 function parseAPIHeader(text) {
+  const classNames = 'api_stability api_stability_$2';
+  const docsUrl = 'documentation.html#documentation_stability_index';
+
   text = text.replace(
     STABILITY_TEXT_REG_EXP,
-    '<pre class="api_stability api_stability_$2">$1 $2$3</pre>'
+    `<pre class="${classNames}"><a href="${docsUrl}">$1 $2</a>$3</pre>`
   );
   return text;
 }
@@ -352,7 +453,7 @@ function buildToc(lexed, filename, cb) {
   cb(null, toc);
 }
 
-var idCounters = {};
+const idCounters = {};
 function getId(text) {
   text = text.toLowerCase();
   text = text.replace(/[^a-z0-9]+/g, '_');
@@ -364,4 +465,15 @@ function getId(text) {
     idCounters[text] = 0;
   }
   return text;
+}
+
+const numberRe = /^(\d*)/;
+function versionSort(a, b) {
+  a = a.trim();
+  b = b.trim();
+  let i = 0;  // common prefix length
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  a = a.substr(i);
+  b = b.substr(i);
+  return +b.match(numberRe)[1] - +a.match(numberRe)[1];
 }

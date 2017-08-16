@@ -6,7 +6,6 @@ const cp = require('child_process');
 if (process.argv[2] === 'child') {
   setInterval(() => {}, 1000);
 } else {
-  const exitCode = common.isWindows ? 1 : 0;
   const { SIGKILL } = process.binding('constants').os.signals;
 
   function spawn(killSignal) {
@@ -14,7 +13,7 @@ if (process.argv[2] === 'child') {
                                [__filename, 'child'],
                                {killSignal, timeout: 100});
 
-    assert.strictEqual(child.status, exitCode);
+    assert.strictEqual(child.status, null);
     assert.strictEqual(child.error.code, 'ETIMEDOUT');
     return child;
   }
@@ -22,7 +21,7 @@ if (process.argv[2] === 'child') {
   // Verify that an error is thrown for unknown signals.
   assert.throws(() => {
     spawn('SIG_NOT_A_REAL_SIGNAL');
-  }, /Error: Unknown signal: SIG_NOT_A_REAL_SIGNAL/);
+  }, common.expectsError({ code: 'ERR_UNKNOWN_SIGNAL' }));
 
   // Verify that the default kill signal is SIGTERM.
   {

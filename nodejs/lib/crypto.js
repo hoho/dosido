@@ -1,10 +1,31 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 // Note: In 0.8 and before, crypto functions all defaulted to using
 // binary-encoded strings rather than buffers.
 
 'use strict';
 
 const internalUtil = require('internal/util');
-internalUtil.assertCrypto(exports);
+internalUtil.assertCrypto();
 
 exports.DEFAULT_ENCODING = 'buffer';
 
@@ -19,8 +40,10 @@ const setFipsCrypto = binding.setFipsCrypto;
 const timingSafeEqual = binding.timingSafeEqual;
 
 const Buffer = require('buffer').Buffer;
+const kBufferMaxLength = require('buffer').kMaxLength;
 const stream = require('stream');
 const util = require('util');
+const { isUint8Array } = process.binding('util');
 const LazyTransform = require('internal/streams/lazy_transform');
 
 const DH_GENERATOR = 2;
@@ -78,7 +101,8 @@ Hash.prototype.update = function update(data, encoding) {
 
 Hash.prototype.digest = function digest(outputEncoding) {
   outputEncoding = outputEncoding || exports.DEFAULT_ENCODING;
-  return this._handle.digest(outputEncoding);
+  // Explicit conversion for backward compatibility.
+  return this._handle.digest(`${outputEncoding}`);
 };
 
 
@@ -282,7 +306,28 @@ Sign.prototype.sign = function sign(options, encoding) {
 
   var key = options.key || options;
   var passphrase = options.passphrase || null;
-  var ret = this._handle.sign(toBuf(key), null, passphrase);
+
+  // Options specific to RSA
+  var rsaPadding = constants.RSA_PKCS1_PADDING;
+  if (options.hasOwnProperty('padding')) {
+    if (options.padding === options.padding >> 0) {
+      rsaPadding = options.padding;
+    } else {
+      throw new TypeError('padding must be an integer');
+    }
+  }
+
+  var pssSaltLength = constants.RSA_PSS_SALTLEN_AUTO;
+  if (options.hasOwnProperty('saltLength')) {
+    if (options.saltLength === options.saltLength >> 0) {
+      pssSaltLength = options.saltLength;
+    } else {
+      throw new TypeError('saltLength must be an integer');
+    }
+  }
+
+  var ret = this._handle.sign(toBuf(key), passphrase, rsaPadding,
+                              pssSaltLength);
 
   encoding = encoding || exports.DEFAULT_ENCODING;
   if (encoding && encoding !== 'buffer')
@@ -308,9 +353,31 @@ util.inherits(Verify, stream.Writable);
 Verify.prototype._write = Sign.prototype._write;
 Verify.prototype.update = Sign.prototype.update;
 
-Verify.prototype.verify = function verify(object, signature, sigEncoding) {
+Verify.prototype.verify = function verify(options, signature, sigEncoding) {
+  var key = options.key || options;
   sigEncoding = sigEncoding || exports.DEFAULT_ENCODING;
-  return this._handle.verify(toBuf(object), toBuf(signature, sigEncoding));
+
+  // Options specific to RSA
+  var rsaPadding = constants.RSA_PKCS1_PADDING;
+  if (options.hasOwnProperty('padding')) {
+    if (options.padding === options.padding >> 0) {
+      rsaPadding = options.padding;
+    } else {
+      throw new TypeError('padding must be an integer');
+    }
+  }
+
+  var pssSaltLength = constants.RSA_PSS_SALTLEN_AUTO;
+  if (options.hasOwnProperty('saltLength')) {
+    if (options.saltLength === options.saltLength >> 0) {
+      pssSaltLength = options.saltLength;
+    } else {
+      throw new TypeError('saltLength must be an integer');
+    }
+  }
+
+  return this._handle.verify(toBuf(key), toBuf(signature, sigEncoding),
+                             rsaPadding, pssSaltLength);
 };
 
 function rsaPublic(method, defaultPadding) {
@@ -347,10 +414,12 @@ function DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding) {
   if (!(this instanceof DiffieHellman))
     return new DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding);
 
-  if (!(sizeOrKey instanceof Buffer) &&
-      typeof sizeOrKey !== 'number' &&
-      typeof sizeOrKey !== 'string')
-    throw new TypeError('First argument should be number, string or Buffer');
+  if (typeof sizeOrKey !== 'number' &&
+      typeof sizeOrKey !== 'string' &&
+      !ArrayBuffer.isView(sizeOrKey)) {
+    throw new TypeError('First argument should be number, string, ' +
+                        'Buffer, TypedArray, or DataView');
+  }
 
   if (keyEncoding) {
     if (typeof keyEncoding !== 'string' ||
@@ -537,11 +606,6 @@ ECDH.prototype.getPublicKey = function getPublicKey(encoding, format) {
 };
 
 
-const pbkdf2DeprecationWarning =
-    internalUtil.deprecate(() => {}, 'crypto.pbkdf2 without specifying' +
-      ' a digest is deprecated. Please specify a digest');
-
-
 exports.pbkdf2 = function(password,
                           salt,
                           iterations,
@@ -551,7 +615,6 @@ exports.pbkdf2 = function(password,
   if (typeof digest === 'function') {
     callback = digest;
     digest = undefined;
-    pbkdf2DeprecationWarning();
   }
 
   if (typeof callback !== 'function')
@@ -562,15 +625,17 @@ exports.pbkdf2 = function(password,
 
 
 exports.pbkdf2Sync = function(password, salt, iterations, keylen, digest) {
-  if (typeof digest === 'undefined') {
-    digest = undefined;
-    pbkdf2DeprecationWarning();
-  }
   return pbkdf2(password, salt, iterations, keylen, digest);
 };
 
 
 function pbkdf2(password, salt, iterations, keylen, digest, callback) {
+
+  if (digest === undefined) {
+    throw new TypeError(
+      'The "digest" argument is required and must not be undefined');
+  }
+
   password = toBuf(password);
   salt = toBuf(salt);
 
@@ -580,11 +645,11 @@ function pbkdf2(password, salt, iterations, keylen, digest, callback) {
   // at this point, we need to handle encodings.
   var encoding = exports.DEFAULT_ENCODING;
   if (callback) {
-    var next = function(er, ret) {
+    function next(er, ret) {
       if (ret)
         ret = ret.toString(encoding);
       callback(er, ret);
-    };
+    }
     binding.PBKDF2(password, salt, iterations, keylen, digest, next);
   } else {
     var ret = binding.PBKDF2(password, salt, iterations, keylen, digest);
@@ -633,21 +698,89 @@ exports.setEngine = function setEngine(id, flags) {
   return binding.setEngine(id, flags);
 };
 
+const kMaxUint32 = Math.pow(2, 32) - 1;
+
+function randomFillSync(buf, offset = 0, size) {
+  if (!isUint8Array(buf)) {
+    throw new TypeError('"buf" argument must be a Buffer or Uint8Array');
+  }
+
+  assertOffset(offset, buf.length);
+
+  if (size === undefined) size = buf.length - offset;
+
+  assertSize(size, offset, buf.length);
+
+  return binding.randomFill(buf, offset, size);
+}
+exports.randomFillSync = randomFillSync;
+
+function randomFill(buf, offset, size, cb) {
+  if (!isUint8Array(buf)) {
+    throw new TypeError('"buf" argument must be a Buffer or Uint8Array');
+  }
+
+  if (typeof offset === 'function') {
+    cb = offset;
+    offset = 0;
+    size = buf.length;
+  } else if (typeof size === 'function') {
+    cb = size;
+    size = buf.length - offset;
+  } else if (typeof cb !== 'function') {
+    throw new TypeError('"cb" argument must be a function');
+  }
+
+  assertOffset(offset, buf.length);
+  assertSize(size, offset, buf.length);
+
+  return binding.randomFill(buf, offset, size, cb);
+}
+exports.randomFill = randomFill;
+
+function assertOffset(offset, length) {
+  if (typeof offset !== 'number' || offset !== offset) {
+    throw new TypeError('offset must be a number');
+  }
+
+  if (offset > kMaxUint32 || offset < 0) {
+    throw new TypeError('offset must be a uint32');
+  }
+
+  if (offset > kBufferMaxLength || offset > length) {
+    throw new RangeError('offset out of range');
+  }
+}
+
+function assertSize(size, offset, length) {
+  if (typeof size !== 'number' || size !== size) {
+    throw new TypeError('size must be a number');
+  }
+
+  if (size > kMaxUint32 || size < 0) {
+    throw new TypeError('size must be a uint32');
+  }
+
+  if (size + offset > length || size > kBufferMaxLength) {
+    throw new RangeError('buffer too small');
+  }
+}
+
 exports.randomBytes = exports.pseudoRandomBytes = randomBytes;
 
 exports.rng = exports.prng = randomBytes;
 
-exports.getCiphers = internalUtil.cachedResult(() => {
-  return internalUtil.filterDuplicateStrings(getCiphers());
-});
+exports.getCiphers = internalUtil.cachedResult(
+  () => internalUtil.filterDuplicateStrings(getCiphers())
+);
 
-exports.getHashes = internalUtil.cachedResult(() => {
-  return internalUtil.filterDuplicateStrings(getHashes());
-});
+exports.getHashes = internalUtil.cachedResult(
+  () => internalUtil.filterDuplicateStrings(getHashes())
+);
 
-exports.getCurves = internalUtil.cachedResult(() => {
-  return internalUtil.filterDuplicateStrings(getCurves());
-});
+exports.getCurves = internalUtil.cachedResult(
+  () => internalUtil.filterDuplicateStrings(getCurves())
+);
 
 Object.defineProperty(exports, 'fips', {
   get: getFipsCrypto,
@@ -663,7 +796,7 @@ Object.defineProperty(exports, 'createCredentials', {
   get: internalUtil.deprecate(function() {
     return require('tls').createSecureContext;
   }, 'crypto.createCredentials is deprecated. ' +
-     'Use tls.createSecureContext instead.')
+     'Use tls.createSecureContext instead.', 'DEP0010')
 });
 
 Object.defineProperty(exports, 'Credentials', {
@@ -672,5 +805,5 @@ Object.defineProperty(exports, 'Credentials', {
   get: internalUtil.deprecate(function() {
     return require('tls').SecureContext;
   }, 'crypto.Credentials is deprecated. ' +
-     'Use tls.SecureContext instead.')
+     'Use tls.SecureContext instead.', 'DEP0011')
 });

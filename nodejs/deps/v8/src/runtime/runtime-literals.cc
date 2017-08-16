@@ -6,78 +6,63 @@
 
 #include "src/allocation-site-scopes.h"
 #include "src/arguments.h"
+#include "src/ast/ast.h"
+#include "src/ast/compile-time-value.h"
 #include "src/isolate-inl.h"
-#include "src/parsing/parser.h"
 #include "src/runtime/runtime.h"
 
 namespace v8 {
 namespace internal {
 
-static Handle<Map> ComputeObjectLiteralMap(
-    Handle<Context> context, Handle<FixedArray> constant_properties,
-    bool* is_result_from_cache) {
-  int properties_length = constant_properties->length();
-  int number_of_properties = properties_length / 2;
-
-  for (int p = 0; p != properties_length; p += 2) {
-    Object* key = constant_properties->get(p);
-    uint32_t element_index = 0;
-    if (key->ToArrayIndex(&element_index)) {
-      // An index key does not require space in the property backing store.
-      number_of_properties--;
-    }
-  }
-  Isolate* isolate = context->GetIsolate();
-  return isolate->factory()->ObjectLiteralMapFromCache(
-      context, number_of_properties, is_result_from_cache);
-}
-
 MUST_USE_RESULT static MaybeHandle<Object> CreateLiteralBoilerplate(
-    Isolate* isolate, Handle<LiteralsArray> literals,
-    Handle<FixedArray> constant_properties);
+    Isolate* isolate, Handle<FeedbackVector> vector,
+    Handle<FixedArray> compile_time_value);
 
 MUST_USE_RESULT static MaybeHandle<Object> CreateObjectLiteralBoilerplate(
-    Isolate* isolate, Handle<LiteralsArray> literals,
-    Handle<FixedArray> constant_properties, bool should_have_fast_elements) {
-  Handle<Context> context = isolate->native_context();
+    Isolate* isolate, Handle<FeedbackVector> vector,
+    Handle<BoilerplateDescription> boilerplate_description,
+    bool use_fast_elements, bool has_null_prototype) {
+  Handle<Context> native_context = isolate->native_context();
 
   // In case we have function literals, we want the object to be in
   // slow properties mode for now. We don't go in the map cache because
   // maps with constant functions can't be shared if the functions are
   // not the same (which is the common case).
-  bool is_result_from_cache = false;
-  Handle<Map> map = ComputeObjectLiteralMap(context, constant_properties,
-                                            &is_result_from_cache);
+  int number_of_properties = boilerplate_description->backing_store_size();
+
+  // Ignoring number_of_properties for force dictionary map with __proto__:null.
+  Handle<Map> map =
+      has_null_prototype
+          ? handle(native_context->slow_object_with_null_prototype_map(),
+                   isolate)
+          : isolate->factory()->ObjectLiteralMapFromCache(native_context,
+                                                          number_of_properties);
 
   PretenureFlag pretenure_flag =
-      isolate->heap()->InNewSpace(*literals) ? NOT_TENURED : TENURED;
+      isolate->heap()->InNewSpace(*vector) ? NOT_TENURED : TENURED;
 
   Handle<JSObject> boilerplate =
-      isolate->factory()->NewJSObjectFromMap(map, pretenure_flag);
+      map->is_dictionary_map()
+          ? isolate->factory()->NewSlowJSObjectFromMap(
+                map, number_of_properties, pretenure_flag)
+          : isolate->factory()->NewJSObjectFromMap(map, pretenure_flag);
 
   // Normalize the elements of the boilerplate to save space if needed.
-  if (!should_have_fast_elements) JSObject::NormalizeElements(boilerplate);
+  if (!use_fast_elements) JSObject::NormalizeElements(boilerplate);
 
   // Add the constant properties to the boilerplate.
-  int length = constant_properties->length();
-  bool should_transform =
-      !is_result_from_cache && boilerplate->HasFastProperties();
-  bool should_normalize = should_transform;
-  if (should_normalize) {
-    // TODO(verwaest): We might not want to ever normalize here.
-    JSObject::NormalizeProperties(boilerplate, KEEP_INOBJECT_PROPERTIES,
-                                  length / 2, "Boilerplate");
-  }
+  int length = boilerplate_description->size();
   // TODO(verwaest): Support tracking representations in the boilerplate.
-  for (int index = 0; index < length; index += 2) {
-    Handle<Object> key(constant_properties->get(index + 0), isolate);
-    Handle<Object> value(constant_properties->get(index + 1), isolate);
+  for (int index = 0; index < length; index++) {
+    Handle<Object> key(boilerplate_description->name(index), isolate);
+    Handle<Object> value(boilerplate_description->value(index), isolate);
     if (value->IsFixedArray()) {
-      // The value contains the constant_properties of a
-      // simple object or array literal.
-      Handle<FixedArray> array = Handle<FixedArray>::cast(value);
+      // The value contains the CompileTimeValue with the boilerplate properties
+      // of a simple object or array literal.
+      Handle<FixedArray> compile_time_value = Handle<FixedArray>::cast(value);
       ASSIGN_RETURN_ON_EXCEPTION(
-          isolate, value, CreateLiteralBoilerplate(isolate, literals, array),
+          isolate, value,
+          CreateLiteralBoilerplate(isolate, vector, compile_time_value),
           Object);
     }
     MaybeHandle<Object> maybe_result;
@@ -85,7 +70,7 @@ MUST_USE_RESULT static MaybeHandle<Object> CreateObjectLiteralBoilerplate(
     if (key->ToArrayIndex(&element_index)) {
       // Array index (uint32).
       if (value->IsUninitialized(isolate)) {
-        value = handle(Smi::FromInt(0), isolate);
+        value = handle(Smi::kZero, isolate);
       }
       maybe_result = JSObject::SetOwnElementIgnoreAttributes(
           boilerplate, element_index, value, NONE);
@@ -98,11 +83,9 @@ MUST_USE_RESULT static MaybeHandle<Object> CreateObjectLiteralBoilerplate(
     RETURN_ON_EXCEPTION(isolate, maybe_result, Object);
   }
 
-  // Transform to fast properties if necessary. For object literals with
-  // containing function literals we defer this operation until after all
-  // computed properties have been assigned so that we can generate
-  // constant function properties.
-  if (should_transform) {
+  if (map->is_dictionary_map() && !has_null_prototype) {
+    // TODO(cbruni): avoid making the boilerplate fast again, the clone stub
+    // supports dict-mode objects directly.
     JSObject::MigrateSlowToFast(boilerplate,
                                 boilerplate->map()->unused_property_fields(),
                                 "FastLiteral");
@@ -111,21 +94,20 @@ MUST_USE_RESULT static MaybeHandle<Object> CreateObjectLiteralBoilerplate(
 }
 
 static MaybeHandle<Object> CreateArrayLiteralBoilerplate(
-    Isolate* isolate, Handle<LiteralsArray> literals,
-    Handle<FixedArray> elements) {
+    Isolate* isolate, Handle<FeedbackVector> vector,
+    Handle<ConstantElementsPair> elements) {
   // Create the JSArray.
   Handle<JSFunction> constructor = isolate->array_function();
 
   PretenureFlag pretenure_flag =
-      isolate->heap()->InNewSpace(*literals) ? NOT_TENURED : TENURED;
+      isolate->heap()->InNewSpace(*vector) ? NOT_TENURED : TENURED;
 
   Handle<JSArray> object = Handle<JSArray>::cast(
       isolate->factory()->NewJSObject(constructor, pretenure_flag));
 
   ElementsKind constant_elements_kind =
-      static_cast<ElementsKind>(Smi::cast(elements->get(0))->value());
-  Handle<FixedArrayBase> constant_elements_values(
-      FixedArrayBase::cast(elements->get(1)));
+      static_cast<ElementsKind>(elements->elements_kind());
+  Handle<FixedArrayBase> constant_elements_values(elements->constant_values());
 
   {
     DisallowHeapAllocation no_gc;
@@ -162,14 +144,16 @@ static MaybeHandle<Object> CreateArrayLiteralBoilerplate(
       FOR_WITH_HANDLE_SCOPE(
           isolate, int, i = 0, i, i < fixed_array_values->length(), i++, {
             if (fixed_array_values->get(i)->IsFixedArray()) {
-              // The value contains the constant_properties of a
-              // simple object or array literal.
-              Handle<FixedArray> fa(
+              // The value contains the CompileTimeValue with the
+              // boilerplate description of a simple object or
+              // array literal.
+              Handle<FixedArray> compile_time_value(
                   FixedArray::cast(fixed_array_values->get(i)));
               Handle<Object> result;
               ASSIGN_RETURN_ON_EXCEPTION(
                   isolate, result,
-                  CreateLiteralBoilerplate(isolate, literals, fa), Object);
+                  CreateLiteralBoilerplate(isolate, vector, compile_time_value),
+                  Object);
               fixed_array_values_copy->set(i, *result);
             }
           });
@@ -183,20 +167,22 @@ static MaybeHandle<Object> CreateArrayLiteralBoilerplate(
 }
 
 MUST_USE_RESULT static MaybeHandle<Object> CreateLiteralBoilerplate(
-    Isolate* isolate, Handle<LiteralsArray> literals,
-    Handle<FixedArray> array) {
-  Handle<FixedArray> elements = CompileTimeValue::GetElements(array);
-  switch (CompileTimeValue::GetLiteralType(array)) {
-    case CompileTimeValue::OBJECT_LITERAL_FAST_ELEMENTS:
-      return CreateObjectLiteralBoilerplate(isolate, literals, elements, true);
-    case CompileTimeValue::OBJECT_LITERAL_SLOW_ELEMENTS:
-      return CreateObjectLiteralBoilerplate(isolate, literals, elements, false);
-    case CompileTimeValue::ARRAY_LITERAL:
-      return CreateArrayLiteralBoilerplate(isolate, literals, elements);
-    default:
-      UNREACHABLE();
-      return MaybeHandle<Object>();
+    Isolate* isolate, Handle<FeedbackVector> vector,
+    Handle<FixedArray> compile_time_value) {
+  Handle<HeapObject> elements =
+      CompileTimeValue::GetElements(compile_time_value);
+  int flags = CompileTimeValue::GetLiteralTypeFlags(compile_time_value);
+  if (flags == CompileTimeValue::kArrayLiteralFlag) {
+    Handle<ConstantElementsPair> elems =
+        Handle<ConstantElementsPair>::cast(elements);
+    return CreateArrayLiteralBoilerplate(isolate, vector, elems);
   }
+  Handle<BoilerplateDescription> props =
+      Handle<BoilerplateDescription>::cast(elements);
+  bool use_fast_elements = (flags & ObjectLiteral::kFastElements) != 0;
+  bool has_null_prototype = (flags & ObjectLiteral::kHasNullPrototype) != 0;
+  return CreateObjectLiteralBoilerplate(isolate, vector, props,
+                                        use_fast_elements, has_null_prototype);
 }
 
 
@@ -207,13 +193,15 @@ RUNTIME_FUNCTION(Runtime_CreateRegExpLiteral) {
   CONVERT_SMI_ARG_CHECKED(index, 1);
   CONVERT_ARG_HANDLE_CHECKED(String, pattern, 2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
+  FeedbackSlot literal_slot(FeedbackVector::ToSlot(index));
 
   // Check if boilerplate exists. If not, create it first.
-  Handle<Object> boilerplate(closure->literals()->literal(index), isolate);
+  Handle<Object> boilerplate(closure->feedback_vector()->Get(literal_slot),
+                             isolate);
   if (boilerplate->IsUndefined(isolate)) {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, boilerplate, JSRegExp::New(pattern, JSRegExp::Flags(flags)));
-    closure->literals()->set_literal(index, *boilerplate);
+    closure->feedback_vector()->Set(literal_slot, *boilerplate);
   }
   return *JSRegExp::Copy(Handle<JSRegExp>::cast(boilerplate));
 }
@@ -224,25 +212,27 @@ RUNTIME_FUNCTION(Runtime_CreateObjectLiteral) {
   DCHECK_EQ(4, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
   CONVERT_SMI_ARG_CHECKED(literals_index, 1);
-  CONVERT_ARG_HANDLE_CHECKED(FixedArray, constant_properties, 2);
+  CONVERT_ARG_HANDLE_CHECKED(BoilerplateDescription, boilerplate_description,
+                             2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
-  Handle<LiteralsArray> literals(closure->literals(), isolate);
-  bool should_have_fast_elements = (flags & ObjectLiteral::kFastElements) != 0;
+  Handle<FeedbackVector> vector(closure->feedback_vector(), isolate);
+  bool use_fast_elements = (flags & ObjectLiteral::kFastElements) != 0;
   bool enable_mementos = (flags & ObjectLiteral::kDisableMementos) == 0;
+  bool has_null_prototype = (flags & ObjectLiteral::kHasNullPrototype) != 0;
 
-  CHECK(literals_index >= 0);
-  CHECK(literals_index < literals->literals_count());
+  FeedbackSlot literals_slot(FeedbackVector::ToSlot(literals_index));
+  CHECK(literals_slot.ToInt() < vector->slot_count());
 
   // Check if boilerplate exists. If not, create it first.
-  Handle<Object> literal_site(literals->literal(literals_index), isolate);
+  Handle<Object> literal_site(vector->Get(literals_slot), isolate);
   Handle<AllocationSite> site;
   Handle<JSObject> boilerplate;
   if (literal_site->IsUndefined(isolate)) {
     Handle<Object> raw_boilerplate;
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, raw_boilerplate,
-        CreateObjectLiteralBoilerplate(isolate, literals, constant_properties,
-                                       should_have_fast_elements));
+        CreateObjectLiteralBoilerplate(isolate, vector, boilerplate_description,
+                                       use_fast_elements, has_null_prototype));
     boilerplate = Handle<JSObject>::cast(raw_boilerplate);
 
     AllocationSiteCreationContext creation_context(isolate);
@@ -252,7 +242,7 @@ RUNTIME_FUNCTION(Runtime_CreateObjectLiteral) {
     creation_context.ExitScope(site, boilerplate);
 
     // Update the functions literal and return the boilerplate.
-    literals->set_literal(literals_index, *site);
+    vector->Set(literals_slot, *site);
   } else {
     site = Handle<AllocationSite>::cast(literal_site);
     boilerplate =
@@ -268,17 +258,16 @@ RUNTIME_FUNCTION(Runtime_CreateObjectLiteral) {
 }
 
 MUST_USE_RESULT static MaybeHandle<AllocationSite> GetLiteralAllocationSite(
-    Isolate* isolate, Handle<LiteralsArray> literals, int literals_index,
-    Handle<FixedArray> elements) {
+    Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot literals_slot,
+    Handle<ConstantElementsPair> elements) {
   // Check if boilerplate exists. If not, create it first.
-  Handle<Object> literal_site(literals->literal(literals_index), isolate);
+  Handle<Object> literal_site(vector->Get(literals_slot), isolate);
   Handle<AllocationSite> site;
   if (literal_site->IsUndefined(isolate)) {
-    DCHECK(*elements != isolate->heap()->empty_fixed_array());
     Handle<Object> boilerplate;
     ASSIGN_RETURN_ON_EXCEPTION(
         isolate, boilerplate,
-        CreateArrayLiteralBoilerplate(isolate, literals, elements),
+        CreateArrayLiteralBoilerplate(isolate, vector, elements),
         AllocationSite);
 
     AllocationSiteCreationContext creation_context(isolate);
@@ -289,7 +278,7 @@ MUST_USE_RESULT static MaybeHandle<AllocationSite> GetLiteralAllocationSite(
     }
     creation_context.ExitScope(site, Handle<JSObject>::cast(boilerplate));
 
-    literals->set_literal(literals_index, *site);
+    vector->Set(literals_slot, *site);
   } else {
     site = Handle<AllocationSite>::cast(literal_site);
   }
@@ -297,15 +286,14 @@ MUST_USE_RESULT static MaybeHandle<AllocationSite> GetLiteralAllocationSite(
   return site;
 }
 
-
 static MaybeHandle<JSObject> CreateArrayLiteralImpl(
-    Isolate* isolate, Handle<LiteralsArray> literals, int literals_index,
-    Handle<FixedArray> elements, int flags) {
-  CHECK(literals_index >= 0 && literals_index < literals->literals_count());
+    Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot literals_slot,
+    Handle<ConstantElementsPair> elements, int flags) {
+  CHECK(literals_slot.ToInt() < vector->slot_count());
   Handle<AllocationSite> site;
   ASSIGN_RETURN_ON_EXCEPTION(
       isolate, site,
-      GetLiteralAllocationSite(isolate, literals, literals_index, elements),
+      GetLiteralAllocationSite(isolate, vector, literals_slot, elements),
       JSObject);
 
   bool enable_mementos = (flags & ArrayLiteral::kDisableMementos) == 0;
@@ -327,13 +315,14 @@ RUNTIME_FUNCTION(Runtime_CreateArrayLiteral) {
   DCHECK_EQ(4, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
   CONVERT_SMI_ARG_CHECKED(literals_index, 1);
-  CONVERT_ARG_HANDLE_CHECKED(FixedArray, elements, 2);
+  CONVERT_ARG_HANDLE_CHECKED(ConstantElementsPair, elements, 2);
   CONVERT_SMI_ARG_CHECKED(flags, 3);
 
-  Handle<LiteralsArray> literals(closure->literals(), isolate);
+  FeedbackSlot literals_slot(FeedbackVector::ToSlot(literals_index));
+  Handle<FeedbackVector> vector(closure->feedback_vector(), isolate);
   RETURN_RESULT_OR_FAILURE(
-      isolate, CreateArrayLiteralImpl(isolate, literals, literals_index,
-                                      elements, flags));
+      isolate,
+      CreateArrayLiteralImpl(isolate, vector, literals_slot, elements, flags));
 }
 
 
@@ -342,13 +331,13 @@ RUNTIME_FUNCTION(Runtime_CreateArrayLiteralStubBailout) {
   DCHECK_EQ(3, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, closure, 0);
   CONVERT_SMI_ARG_CHECKED(literals_index, 1);
-  CONVERT_ARG_HANDLE_CHECKED(FixedArray, elements, 2);
+  CONVERT_ARG_HANDLE_CHECKED(ConstantElementsPair, elements, 2);
 
-  Handle<LiteralsArray> literals(closure->literals(), isolate);
+  Handle<FeedbackVector> vector(closure->feedback_vector(), isolate);
+  FeedbackSlot literals_slot(FeedbackVector::ToSlot(literals_index));
   RETURN_RESULT_OR_FAILURE(
-      isolate,
-      CreateArrayLiteralImpl(isolate, literals, literals_index, elements,
-                             ArrayLiteral::kShallowElements));
+      isolate, CreateArrayLiteralImpl(isolate, vector, literals_slot, elements,
+                                      ArrayLiteral::kShallowElements));
 }
 
 }  // namespace internal

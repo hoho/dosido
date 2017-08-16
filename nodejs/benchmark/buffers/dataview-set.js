@@ -1,12 +1,25 @@
 'use strict';
 var common = require('../common.js');
+
+var types = [
+  'Uint8',
+  'Uint16LE',
+  'Uint16BE',
+  'Uint32LE',
+  'Uint32BE',
+  'Int8',
+  'Int16LE',
+  'Int16BE',
+  'Int32LE',
+  'Int32BE',
+  'Float32LE',
+  'Float32BE',
+  'Float64LE',
+  'Float64BE'
+];
+
 var bench = common.createBenchmark(main, {
-  type: ['Uint8', 'Uint16LE', 'Uint16BE',
-         'Uint32LE', 'Uint32BE',
-         'Int8', 'Int16LE', 'Int16BE',
-         'Int32LE', 'Int32BE',
-         'Float32LE', 'Float32BE',
-         'Float64LE', 'Float64BE'],
+  type: types,
   millions: [1]
 });
 
@@ -31,7 +44,7 @@ function main(conf) {
   var ab = new ArrayBuffer(8);
   var dv = new DataView(ab, 0, 8);
   var le = /LE$/.test(conf.type);
-  var fn = 'set' + conf.type.replace(/[LB]E$/, '');
+  var fn = `set${conf.type.replace(/[LB]E$/, '')}`;
 
   if (/int/i.test(fn))
     benchInt(dv, fn, len, le);

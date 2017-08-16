@@ -1,5 +1,7 @@
 'use strict';
 
+const util = require('util');
+
 var _lazyConstants = null;
 
 function lazyConstants() {
@@ -8,15 +10,6 @@ function lazyConstants() {
   }
   return _lazyConstants;
 }
-
-exports.setup_cpuUsage = setup_cpuUsage;
-exports.setup_hrtime = setup_hrtime;
-exports.setupConfig = setupConfig;
-exports.setupKillAndExit = setupKillAndExit;
-exports.setupSignalHandlers = setupSignalHandlers;
-exports.setupChannel = setupChannel;
-exports.setupRawDebug = setupRawDebug;
-
 
 const assert = process.assert = function(x, msg) {
   if (!x) throw new Error(msg || 'assertion error');
@@ -52,10 +45,12 @@ function setup_cpuUsage() {
     }
 
     // If a previous value was passed in, return diff of current from previous.
-    if (prevValue) return {
-      user: cpuValues[0] - prevValue.user,
-      system: cpuValues[1] - prevValue.system
-    };
+    if (prevValue) {
+      return {
+        user: cpuValues[0] - prevValue.user,
+        system: cpuValues[1] - prevValue.system
+      };
+    }
 
     // If no previous value passed in, return current value.
     return {
@@ -73,19 +68,22 @@ function setup_cpuUsage() {
   };
 }
 
-
+// The 3 entries filled in by the original process.hrtime contains
+// the upper/lower 32 bits of the second part of the value,
+// and the remaining nanoseconds of the value.
 function setup_hrtime() {
   const _hrtime = process.hrtime;
   const hrValues = new Uint32Array(3);
 
-  process.hrtime = function hrtime(ar) {
+  process.hrtime = function hrtime(time) {
     _hrtime(hrValues);
 
-    if (typeof ar !== 'undefined') {
-      if (Array.isArray(ar)) {
-        const sec = (hrValues[0] * 0x100000000 + hrValues[1]) - ar[0];
-        const nsec = hrValues[2] - ar[1];
-        return [nsec < 0 ? sec - 1 : sec, nsec < 0 ? nsec + 1e9 : nsec];
+    if (time !== undefined) {
+      if (Array.isArray(time) && time.length === 2) {
+        const sec = (hrValues[0] * 0x100000000 + hrValues[1]) - time[0];
+        const nsec = hrValues[2] - time[1];
+        const needsBorrow = nsec < 0;
+        return [needsBorrow ? sec - 1 : sec, needsBorrow ? nsec + 1e9 : nsec];
       }
 
       throw new TypeError('process.hrtime() only accepts an Array tuple');
@@ -98,6 +96,20 @@ function setup_hrtime() {
   };
 }
 
+function setupMemoryUsage() {
+  const memoryUsage_ = process.memoryUsage;
+  const memValues = new Float64Array(4);
+
+  process.memoryUsage = function memoryUsage() {
+    memoryUsage_(memValues);
+    return {
+      rss: memValues[0],
+      heapTotal: memValues[1],
+      heapUsed: memValues[2],
+      external: memValues[3]
+    };
+  };
+}
 
 function setupConfig(_source) {
   // NativeModule._source
@@ -122,17 +134,16 @@ function setupConfig(_source) {
     const oldV8BreakIterator = Intl.v8BreakIterator;
     const des = Object.getOwnPropertyDescriptor(Intl, 'v8BreakIterator');
     des.value = require('internal/util').deprecate(function v8BreakIterator() {
-      if (processConfig.hasSmallICU && !process.icu_data_dir) {
+      if (processConfig.hasSmallICU && !processConfig.icuDataDir) {
         // Intl.v8BreakIterator() would crash w/ fatal error, so throw instead.
         throw new Error('v8BreakIterator: full ICU data not installed. ' +
                         'See https://github.com/nodejs/node/wiki/Intl');
       }
       return Reflect.construct(oldV8BreakIterator, arguments);
-    }, 'Intl.v8BreakIterator is deprecated and will be removed soon.');
+    }, 'Intl.v8BreakIterator is deprecated and will be removed soon.',
+                                                   'DEP0017');
     Object.defineProperty(Intl, 'v8BreakIterator', des);
   }
-  // Don’t let icu_data_dir leak through.
-  delete process.icu_data_dir;
 }
 
 
@@ -152,6 +163,7 @@ function setupKillAndExit() {
   process.kill = function(pid, sig) {
     var err;
 
+    // eslint-disable-next-line eqeqeq
     if (pid != (pid | 0)) {
       throw new TypeError('invalid pid');
     }
@@ -168,10 +180,8 @@ function setupKillAndExit() {
       }
     }
 
-    if (err) {
-      const errnoException = require('util')._errnoException;
-      throw errnoException(err, 'kill');
-    }
+    if (err)
+      throw util._errnoException(err, 'kill');
 
     return true;
   };
@@ -184,8 +194,7 @@ function setupSignalHandlers() {
   const signalWraps = {};
 
   function isSignal(event) {
-    return typeof event === 'string' &&
-           lazyConstants().hasOwnProperty(event);
+    return typeof event === 'string' && lazyConstants()[event] !== undefined;
   }
 
   // Detect presence of a listener for the special signal types
@@ -203,8 +212,7 @@ function setupSignalHandlers() {
       const err = wrap.start(signum);
       if (err) {
         wrap.close();
-        const errnoException = require('util')._errnoException;
-        throw errnoException(err, 'uv_signal_start');
+        throw util._errnoException(err, 'uv_signal_start');
       }
 
       signalWraps[type] = wrap;
@@ -244,9 +252,19 @@ function setupChannel() {
 
 
 function setupRawDebug() {
-  const format = require('util').format;
   const rawDebug = process._rawDebug;
   process._rawDebug = function() {
-    rawDebug(format.apply(null, arguments));
+    rawDebug(util.format.apply(null, arguments));
   };
 }
+
+module.exports = {
+  setup_cpuUsage,
+  setup_hrtime,
+  setupMemoryUsage,
+  setupConfig,
+  setupKillAndExit,
+  setupSignalHandlers,
+  setupChannel,
+  setupRawDebug
+};

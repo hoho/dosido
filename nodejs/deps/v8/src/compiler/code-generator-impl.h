@@ -67,6 +67,14 @@ class InstructionOperandConverter {
     return static_cast<int16_t>(InputInt32(index));
   }
 
+  uint8_t InputInt3(size_t index) {
+    return static_cast<uint8_t>(InputInt32(index) & 0x7);
+  }
+
+  uint8_t InputInt4(size_t index) {
+    return static_cast<uint8_t>(InputInt32(index) & 0xF);
+  }
+
   uint8_t InputInt5(size_t index) {
     return static_cast<uint8_t>(InputInt32(index) & 0x1F);
   }
@@ -170,15 +178,17 @@ class InstructionOperandConverter {
 // Eager deoptimization exit.
 class DeoptimizationExit : public ZoneObject {
  public:
-  explicit DeoptimizationExit(int deoptimization_id)
-      : deoptimization_id_(deoptimization_id) {}
+  explicit DeoptimizationExit(int deoptimization_id, SourcePosition pos)
+      : deoptimization_id_(deoptimization_id), pos_(pos) {}
 
   int deoptimization_id() const { return deoptimization_id_; }
   Label* label() { return &label_; }
+  SourcePosition pos() const { return pos_; }
 
  private:
   int const deoptimization_id_;
   Label label_;
+  SourcePosition const pos_;
 };
 
 // Generator for out-of-line code that is emitted after the main code is done.
@@ -203,15 +213,6 @@ class OutOfLineCode : public ZoneObject {
   MacroAssembler* const masm_;
   OutOfLineCode* const next_;
 };
-
-
-// TODO(dcarney): generify this on bleeding_edge and replace this call
-// when merged.
-static inline void FinishCode(MacroAssembler* masm) {
-#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_ARM
-  masm->CheckConstPool(true, false);
-#endif
-}
 
 }  // namespace compiler
 }  // namespace internal

@@ -1,6 +1,26 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 'use strict';
 
-const internalUtil = require('internal/util');
 const tls = require('tls');
 
 const SSL_OP_CIPHER_SERVER_PREFERENCE =
@@ -12,9 +32,9 @@ var crypto = null;
 const binding = process.binding('crypto');
 const NativeSecureContext = binding.SecureContext;
 
-function SecureContext(secureProtocol, flags, context) {
+function SecureContext(secureProtocol, secureOptions, context) {
   if (!(this instanceof SecureContext)) {
-    return new SecureContext(secureProtocol, flags, context);
+    return new SecureContext(secureProtocol, secureOptions, context);
   }
 
   if (context) {
@@ -29,7 +49,7 @@ function SecureContext(secureProtocol, flags, context) {
     }
   }
 
-  if (flags) this.context.setOptions(flags);
+  if (secureOptions) this.context.setOptions(secureOptions);
 }
 
 exports.SecureContext = SecureContext;
@@ -71,24 +91,18 @@ exports.createSecureContext = function createSecureContext(options, context) {
   }
 
   // NOTE: It is important to set the key after the cert.
-  // `ssl_set_pkey` returns `0` when the key does not much the cert, but
+  // `ssl_set_pkey` returns `0` when the key does not match the cert, but
   // `ssl_set_cert` returns `1` and nullifies the key in the SSL structure
   // which leads to the crash later on.
   if (options.key) {
     if (Array.isArray(options.key)) {
       for (i = 0; i < options.key.length; i++) {
         const key = options.key[i];
-        if (key.passphrase)
-          c.context.setKey(key.pem, key.passphrase);
-        else
-          c.context.setKey(key);
+        const passphrase = key.passphrase || options.passphrase;
+        c.context.setKey(key.pem || key, passphrase);
       }
     } else {
-      if (options.passphrase) {
-        c.context.setKey(options.key, options.passphrase);
-      } else {
-        c.context.setKey(options.key);
-      }
+      c.context.setKey(options.key, options.passphrase);
     }
   }
 
@@ -105,7 +119,7 @@ exports.createSecureContext = function createSecureContext(options, context) {
   if (options.dhparam) {
     const warning = c.context.setDHParam(options.dhparam);
     if (warning)
-      internalUtil.trace(warning);
+      process.emitWarning(warning, 'SecurityWarning');
   }
 
   if (options.crl) {
@@ -140,7 +154,9 @@ exports.createSecureContext = function createSecureContext(options, context) {
     }
   }
 
-  // Do not keep read/write buffers in free list
+  // Do not keep read/write buffers in free list for OpenSSL < 1.1.0. (For
+  // OpenSSL 1.1.0, buffers are malloced and freed without the use of a
+  // freelist.)
   if (options.singleUse) {
     c.singleUse = true;
     c.context.setFreeListLength(0);
@@ -153,12 +169,12 @@ exports.translatePeerCertificate = function translatePeerCertificate(c) {
   if (!c)
     return null;
 
-  if (c.issuer) c.issuer = tls.parseCertString(c.issuer);
-  if (c.issuerCertificate && c.issuerCertificate !== c) {
+  if (c.issuer != null) c.issuer = tls.parseCertString(c.issuer);
+  if (c.issuerCertificate != null && c.issuerCertificate !== c) {
     c.issuerCertificate = translatePeerCertificate(c.issuerCertificate);
   }
-  if (c.subject) c.subject = tls.parseCertString(c.subject);
-  if (c.infoAccess) {
+  if (c.subject != null) c.subject = tls.parseCertString(c.subject);
+  if (c.infoAccess != null) {
     var info = c.infoAccess;
     c.infoAccess = {};
 

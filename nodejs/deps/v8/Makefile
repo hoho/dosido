@@ -51,6 +51,10 @@ endif
 ifeq ($(objectprint), on)
   GYPFLAGS += -Dv8_object_print=1
 endif
+# verifycsa=on
+ifeq ($(verifycsa), on)
+  GYPFLAGS += -Dv8_enable_verify_csa=1
+endif
 # verifyheap=on
 ifeq ($(verifyheap), on)
   GYPFLAGS += -Dv8_enable_verify_heap=1
@@ -163,6 +167,14 @@ endif
 ifeq ($(goma), on)
   GYPFLAGS += -Duse_goma=1
 endif
+# v8_os_page_size=0, when 0 or not specified use build OS page size
+ifdef v8_os_page_size
+  ifneq ($(v8_os_page_size), 0)
+    ifneq ($(snapshot), off)
+      GYPFLAGS += -Dv8_os_page_size=$(v8_os_page_size)
+    endif
+  endif
+endif
 # arm specific flags.
 # arm_version=<number | "default">
 ifneq ($(strip $(arm_version)),)
@@ -228,7 +240,6 @@ ifdef android_ndk_root
 endif
 
 # ----------------- available targets: --------------------
-# - "grokdump": rebuilds heap constants lists used by grokdump
 # - any arch listed in ARCHES (see below)
 # - any mode listed in MODES
 # - every combination <arch>.<mode>, e.g. "ia32.release"
@@ -454,12 +465,6 @@ $(ENVFILE).new:
 	$(eval CXX_TARGET_ARCH:=$(subst aarch64,arm64,$(CXX_TARGET_ARCH)))
 	$(eval CXX_TARGET_ARCH:=$(subst x86_64,x64,$(CXX_TARGET_ARCH)))
 	@mkdir -p $(OUTDIR); echo "GYPFLAGS=$(GYPFLAGS) -Dtarget_arch=$(CXX_TARGET_ARCH)" > $(ENVFILE).new;
-
-# Heap constants for grokdump.
-DUMP_FILE = tools/v8heapconst.py
-grokdump: ia32.release
-	@cat $(DUMP_FILE).tmpl > $(DUMP_FILE)
-	@$(OUTDIR)/ia32.release/d8 --dump-heap-constants >> $(DUMP_FILE)
 
 # Support for the GNU GLOBAL Source Code Tag System.
 gtags.files: $(GYPFILES) $(ENVFILE)

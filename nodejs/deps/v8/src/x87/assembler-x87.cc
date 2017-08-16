@@ -116,14 +116,25 @@ uint32_t RelocInfo::wasm_memory_size_reference() {
   return Memory::uint32_at(pc_);
 }
 
-void RelocInfo::unchecked_update_wasm_memory_reference(
-    Address address, ICacheFlushMode flush_mode) {
-  Memory::Address_at(pc_) = address;
+uint32_t RelocInfo::wasm_function_table_size_reference() {
+  DCHECK(IsWasmFunctionTableSizeReference(rmode_));
+  return Memory::uint32_at(pc_);
 }
 
-void RelocInfo::unchecked_update_wasm_memory_size(uint32_t size,
-                                                  ICacheFlushMode flush_mode) {
+void RelocInfo::unchecked_update_wasm_memory_reference(
+    Isolate* isolate, Address address, ICacheFlushMode icache_flush_mode) {
+  Memory::Address_at(pc_) = address;
+  if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
+    Assembler::FlushICache(isolate, pc_, sizeof(Address));
+  }
+}
+
+void RelocInfo::unchecked_update_wasm_size(Isolate* isolate, uint32_t size,
+                                           ICacheFlushMode icache_flush_mode) {
   Memory::uint32_at(pc_) = size;
+  if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
+    Assembler::FlushICache(isolate, pc_, sizeof(uint32_t));
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -210,8 +221,8 @@ Register Operand::reg() const {
 #define EMIT(x)                                 \
   *pc_++ = (x)
 
-Assembler::Assembler(Isolate* isolate, void* buffer, int buffer_size)
-    : AssemblerBase(isolate, buffer, buffer_size) {
+Assembler::Assembler(IsolateData isolate_data, void* buffer, int buffer_size)
+    : AssemblerBase(isolate_data, buffer, buffer_size) {
 // Clear the buffer in debug mode unless it was provided by the
 // caller in which case we can't be sure it's okay to overwrite
 // existing code in it; see CodePatcher::CodePatcher(...).
@@ -2052,8 +2063,9 @@ void Assembler::GrowBuffer() {
 
   // Some internal data structures overflow for very large buffers,
   // they must ensure that kMaximalBufferSize is not too large.
-  if ((desc.buffer_size > kMaximalBufferSize) ||
-      (desc.buffer_size > isolate()->heap()->MaxOldGenerationSize())) {
+  if (desc.buffer_size > kMaximalBufferSize ||
+      static_cast<size_t>(desc.buffer_size) >
+          isolate()->heap()->MaxOldGenerationSize()) {
     V8::FatalProcessOutOfMemory("Assembler::GrowBuffer");
   }
 

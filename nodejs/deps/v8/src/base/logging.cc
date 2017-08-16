@@ -4,6 +4,7 @@
 
 #include "src/base/logging.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 
@@ -13,10 +14,19 @@
 namespace v8 {
 namespace base {
 
+namespace {
+
+void (*g_print_stack_trace)() = nullptr;
+
+}  // namespace
+
+void SetPrintStackTrace(void (*print_stack_trace)()) {
+  g_print_stack_trace = print_stack_trace;
+}
+
 // Explicit instantiations for commonly used comparisons.
-#define DEFINE_MAKE_CHECK_OP_STRING(type)              \
-  template std::string* MakeCheckOpString<type, type>( \
-      type const&, type const&, char const*);
+#define DEFINE_MAKE_CHECK_OP_STRING(type) \
+  template std::string* MakeCheckOpString<type, type>(type, type, char const*);
 DEFINE_MAKE_CHECK_OP_STRING(int)
 DEFINE_MAKE_CHECK_OP_STRING(long)       // NOLINT(runtime/int)
 DEFINE_MAKE_CHECK_OP_STRING(long long)  // NOLINT(runtime/int)
@@ -29,11 +39,11 @@ DEFINE_MAKE_CHECK_OP_STRING(void const*)
 
 
 // Explicit instantiations for floating point checks.
-#define DEFINE_CHECK_OP_IMPL(NAME)                          \
-  template std::string* Check##NAME##Impl<float, float>(    \
-      float const& lhs, float const& rhs, char const* msg); \
-  template std::string* Check##NAME##Impl<double, double>(  \
-      double const& lhs, double const& rhs, char const* msg);
+#define DEFINE_CHECK_OP_IMPL(NAME)                                            \
+  template std::string* Check##NAME##Impl<float, float>(float lhs, float rhs, \
+                                                        char const* msg);     \
+  template std::string* Check##NAME##Impl<double, double>(                    \
+      double lhs, double rhs, char const* msg);
 DEFINE_CHECK_OP_IMPL(EQ)
 DEFINE_CHECK_OP_IMPL(NE)
 DEFINE_CHECK_OP_IMPL(LE)
@@ -58,11 +68,8 @@ extern "C" void V8_Fatal(const char* file, int line, const char* format, ...) {
   va_end(arguments);
   v8::base::OS::PrintError("\n#\n");
 
-  v8::base::debug::StackTrace trace;
-  trace.Print();
+  if (v8::base::g_print_stack_trace) v8::base::g_print_stack_trace();
 
   fflush(stderr);
-  // Avoid dumping stack trace on abort signal.
-  v8::base::debug::DisableSignalStackDump();
   v8::base::OS::Abort();
 }

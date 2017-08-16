@@ -44,15 +44,14 @@ class Scavenger {
   VisitorDispatchTable<ScavengingCallback> scavenging_visitors_table_;
 };
 
-
 // Helper class for turning the scavenger into an object visitor that is also
 // filtering out non-HeapObjects and objects which do not reside in new space.
-class ScavengeVisitor : public ObjectVisitor {
+class RootScavengeVisitor : public RootVisitor {
  public:
-  explicit ScavengeVisitor(Heap* heap) : heap_(heap) {}
+  explicit RootScavengeVisitor(Heap* heap) : heap_(heap) {}
 
-  void VisitPointer(Object** p) override;
-  void VisitPointers(Object** start, Object** end) override;
+  void VisitRootPointer(Root root, Object** p) override;
+  void VisitRootPointers(Root root, Object** start, Object** end) override;
 
  private:
   inline void ScavengePointer(Object** p);
@@ -63,9 +62,8 @@ class ScavengeVisitor : public ObjectVisitor {
 
 // Helper class for turning the scavenger into an object visitor that is also
 // filtering out non-HeapObjects and objects which do not reside in new space.
-template <PromotionMode promotion_mode>
 class StaticScavengeVisitor
-    : public StaticNewSpaceVisitor<StaticScavengeVisitor<promotion_mode>> {
+    : public StaticNewSpaceVisitor<StaticScavengeVisitor> {
  public:
   static inline void VisitPointer(Heap* heap, HeapObject* object, Object** p);
 };

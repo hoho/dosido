@@ -4,7 +4,6 @@ const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const Buffer = require('buffer').Buffer;
 
 common.refreshTmpDir();
 
@@ -14,8 +13,8 @@ assert.strictEqual(path.basename(tmpFolder).length, 'foo.XXXXXX'.length);
 assert(common.fileExists(tmpFolder));
 
 const utf8 = fs.mkdtempSync(path.join(common.tmpDir, '\u0222abc.'));
-assert.equal(Buffer.byteLength(path.basename(utf8)),
-             Buffer.byteLength('\u0222abc.XXXXXX'));
+assert.strictEqual(Buffer.byteLength(path.basename(utf8)),
+                   Buffer.byteLength('\u0222abc.XXXXXX'));
 assert(common.fileExists(utf8));
 
 function handler(err, folder) {

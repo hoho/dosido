@@ -5,7 +5,9 @@
 #ifndef V8_COMPILER_BRANCH_CONDITION_ELIMINATION_H_
 #define V8_COMPILER_BRANCH_CONDITION_ELIMINATION_H_
 
+#include "src/base/compiler-specific.h"
 #include "src/compiler/graph-reducer.h"
+#include "src/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -15,8 +17,8 @@ namespace compiler {
 class CommonOperatorBuilder;
 class JSGraph;
 
-
-class BranchElimination final : public AdvancedReducer {
+class V8_EXPORT_PRIVATE BranchElimination final
+    : public NON_EXPORTED_BASE(AdvancedReducer) {
  public:
   BranchElimination(Editor* editor, JSGraph* js_graph, Zone* zone);
   ~BranchElimination() final;
@@ -67,7 +69,7 @@ class BranchElimination final : public AdvancedReducer {
    public:
     PathConditionsForControlNodes(Zone* zone, size_t size_hint)
         : info_for_node_(size_hint, nullptr, zone) {}
-    const ControlPathConditions* Get(Node* node);
+    const ControlPathConditions* Get(Node* node) const;
     void Set(Node* node, const ControlPathConditions* conditions);
 
    private:

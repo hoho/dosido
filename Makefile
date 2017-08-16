@@ -77,6 +77,7 @@ prepare-test: nodejs
 test:
 	# Expecting to have https://github.com/openresty/test-nginx in ../test-nginx.
 	# Needs `sudo cpan Test::Nginx`
+	# Needs `sudo cpan Test::Nginx::Socket`
 	./nodejs/out/Release/node t/testrunner.js
 
 

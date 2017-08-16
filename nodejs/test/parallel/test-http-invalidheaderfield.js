@@ -1,11 +1,12 @@
 'use strict';
-require('../common');
+const common = require('../common');
+
 const assert = require('assert');
 const EventEmitter = require('events');
 const http = require('http');
 
 const ee = new EventEmitter();
-var count = 3;
+let count = 3;
 
 const server = http.createServer(function(req, res) {
   assert.doesNotThrow(function() {
@@ -24,11 +25,11 @@ server.listen(0, function() {
 
   assert.throws(
     function() {
-      var options = {
+      const options = {
         port: server.address().port,
         headers: {'testing 123': 123}
       };
-      http.get(options, function() {});
+      http.get(options, common.mustNotCall());
     },
     function(err) {
       ee.emit('done');
@@ -38,7 +39,7 @@ server.listen(0, function() {
 
   assert.doesNotThrow(
     function() {
-      var options = {
+      const options = {
         port: server.address().port,
         headers: {'testing_123': 123}
       };

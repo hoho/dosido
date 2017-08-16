@@ -50,6 +50,13 @@ raw device. Defaults to `false`.
 added: v0.7.7
 -->
 
+Allows configuration of `tty.ReadStream` so that it operates as a raw device.
+
+When in raw mode, input is always available character-by-character, not
+including modifiers. Additionally, all special processing of characters by the
+terminal is disabled, including echoing input characters.
+Note that `CTRL`+`C` will no longer cause a `SIGINT` when in this mode.
+
 * `mode` {boolean} If `true`, configures the `tty.ReadStream` to operate as a
   raw device. If `false`, configures the `tty.ReadStream` to operate in its
   default mode. The `readStream.isRaw` property will be set to the resulting
@@ -80,6 +87,15 @@ process.stdout.on('resize', () => {
   console.log(`${process.stdout.columns}x${process.stdout.rows}`);
 });
 ```
+
+*Note*: On Windows resize events will be emitted only if stdin is unpaused
+(by a call to `resume()` or by adding a data listener) and in raw mode. It can
+also be triggered if a terminal control sequence that moves the cursor is
+written to the screen. Also, the resize event will only be signaled if the
+console screen buffer height was also changed. For example shrinking the
+console window height will not cause the resize event to be emitted. Increasing
+the console window height will only be registered when the new console window
+height is greater than the current console buffer size.
 
 ### writeStream.columns
 <!-- YAML

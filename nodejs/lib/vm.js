@@ -1,3 +1,24 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 'use strict';
 
 const binding = process.binding('contextify');
@@ -17,39 +38,28 @@ const realRunInThisContext = Script.prototype.runInThisContext;
 const realRunInContext = Script.prototype.runInContext;
 
 Script.prototype.runInThisContext = function(options) {
-  if (options && options.breakOnSigint) {
-    const realRunInThisContextScript = () => {
-      return realRunInThisContext.call(this, options);
-    };
-    return sigintHandlersWrap(realRunInThisContextScript);
+  if (options && options.breakOnSigint && process._events.SIGINT) {
+    return sigintHandlersWrap(realRunInThisContext, this, [options]);
   } else {
     return realRunInThisContext.call(this, options);
   }
 };
 
 Script.prototype.runInContext = function(contextifiedSandbox, options) {
-  if (options && options.breakOnSigint) {
-    const realRunInContextScript = () => {
-      return realRunInContext.call(this, contextifiedSandbox, options);
-    };
-    return sigintHandlersWrap(realRunInContextScript);
+  if (options && options.breakOnSigint && process._events.SIGINT) {
+    return sigintHandlersWrap(realRunInContext, this,
+                              [contextifiedSandbox, options]);
   } else {
     return realRunInContext.call(this, contextifiedSandbox, options);
   }
 };
 
 Script.prototype.runInNewContext = function(sandbox, options) {
-  var context = exports.createContext(sandbox);
+  var context = createContext(sandbox);
   return this.runInContext(context, options);
 };
 
-exports.Script = Script;
-
-exports.createScript = function(code, options) {
-  return new Script(code, options);
-};
-
-exports.createContext = function(sandbox) {
+function createContext(sandbox) {
   if (sandbox === undefined) {
     sandbox = {};
   } else if (binding.isContext(sandbox)) {
@@ -58,44 +68,28 @@ exports.createContext = function(sandbox) {
 
   binding.makeContext(sandbox);
   return sandbox;
-};
+}
 
-exports.runInDebugContext = function(code) {
-  return binding.runInDebugContext(code);
-};
-
-exports.runInContext = function(code, contextifiedSandbox, options) {
-  var script = new Script(code, options);
-  return script.runInContext(contextifiedSandbox, options);
-};
-
-exports.runInNewContext = function(code, sandbox, options) {
-  var script = new Script(code, options);
-  return script.runInNewContext(sandbox, options);
-};
-
-exports.runInThisContext = function(code, options) {
-  var script = new Script(code, options);
-  return script.runInThisContext(options);
-};
-
-exports.isContext = binding.isContext;
+function createScript(code, options) {
+  return new Script(code, options);
+}
 
 // Remove all SIGINT listeners and re-attach them after the wrapped function
 // has executed, so that caught SIGINT are handled by the listeners again.
-function sigintHandlersWrap(fn) {
+function sigintHandlersWrap(fn, thisArg, argsArray) {
   // Using the internal list here to make sure `.once()` wrappers are used,
   // not the original ones.
   let sigintListeners = process._events.SIGINT;
-  if (!Array.isArray(sigintListeners))
-    sigintListeners = sigintListeners ? [sigintListeners] : [];
-  else
+
+  if (Array.isArray(sigintListeners))
     sigintListeners = sigintListeners.slice();
+  else
+    sigintListeners = [sigintListeners];
 
   process.removeAllListeners('SIGINT');
 
   try {
-    return fn();
+    return fn.apply(thisArg, argsArray);
   } finally {
     // Add using the public methods so that the `newListener` handler of
     // process can re-attach the listeners.
@@ -104,3 +98,31 @@ function sigintHandlersWrap(fn) {
     }
   }
 }
+
+function runInDebugContext(code) {
+  return binding.runInDebugContext(code);
+}
+
+function runInContext(code, contextifiedSandbox, options) {
+  return createScript(code, options)
+    .runInContext(contextifiedSandbox, options);
+}
+
+function runInNewContext(code, sandbox, options) {
+  return createScript(code, options).runInNewContext(sandbox, options);
+}
+
+function runInThisContext(code, options) {
+  return createScript(code, options).runInThisContext(options);
+}
+
+module.exports = {
+  Script,
+  createContext,
+  createScript,
+  runInDebugContext,
+  runInContext,
+  runInNewContext,
+  runInThisContext,
+  isContext: binding.isContext
+};

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/interpreter/control-flow-builders.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -21,12 +22,14 @@ void BreakableControlFlowBuilder::EmitJump(BytecodeLabels* sites) {
   builder()->Jump(sites->New());
 }
 
-void BreakableControlFlowBuilder::EmitJumpIfTrue(BytecodeLabels* sites) {
-  builder()->JumpIfTrue(sites->New());
+void BreakableControlFlowBuilder::EmitJumpIfTrue(
+    BytecodeArrayBuilder::ToBooleanMode mode, BytecodeLabels* sites) {
+  builder()->JumpIfTrue(mode, sites->New());
 }
 
-void BreakableControlFlowBuilder::EmitJumpIfFalse(BytecodeLabels* sites) {
-  builder()->JumpIfFalse(sites->New());
+void BreakableControlFlowBuilder::EmitJumpIfFalse(
+    BytecodeArrayBuilder::ToBooleanMode mode, BytecodeLabels* sites) {
+  builder()->JumpIfFalse(mode, sites->New());
 }
 
 void BreakableControlFlowBuilder::EmitJumpIfUndefined(BytecodeLabels* sites) {
@@ -37,7 +40,6 @@ void BreakableControlFlowBuilder::EmitJumpIfNull(BytecodeLabels* sites) {
   builder()->JumpIfNull(sites->New());
 }
 
-
 void BlockBuilder::EndBlock() {
   builder()->Bind(&block_end_);
   BindBreakTarget();
@@ -45,38 +47,50 @@ void BlockBuilder::EndBlock() {
 
 LoopBuilder::~LoopBuilder() {
   DCHECK(continue_labels_.empty() || continue_labels_.is_bound());
-  DCHECK(header_labels_.empty() || header_labels_.is_bound());
+  BindBreakTarget();
+  // Restore the parent jump table.
+  if (generator_jump_table_location_ != nullptr) {
+    *generator_jump_table_location_ = parent_generator_jump_table_;
+  }
 }
 
-void LoopBuilder::LoopHeader(ZoneVector<BytecodeLabel>* additional_labels) {
+void LoopBuilder::LoopHeader() {
   // Jumps from before the loop header into the loop violate ordering
   // requirements of bytecode basic blocks. The only entry into a loop
   // must be the loop header. Surely breaks is okay? Not if nested
   // and misplaced between the headers.
   DCHECK(break_labels_.empty() && continue_labels_.empty());
   builder()->Bind(&loop_header_);
-  for (auto& label : *additional_labels) {
-    builder()->Bind(&label);
+}
+
+void LoopBuilder::LoopHeaderInGenerator(
+    BytecodeJumpTable** generator_jump_table, int first_resume_id,
+    int resume_count) {
+  // Bind all the resume points that are inside the loop to be at the loop
+  // header.
+  for (int id = first_resume_id; id < first_resume_id + resume_count; ++id) {
+    builder()->Bind(*generator_jump_table, id);
   }
+
+  // Create the loop header.
+  LoopHeader();
+
+  // Create a new jump table for after the loop header for only these
+  // resume points.
+  generator_jump_table_location_ = generator_jump_table;
+  parent_generator_jump_table_ = *generator_jump_table;
+  *generator_jump_table =
+      builder()->AllocateJumpTable(resume_count, first_resume_id);
 }
 
-void LoopBuilder::JumpToHeader() {
+void LoopBuilder::JumpToHeader(int loop_depth) {
+  // Pass the proper loop nesting level to the backwards branch, to trigger
+  // on-stack replacement when armed for the given loop nesting depth.
+  int level = Min(loop_depth, AbstractCode::kMaxLoopNestingMarker - 1);
   // Loop must have closed form, i.e. all loop elements are within the loop,
   // the loop header precedes the body and next elements in the loop.
   DCHECK(loop_header_.is_bound());
-  builder()->Jump(&loop_header_);
-}
-
-void LoopBuilder::JumpToHeaderIfTrue() {
-  // Loop must have closed form, i.e. all loop elements are within the loop,
-  // the loop header precedes the body and next elements in the loop.
-  DCHECK(loop_header_.is_bound());
-  builder()->JumpIfTrue(&loop_header_);
-}
-
-void LoopBuilder::EndLoop() {
-  BindBreakTarget();
-  header_labels_.BindToLabel(builder(), loop_header_);
+  builder()->JumpLoop(&loop_header_, level);
 }
 
 void LoopBuilder::BindContinueTarget() { continue_labels_.Bind(builder()); }

@@ -12,11 +12,21 @@ declare_args() {
 }
 
 template("v8_isolate_run") {
+  forward_variables_from(invoker,
+                         "*",
+                         [
+                           "deps",
+                           "isolate",
+                         ])
+
   # Remember target name as within the action scope the target name will be
   # different.
   name = target_name
-  if (name != "" && invoker.isolate != "" && invoker.deps != [] &&
-      v8_test_isolation_mode != "noop") {
+
+  assert(defined(invoker.deps))
+  assert(defined(invoker.isolate))
+
+  if (name != "" && v8_test_isolation_mode != "noop") {
     action(name + "_run") {
       testonly = true
 
@@ -50,6 +60,11 @@ template("v8_isolate_run") {
         asan = "1"
       } else {
         asan = "0"
+      }
+      if (is_lsan) {
+        lsan = "1"
+      } else {
+        lsan = "0"
       }
       if (is_msan) {
         msan = "1"
@@ -107,7 +122,6 @@ template("v8_isolate_run") {
         gcmole = "0"
       }
 
-
       # Note, all paths will be rebased in isolate_driver.py to be relative to
       # the isolate file.
       args = [
@@ -142,6 +156,10 @@ template("v8_isolate_run") {
         "--config-variable",
         "icu_use_data_file_flag=$icu_use_data_file_flag",
         "--config-variable",
+        "is_gn=1",
+        "--config-variable",
+        "lsan=$lsan",
+        "--config-variable",
         "msan=$msan",
         "--config-variable",
         "tsan=$tsan",
@@ -162,7 +180,7 @@ template("v8_isolate_run") {
       if (is_win) {
         args += [
           "--config-variable",
-          "msvs_version=2013",
+          "msvs_version=2015",
         ]
       } else {
         args += [

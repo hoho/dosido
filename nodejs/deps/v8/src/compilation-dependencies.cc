@@ -8,12 +8,12 @@
 #include "src/handles-inl.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
-#include "src/zone.h"
+#include "src/zone/zone.h"
 
 namespace v8 {
 namespace internal {
 
-DependentCode* CompilationDependencies::Get(Handle<Object> object) {
+DependentCode* CompilationDependencies::Get(Handle<Object> object) const {
   if (object->IsMap()) {
     return Handle<Map>::cast(object)->dependent_code();
   } else if (object->IsPropertyCell()) {

@@ -31,6 +31,7 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into gcl.
 """
 
+import re
 import sys
 
 
@@ -39,6 +40,12 @@ _EXCLUDED_PATHS = (
     r"^testing[\\\/].*",
     r"^third_party[\\\/].*",
     r"^tools[\\\/].*",
+)
+
+
+# Regular expression that matches code which should not be run through cpplint.
+_NO_LINT_PATHS = (
+    r'src[\\\/]base[\\\/]export-template\.h',
 )
 
 
@@ -67,23 +74,28 @@ def _V8PresubmitChecks(input_api, output_api):
         input_api.PresubmitLocalPath(), 'tools'))
   from presubmit import CppLintProcessor
   from presubmit import SourceProcessor
-  from presubmit import CheckExternalReferenceRegistration
-  from presubmit import CheckAuthorizedAuthor
-  from presubmit import CheckStatusFiles
+  from presubmit import StatusFilesProcessor
+
+  def FilterFile(affected_file):
+    return input_api.FilterSourceFile(
+      affected_file,
+      white_list=None,
+      black_list=_NO_LINT_PATHS)
 
   results = []
-  if not CppLintProcessor().Run(input_api.PresubmitLocalPath()):
+  if not CppLintProcessor().RunOnFiles(
+      input_api.AffectedFiles(file_filter=FilterFile, include_deletes=False)):
     results.append(output_api.PresubmitError("C++ lint check failed"))
-  if not SourceProcessor().Run(input_api.PresubmitLocalPath()):
+  if not SourceProcessor().RunOnFiles(
+      input_api.AffectedFiles(include_deletes=False)):
     results.append(output_api.PresubmitError(
         "Copyright header, trailing whitespaces and two empty lines " \
         "between declarations check failed"))
-  if not CheckExternalReferenceRegistration(input_api.PresubmitLocalPath()):
-    results.append(output_api.PresubmitError(
-        "External references registration check failed"))
-  if not CheckStatusFiles(input_api.PresubmitLocalPath()):
+  if not StatusFilesProcessor().RunOnFiles(
+      input_api.AffectedFiles(include_deletes=True)):
     results.append(output_api.PresubmitError("Status file check failed"))
-  results.extend(CheckAuthorizedAuthor(input_api, output_api))
+  results.extend(input_api.canned_checks.CheckAuthorizedAuthor(
+      input_api, output_api))
   return results
 
 
@@ -216,9 +228,42 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
     return []
 
 
+def _CheckMissingFiles(input_api, output_api):
+  """Runs verify_source_deps.py to ensure no files were added that are not in
+  GN.
+  """
+  # We need to wait until we have an input_api object and use this
+  # roundabout construct to import checkdeps because this file is
+  # eval-ed and thus doesn't have __file__.
+  original_sys_path = sys.path
+  try:
+    sys.path = sys.path + [input_api.os_path.join(
+        input_api.PresubmitLocalPath(), 'tools')]
+    from verify_source_deps import missing_gn_files, missing_gyp_files
+  finally:
+    # Restore sys.path to what it was before.
+    sys.path = original_sys_path
+
+  gn_files = missing_gn_files()
+  gyp_files = missing_gyp_files()
+  results = []
+  if gn_files:
+    results.append(output_api.PresubmitError(
+        "You added one or more source files but didn't update the\n"
+        "corresponding BUILD.gn files:\n",
+        gn_files))
+  if gyp_files:
+    results.append(output_api.PresubmitError(
+        "You added one or more source files but didn't update the\n"
+        "corresponding gyp files:\n",
+        gyp_files))
+  return results
+
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
+  results.extend(_CheckCommitMessageBugEntry(input_api, output_api))
   results.extend(input_api.canned_checks.CheckOwners(
       input_api, output_api, source_file_filter=None))
   results.extend(input_api.canned_checks.CheckPatchFormatted(
@@ -231,6 +276,7 @@ def _CommonChecks(input_api, output_api):
       _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
   results.extend(
       _CheckNoInlineHeaderIncludesInNormalHeaders(input_api, output_api))
+  results.extend(_CheckMissingFiles(input_api, output_api))
   return results
 
 
@@ -242,6 +288,32 @@ def _SkipTreeCheck(input_api, output_api):
       lambda file: file.LocalPath() == src_version):
     return False
   return input_api.environ.get('PRESUBMIT_TREE_CHECK') == 'skip'
+
+
+def _CheckCommitMessageBugEntry(input_api, output_api):
+  """Check that bug entries are well-formed in commit message."""
+  bogus_bug_msg = (
+      'Bogus BUG entry: %s. Please specify the issue tracker prefix and the '
+      'issue number, separated by a colon, e.g. v8:123 or chromium:12345.')
+  results = []
+  for bug in (input_api.change.BUG or '').split(','):
+    bug = bug.strip()
+    if 'none'.startswith(bug.lower()):
+      continue
+    if ':' not in bug:
+      try:
+        if int(bug) > 100000:
+          # Rough indicator for current chromium bugs.
+          prefix_guess = 'chromium'
+        else:
+          prefix_guess = 'v8'
+        results.append('BUG entry requires issue tracker prefix, e.g. %s:%s' %
+                       (prefix_guess, bug))
+      except ValueError:
+        results.append(bogus_bug_msg % bug)
+    elif not re.match(r'\w+:\d+', bug):
+      results.append(bogus_bug_msg % bug)
+  return [output_api.PresubmitError(r) for r in results]
 
 
 def CheckChangeOnUpload(input_api, output_api):
